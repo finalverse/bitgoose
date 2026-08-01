@@ -42,8 +42,14 @@ pub enum IngestError {
 /// Run on a schedule, not just at seed time: a publisher can add a
 /// `Disallow` at any point, and continuing to poll after that is exactly the
 /// behaviour that gets a crawler banned.
-pub async fn refresh_robots(db: &bg_db::Db, client: &reqwest::Client, agent: &str) -> Vec<(String, bool)> {
-    let Ok(all) = bg_db::sources::all(db).await else { return Vec::new() };
+pub async fn refresh_robots(
+    db: &bg_db::Db,
+    client: &reqwest::Client,
+    agent: &str,
+) -> Vec<(String, bool)> {
+    let Ok(all) = bg_db::sources::all(db).await else {
+        return Vec::new();
+    };
     let mut out = Vec::with_capacity(all.len());
     for s in all {
         let ok = robots::allows(client, agent, &s.url).await;

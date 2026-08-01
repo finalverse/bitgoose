@@ -1,0 +1,45 @@
+[Unit]
+Description=BitGoose newsroom worker (the Flock pipeline)
+Documentation=https://github.com/finalverse/bitgoose
+After=network-online.target postgresql.service bitgoose-web.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=bitgoose
+Group=bitgoose
+WorkingDirectory=/opt/bitgoose/current
+EnvironmentFile=/opt/bitgoose/shared/bitgoose.env
+# 300s between passes: fast enough that breaking news lands within minutes,
+# slow enough to stay polite to nine upstream feeds. Conditional GET means most
+# passes cost one 304 per source.
+ExecStart=/opt/bitgoose/current/bin/bg worker --interval 300
+Restart=always
+RestartSec=30s
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bitgoose-worker
+
+[Install]
+WantedBy=multi-user.target

@@ -43,22 +43,32 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<crate::gander::Outcome> {
     let s = bg_db::stories::by_id(&ctx.db, story).await?;
     let system = crate::system_prompt(ctx, AgentRole::Herald).await;
 
-    let summary = stage(ctx, AgentRole::Herald, Some(story), "wire", |_run| async move {
-        let mut prompt = format!("Headline: {}\n\nSource material:\n", s.title);
-        for it in items.iter().take(3) {
-            if let Some(b) = it.summary_raw.as_deref().or(it.body_raw.as_deref()) {
-                prompt.push_str(&format!("- {}\n", bg_core::text::truncate_words(b, 120)));
+    let summary = stage(
+        ctx,
+        AgentRole::Herald,
+        Some(story),
+        "wire",
+        |_run| async move {
+            let mut prompt = format!("Headline: {}\n\nSource material:\n", s.title);
+            for it in items.iter().take(3) {
+                if let Some(b) = it.summary_raw.as_deref().or(it.body_raw.as_deref()) {
+                    prompt.push_str(&format!("- {}\n", bg_core::text::truncate_words(b, 120)));
+                }
             }
-        }
-        prompt.push_str("\nWrite the Wire summary.");
+            prompt.push_str("\nWrite the Wire summary.");
 
-        let req = Request::new("herald.wire", ModelTier::Fast, system, prompt)
-            .with_schema(schema())
-            .with_max_tokens(800);
-        let (c, completion) = ctx.llm.complete_json::<WireCopy>(&req).await?;
-        let note = format!("{} words", bg_core::text::word_count(&c.summary));
-        Ok(StageOutput::with(c.summary.trim().to_string(), completion, note))
-    })
+            let req = Request::new("herald.wire", ModelTier::Fast, system, prompt)
+                .with_schema(schema())
+                .with_max_tokens(800);
+            let (c, completion) = ctx.llm.complete_json::<WireCopy>(&req).await?;
+            let note = format!("{} words", bg_core::text::word_count(&c.summary));
+            Ok(StageOutput::with(
+                c.summary.trim().to_string(),
+                completion,
+                note,
+            ))
+        },
+    )
     .await?;
 
     crate::gander::publish_wire(ctx, story, &summary).await

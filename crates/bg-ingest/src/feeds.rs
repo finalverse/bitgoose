@@ -51,7 +51,10 @@ impl PollReport {
 /// Errors are captured into the report rather than propagated: one dead feed
 /// must not abort a sweep across the other eight.
 pub async fn poll_source(db: &Db, client: &reqwest::Client, src: &Source) -> PollReport {
-    let mut rep = PollReport { source_slug: src.slug.clone(), ..Default::default() };
+    let mut rep = PollReport {
+        source_slug: src.slug.clone(),
+        ..Default::default()
+    };
 
     match poll_inner(db, client, src, &mut rep).await {
         Ok(()) if rep.is_stale_feed() => {
@@ -86,8 +89,13 @@ async fn poll_inner(
     src: &Source,
     rep: &mut PollReport,
 ) -> Result<()> {
-    let fetched =
-        conditional_get(client, &src.url, src.etag.as_deref(), src.last_modified.as_deref()).await?;
+    let fetched = conditional_get(
+        client,
+        &src.url,
+        src.etag.as_deref(),
+        src.last_modified.as_deref(),
+    )
+    .await?;
 
     let (bytes, etag, last_modified) = match fetched {
         Fetched::NotModified => {
@@ -96,11 +104,18 @@ async fn poll_inner(
             sources::record_success(db, src.id, None, None).await?;
             return Ok(());
         }
-        Fetched::Body { bytes, etag, last_modified, .. } => (bytes, etag, last_modified),
+        Fetched::Body {
+            bytes,
+            etag,
+            last_modified,
+            ..
+        } => (bytes, etag, last_modified),
     };
 
-    let feed = feed_rs::parser::parse(&bytes[..])
-        .map_err(|e| IngestError::Parse { source_slug: src.slug.clone(), detail: e.to_string() })?;
+    let feed = feed_rs::parser::parse(&bytes[..]).map_err(|e| IngestError::Parse {
+        source_slug: src.slug.clone(),
+        detail: e.to_string(),
+    })?;
 
     rep.fetched = feed.entries.len();
 
@@ -143,8 +158,12 @@ async fn poll_inner(
             .filter(|b| b.len() > 200)
             .or_else(|| summary.clone().filter(|s| s.len() > 200));
 
-        let authors: Vec<String> =
-            entry.authors.iter().map(|a| a.name.clone()).filter(|n| !n.is_empty()).collect();
+        let authors: Vec<String> = entry
+            .authors
+            .iter()
+            .map(|a| a.name.clone())
+            .filter(|n| !n.is_empty())
+            .collect();
 
         let image = entry
             .media
@@ -152,7 +171,12 @@ async fn poll_inner(
             .flat_map(|m| m.content.iter())
             .find_map(|c| c.url.as_ref().map(|u| u.to_string()))
             .or_else(|| {
-                entry.media.iter().flat_map(|m| m.thumbnails.iter()).next().map(|t| t.image.uri.clone())
+                entry
+                    .media
+                    .iter()
+                    .flat_map(|m| m.thumbnails.iter())
+                    .next()
+                    .map(|t| t.image.uri.clone())
             });
 
         // Fingerprint over title + lede: enough signal to spot a rewrite of the
@@ -168,7 +192,9 @@ async fn poll_inner(
             canonical_url: crate::canonical::canonicalize(&link),
             url_hash: url_hash(&link),
             title,
-            dek: summary.as_ref().map(|s| bg_core::text::truncate_words(s, 40)),
+            dek: summary
+                .as_ref()
+                .map(|s| bg_core::text::truncate_words(s, 40)),
             authors,
             published_at: published,
             summary_raw: summary,

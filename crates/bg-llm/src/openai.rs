@@ -36,11 +36,17 @@ impl OpenAiProvider {
             });
         }
         Ok(Self {
-            api_key: if api_key.is_empty() { "local".into() } else { api_key },
+            api_key: if api_key.is_empty() {
+                "local".into()
+            } else {
+                api_key
+            },
             base_url,
             http: http_client(),
             overrides: [
-                std::env::var("BG_MODEL_FAST").ok().filter(|s| !s.is_empty()),
+                std::env::var("BG_MODEL_FAST")
+                    .ok()
+                    .filter(|s| !s.is_empty()),
                 std::env::var("BG_MODEL_MID").ok().filter(|s| !s.is_empty()),
                 std::env::var("BG_MODEL_TOP").ok().filter(|s| !s.is_empty()),
             ],
@@ -137,23 +143,35 @@ impl LlmProvider for OpenAiProvider {
             return Err(LlmError::Api {
                 provider: "openai",
                 status: status.as_u16(),
-                body: resp.text().await.unwrap_or_default().chars().take(500).collect(),
+                body: resp
+                    .text()
+                    .await
+                    .unwrap_or_default()
+                    .chars()
+                    .take(500)
+                    .collect(),
             });
         }
 
         let parsed: ChatResponse = resp.json().await?;
         let latency_ms = started.elapsed().as_millis() as u32;
 
-        let choice = parsed.choices.into_iter().next().ok_or_else(|| LlmError::BadJson {
-            detail: "response contained no choices".into(),
-            raw: String::new(),
-        })?;
+        let choice = parsed
+            .choices
+            .into_iter()
+            .next()
+            .ok_or_else(|| LlmError::BadJson {
+                detail: "response contained no choices".into(),
+                raw: String::new(),
+            })?;
 
         if let Some(r) = choice.message.refusal {
             return Err(LlmError::Refused { category: r });
         }
         if choice.finish_reason.as_deref() == Some("content_filter") {
-            return Err(LlmError::Refused { category: "content_filter".into() });
+            return Err(LlmError::Refused {
+                category: "content_filter".into(),
+            });
         }
 
         let text = choice.message.content.unwrap_or_default();
@@ -165,7 +183,10 @@ impl LlmProvider for OpenAiProvider {
         }
         if choice.finish_reason.as_deref() == Some("length") && req.json_schema.is_some() {
             return Err(LlmError::BadJson {
-                detail: format!("hit max_tokens ({}); structured output truncated", req.max_tokens),
+                detail: format!(
+                    "hit max_tokens ({}); structured output truncated",
+                    req.max_tokens
+                ),
                 raw: text.chars().take(200).collect(),
             });
         }
@@ -206,7 +227,13 @@ impl LlmProvider for OpenAiProvider {
             Err(LlmError::Api {
                 provider: "openai",
                 status: resp.status().as_u16(),
-                body: resp.text().await.unwrap_or_default().chars().take(300).collect(),
+                body: resp
+                    .text()
+                    .await
+                    .unwrap_or_default()
+                    .chars()
+                    .take(300)
+                    .collect(),
             })
         }
     }

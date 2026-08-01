@@ -47,8 +47,10 @@ pub async fn run(ctx: &Ctx) -> Result<ScoutReport> {
         }
 
         info!(
-            polled = r.sources_polled, failed = r.sources_failed,
-            new = r.items_new, not_modified = r.not_modified,
+            polled = r.sources_polled,
+            failed = r.sources_failed,
+            new = r.items_new,
+            not_modified = r.not_modified,
             "scout swept"
         );
         let note = format!(

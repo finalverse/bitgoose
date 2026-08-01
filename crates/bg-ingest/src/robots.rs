@@ -35,7 +35,9 @@ impl Robots {
             if line.is_empty() {
                 continue;
             }
-            let Some((key, value)) = line.split_once(':') else { continue };
+            let Some((key, value)) = line.split_once(':') else {
+                continue;
+            };
             let key = key.trim().to_ascii_lowercase();
             let value = value.trim();
 
@@ -58,10 +60,10 @@ impl Robots {
                         continue;
                     }
                     for a in &current {
-                        groups
-                            .entry(a.clone())
-                            .or_default()
-                            .push(Rule { path: value.to_string(), allow });
+                        groups.entry(a.clone()).or_default().push(Rule {
+                            path: value.to_string(),
+                            allow,
+                        });
                     }
                 }
                 _ => {}
@@ -111,16 +113,24 @@ impl Robots {
 /// treating a transient 500 on robots.txt as a site-wide ban would silently
 /// disable a source and leave no obvious trace of why.
 pub async fn allows(client: &reqwest::Client, agent: &str, target: &str) -> bool {
-    let Ok(u) = url::Url::parse(target) else { return false };
-    let Ok(robots_url) = u.join("/robots.txt") else { return true };
+    let Ok(u) = url::Url::parse(target) else {
+        return false;
+    };
+    let Ok(robots_url) = u.join("/robots.txt") else {
+        return true;
+    };
 
-    let Ok(resp) = client.get(robots_url).send().await else { return true };
+    let Ok(resp) = client.get(robots_url).send().await else {
+        return true;
+    };
     if !resp.status().is_success() {
         // 404 means no restrictions; anything else we also treat as open,
         // having no rules to apply.
         return true;
     }
-    let Ok(body) = resp.text().await else { return true };
+    let Ok(body) = resp.text().await else {
+        return true;
+    };
     Robots::parse(&body).allowed(agent, u.path())
 }
 
@@ -151,10 +161,11 @@ mod tests {
 
     #[test]
     fn a_named_group_takes_precedence_over_the_wildcard() {
-        let r = Robots::parse(
-            "User-agent: *\nDisallow:\n\nUser-agent: bitgoosebot\nDisallow: /\n",
+        let r = Robots::parse("User-agent: *\nDisallow:\n\nUser-agent: bitgoosebot\nDisallow: /\n");
+        assert!(
+            !r.allowed("BitGooseBot/0.1", "/feed"),
+            "our own rule must win"
         );
-        assert!(!r.allowed("BitGooseBot/0.1", "/feed"), "our own rule must win");
         assert!(r.allowed("SomeOtherBot", "/feed"));
     }
 

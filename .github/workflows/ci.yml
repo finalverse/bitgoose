@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # The WASM boundary is the single most likely way this codebase breaks: adding
+  # tokio or sqlx to bg-core compiles fine on the host and only fails when the
+  # hydrate bundle is built. Checking it first, in its own fast job, surfaces
+  # that in under a minute instead of at the end of a full build.
+  wasm-boundary:
+    name: WASM boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: bg-core must compile for wasm32
+        run: cargo build -p bg-core --target wasm32-unknown-unknown
+      - name: bg-web hydrate bundle must compile for wasm32
+        run: cargo build -p bg-web --target wasm32-unknown-unknown --lib --features hydrate --no-default-features
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: bitgoose
+          POSTGRES_PASSWORD: bitgoose
+          POSTGRES_DB: bitgoose
+        ports: ["55434:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bitgoose"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://bitgoose:bitgoose@127.0.0.1:55434/bitgoose
+      TEST_DATABASE_URL: postgres://bitgoose:bitgoose@127.0.0.1:55434/bitgoose_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit and integration tests
+        # Single-threaded: the integration tests create and drop their own
+        # scratch databases, and parallel runs would race on them.
+        run: cargo test --workspace -- --test-threads=1
+
+  lint:
+    name: Format & clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan history for credentials
+        run: |
+          set -uo pipefail
+          fail=0
+          scan() {
+            # `git grep` over every commit: a secret removed in a later commit
+            # is still in the history and still needs revoking.
+            if git grep -IEn "$2" $(git rev-list --all) -- \
+                 ':!*.githooks/*' ':!.github/workflows/ci.yml' 2>/dev/null | head -3 | grep -q .; then
+              echo "::error::possible $1 found in git history"
+              fail=1
+            fi
+          }
+          scan "GitHub token"     'gh[pousr]_[A-Za-z0-9]{30,}'
+          scan "GitHub PAT"       'github_pat_[A-Za-z0-9_]{50,}'
+          scan "Anthropic key"    'sk-ant-[A-Za-z0-9_-]{20,}'
+          scan "AWS key"          'AKIA[0-9A-Z]{16}'
+          scan "private key"      'BEGIN [A-Z ]*PRIVATE KEY'
+          if git rev-list --all --objects -- .env | grep -q .; then
+            echo "::error::.env appears in git history"
+            fail=1
+          fi
+          exit $fail

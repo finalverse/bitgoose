@@ -59,9 +59,15 @@ fn schema(n: usize) -> serde_json::Value {
                 sch::object(
                     vec![
                         ("index", sch::integer_index("index of the item, as given")),
-                        ("is_news", sch::boolean("does this report something that happened")),
+                        (
+                            "is_news",
+                            sch::boolean("does this report something that happened"),
+                        ),
                         ("category", sch::enumeration(&cats, "desk")),
-                        ("assets", sch::array(sch::string_hinted("ticker", "asset"), "tickers")),
+                        (
+                            "assets",
+                            sch::array(sch::string_hinted("ticker", "asset"), "tickers"),
+                        ),
                         ("score", sch::number_range("newsworthiness", 0.0, 100.0)),
                     ],
                     &["index", "is_news", "category", "assets", "score"],
@@ -107,10 +113,16 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
 
             let mut n = 0usize;
             for r in parsed.items {
-                let Some(item) = chunk.get(r.index as usize) else { continue };
+                let Some(item) = chunk.get(r.index as usize) else {
+                    continue;
+                };
                 // A non-news item is still marked triaged — otherwise it is
                 // re-read on every run forever.
-                let score = if r.is_news { r.score.clamp(0.0, 100.0) as i16 } else { 0 };
+                let score = if r.is_news {
+                    r.score.clamp(0.0, 100.0) as i16
+                } else {
+                    0
+                };
                 let assets: Vec<String> = r
                     .assets
                     .iter()

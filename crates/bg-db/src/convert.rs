@@ -32,7 +32,9 @@ pub fn enum_col_opt<T: FromStr<Err = bg_core::CoreError>>(
     let raw: Option<String> = row.try_get(column)?;
     match raw {
         None => Ok(None),
-        Some(s) => T::from_str(&s).map(Some).map_err(|source| DbError::Decode { column, source }),
+        Some(s) => T::from_str(&s)
+            .map(Some)
+            .map_err(|source| DbError::Decode { column, source }),
     }
 }
 
@@ -61,15 +63,21 @@ id_col_fns!(
 );
 
 pub fn story_id_opt(row: &PgRow, column: &'static str) -> Result<Option<StoryId>, DbError> {
-    Ok(row.try_get::<Option<Uuid>, _>(column)?.map(StoryId::from_uuid))
+    Ok(row
+        .try_get::<Option<Uuid>, _>(column)?
+        .map(StoryId::from_uuid))
 }
 
 pub fn run_id_opt(row: &PgRow, column: &'static str) -> Result<Option<RunId>, DbError> {
-    Ok(row.try_get::<Option<Uuid>, _>(column)?.map(RunId::from_uuid))
+    Ok(row
+        .try_get::<Option<Uuid>, _>(column)?
+        .map(RunId::from_uuid))
 }
 
 pub fn agent_id_opt(row: &PgRow, column: &'static str) -> Result<Option<AgentId>, DbError> {
-    Ok(row.try_get::<Option<Uuid>, _>(column)?.map(AgentId::from_uuid))
+    Ok(row
+        .try_get::<Option<Uuid>, _>(column)?
+        .map(AgentId::from_uuid))
 }
 
 /// Postgres has no unsigned 64-bit integer, so SimHash values round-trip

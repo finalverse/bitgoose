@@ -38,7 +38,9 @@ impl AnthropicProvider {
             base_url,
             http: http_client(),
             overrides: [
-                std::env::var("BG_MODEL_FAST").ok().filter(|s| !s.is_empty()),
+                std::env::var("BG_MODEL_FAST")
+                    .ok()
+                    .filter(|s| !s.is_empty()),
                 std::env::var("BG_MODEL_MID").ok().filter(|s| !s.is_empty()),
                 std::env::var("BG_MODEL_TOP").ok().filter(|s| !s.is_empty()),
             ],
@@ -199,7 +201,10 @@ impl LlmProvider for AnthropicProvider {
         // name the real cause here instead.
         if parsed.stop_reason.as_deref() == Some("max_tokens") && req.json_schema.is_some() {
             return Err(LlmError::BadJson {
-                detail: format!("hit max_tokens ({}); structured output truncated", req.max_tokens),
+                detail: format!(
+                    "hit max_tokens ({}); structured output truncated",
+                    req.max_tokens
+                ),
                 raw: text.chars().take(200).collect(),
             });
         }
@@ -250,7 +255,13 @@ impl LlmProvider for AnthropicProvider {
             Err(LlmError::Api {
                 provider: "anthropic",
                 status: resp.status().as_u16(),
-                body: resp.text().await.unwrap_or_default().chars().take(300).collect(),
+                body: resp
+                    .text()
+                    .await
+                    .unwrap_or_default()
+                    .chars()
+                    .take(300)
+                    .collect(),
             })
         }
     }
@@ -306,7 +317,10 @@ mod tests {
         }"#;
         let parsed: MessagesResponse = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed.stop_reason.as_deref(), Some("refusal"));
-        assert_eq!(parsed.stop_details.unwrap().category.as_deref(), Some("cyber"));
+        assert_eq!(
+            parsed.stop_details.unwrap().category.as_deref(),
+            Some("cyber")
+        );
     }
 
     #[test]

@@ -61,7 +61,10 @@ pub enum DbError {
     Migrate(#[from] sqlx::migrate::MigrateError),
 
     #[error("could not decode column `{column}`: {source}")]
-    Decode { column: &'static str, source: bg_core::CoreError },
+    Decode {
+        column: &'static str,
+        source: bg_core::CoreError,
+    },
 
     #[error("{0} not found")]
     NotFound(&'static str),
@@ -119,7 +122,9 @@ impl Db {
     }
 
     pub async fn server_version(&self) -> Result<String> {
-        let row = sqlx::query("SHOW server_version").fetch_one(&self.pool).await?;
+        let row = sqlx::query("SHOW server_version")
+            .fetch_one(&self.pool)
+            .await?;
         Ok(row.get::<String, _>(0))
     }
 
@@ -139,9 +144,10 @@ impl Db {
         ];
         let mut out = Vec::with_capacity(tables.len());
         for t in tables {
-            let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {t}")))
-                .fetch_one(&self.pool)
-                .await?;
+            let n: i64 =
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {t}")))
+                    .fetch_one(&self.pool)
+                    .await?;
             out.push((t.to_string(), n));
         }
         Ok(out)

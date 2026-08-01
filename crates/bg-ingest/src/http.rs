@@ -27,7 +27,12 @@ pub fn client(user_agent: &str) -> Result<reqwest::Client, IngestError> {
 pub enum Fetched {
     /// Server said nothing changed. Costs us one round trip and no parsing.
     NotModified,
-    Body { bytes: Vec<u8>, etag: Option<String>, last_modified: Option<String>, final_url: String },
+    Body {
+        bytes: Vec<u8>,
+        etag: Option<String>,
+        last_modified: Option<String>,
+        final_url: String,
+    },
 }
 
 /// GET with `If-None-Match` / `If-Modified-Since` when we hold validators.
@@ -56,16 +61,27 @@ pub async fn conditional_get(
         return Ok(Fetched::NotModified);
     }
     if !status.is_success() {
-        return Err(IngestError::Http { status: status.as_u16(), url: url.to_string() });
+        return Err(IngestError::Http {
+            status: status.as_u16(),
+            url: url.to_string(),
+        });
     }
 
     let final_url = resp.url().to_string();
     let hdr = |name: reqwest::header::HeaderName| {
-        resp.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string)
+        resp.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
     };
     let new_etag = hdr(reqwest::header::ETAG);
     let new_lm = hdr(reqwest::header::LAST_MODIFIED);
     let bytes = resp.bytes().await?.to_vec();
 
-    Ok(Fetched::Body { bytes, etag: new_etag, last_modified: new_lm, final_url })
+    Ok(Fetched::Body {
+        bytes,
+        etag: new_etag,
+        last_modified: new_lm,
+        final_url,
+    })
 }

@@ -68,7 +68,9 @@ async fn main() -> Result<()> {
     // `.env` before anything reads the environment; a missing file is fine.
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .with_target(false)
         .init();
 
@@ -111,7 +113,11 @@ async fn main() -> Result<()> {
             println!("{n} price ticks written");
         }
 
-        Cmd::Run { no_ingest, no_ombuds, provider } => {
+        Cmd::Run {
+            no_ingest,
+            no_ombuds,
+            provider,
+        } => {
             let ctx = context(&url, provider).await?;
             let opts = runner::RunOpts {
                 ingest: !no_ingest,
@@ -205,8 +211,9 @@ async fn doctor(url: &str) -> Result<()> {
         Err(e) => println!("  [warn] pgvector: {e}"),
     }
 
-    let applied: Result<i64, _> =
-        sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations").fetch_one(&db.pool).await;
+    let applied: Result<i64, _> = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations")
+        .fetch_one(&db.pool)
+        .await;
     match applied {
         Ok(n) => println!("  [ok]   {n} migration(s) applied"),
         Err(_) => println!("  [FAIL] no migrations applied — run: bg migrate"),
@@ -235,7 +242,10 @@ async fn doctor(url: &str) -> Result<()> {
             "    {mark} {:<18} {:>5} items   {}",
             s.slug,
             s.items,
-            s.last_error.as_deref().map(|e| bg_core::text::truncate_words(e, 12)).unwrap_or_default()
+            s.last_error
+                .as_deref()
+                .map(|e| bg_core::text::truncate_words(e, 12))
+                .unwrap_or_default()
         );
     }
 
@@ -244,7 +254,10 @@ async fn doctor(url: &str) -> Result<()> {
     if agents.len() == 10 {
         println!("\n  [ok]   flock roster complete (10 agents)");
     } else {
-        println!("\n  [FAIL] roster has {} of 10 agents — run: bg seed", agents.len());
+        println!(
+            "\n  [FAIL] roster has {} of 10 agents — run: bg seed",
+            agents.len()
+        );
     }
 
     // -- LLM ----------------------------------------------------------------

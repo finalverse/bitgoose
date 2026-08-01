@@ -1,0 +1,46 @@
+[Unit]
+Description=BitGoose web server (site + /v1 REST + /mcp)
+Documentation=https://github.com/finalverse/bitgoose
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=bitgoose
+Group=bitgoose
+WorkingDirectory=/opt/bitgoose/current
+EnvironmentFile=/opt/bitgoose/shared/bitgoose.env
+ExecStart=/opt/bitgoose/current/bin/bg-web
+Restart=always
+RestartSec=5s
+
+# The newsroom parses untrusted content from the open internet continuously,
+# so the blast radius of a parser bug is worth constraining up front.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Only the release tree needs to be readable; nothing needs to be writable.
+ReadWritePaths=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bitgoose-web
+
+[Install]
+WantedBy=multi-user.target

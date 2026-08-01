@@ -56,44 +56,50 @@ pub async fn run(ctx: &Ctx, story: StoryId, body_md: &str) -> Result<Copy> {
     let system = crate::system_prompt(ctx, AgentRole::Copydesk).await;
     let body = body_md.to_string();
 
-    stage(ctx, AgentRole::Copydesk, Some(story), "copy", |_run| async move {
-        let mut prompt = String::from("Verified claims:\n");
-        for c in &claims {
+    stage(
+        ctx,
+        AgentRole::Copydesk,
+        Some(story),
+        "copy",
+        |_run| async move {
+            let mut prompt = String::from("Verified claims:\n");
+            for c in &claims {
+                prompt.push_str(&format!(
+                    "- [{}] {}\n",
+                    c.claim.verification.label(),
+                    c.claim.text
+                ));
+            }
             prompt.push_str(&format!(
-                "- [{}] {}\n",
-                c.claim.verification.label(),
-                c.claim.text
+                "\nStory body:\n{}\n\nWrite the headline, dek and metadata.",
+                bg_core::text::truncate_words(&body, 400)
             ));
-        }
-        prompt.push_str(&format!(
-            "\nStory body:\n{}\n\nWrite the headline, dek and metadata.",
-            bg_core::text::truncate_words(&body, 400)
-        ));
 
-        let req = Request::new("copydesk.copy", ModelTier::Fast, system, prompt)
-            .with_schema(schema())
-            .with_max_tokens(1_500);
-        let (mut copy, completion) = ctx.llm.complete_json::<Copy>(&req).await?;
+            let req = Request::new("copydesk.copy", ModelTier::Fast, system, prompt)
+                .with_schema(schema())
+                .with_max_tokens(1_500);
+            let (mut copy, completion) = ctx.llm.complete_json::<Copy>(&req).await?;
 
-        copy.headline = copy.headline.trim().to_string();
-        copy.dek = copy.dek.trim().to_string();
-        // Normalized rather than trusted: the slug is a permanent public URL,
-        // and a model-supplied string with a space or slash in it would produce
-        // a broken one.
-        copy.slug = bg_core::slug::slugify(&if copy.slug.trim().is_empty() {
-            copy.headline.clone()
-        } else {
-            copy.slug.clone()
-        });
-        if copy.seo_title.trim().is_empty() {
-            copy.seo_title = copy.headline.clone();
-        }
-        if copy.seo_desc.trim().is_empty() {
-            copy.seo_desc = copy.dek.clone();
-        }
+            copy.headline = copy.headline.trim().to_string();
+            copy.dek = copy.dek.trim().to_string();
+            // Normalized rather than trusted: the slug is a permanent public URL,
+            // and a model-supplied string with a space or slash in it would produce
+            // a broken one.
+            copy.slug = bg_core::slug::slugify(&if copy.slug.trim().is_empty() {
+                copy.headline.clone()
+            } else {
+                copy.slug.clone()
+            });
+            if copy.seo_title.trim().is_empty() {
+                copy.seo_title = copy.headline.clone();
+            }
+            if copy.seo_desc.trim().is_empty() {
+                copy.seo_desc = copy.dek.clone();
+            }
 
-        let note = format!("\"{}\"", bg_core::text::truncate_words(&copy.headline, 10));
-        Ok(StageOutput::with(copy, completion, note))
-    })
+            let note = format!("\"{}\"", bg_core::text::truncate_words(&copy.headline, 10));
+            Ok(StageOutput::with(copy, completion, note))
+        },
+    )
     .await
 }

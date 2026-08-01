@@ -37,7 +37,9 @@ impl IntoResponse for ApiError {
 impl From<bg_db::DbError> for ApiError {
     fn from(e: bg_db::DbError) -> Self {
         match e {
-            bg_db::DbError::NotFound(what) => ApiError(StatusCode::NOT_FOUND, format!("{what} not found")),
+            bg_db::DbError::NotFound(what) => {
+                ApiError(StatusCode::NOT_FOUND, format!("{what} not found"))
+            }
             other => {
                 tracing::error!(error = %other, "api database error");
                 ApiError(StatusCode::INTERNAL_SERVER_ERROR, "internal error".into())
@@ -132,8 +134,15 @@ async fn list_stories(
     State(s): State<ApiState>,
     Query(p): Query<Page>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let kind = p.kind.as_deref().and_then(|k| bg_core::domain::StoryKind::from_str(k).ok());
-    let stories = match p.category.as_deref().and_then(|c| bg_core::domain::Category::from_str(c).ok()) {
+    let kind = p
+        .kind
+        .as_deref()
+        .and_then(|k| bg_core::domain::StoryKind::from_str(k).ok());
+    let stories = match p
+        .category
+        .as_deref()
+        .and_then(|c| bg_core::domain::Category::from_str(c).ok())
+    {
         Some(cat) => bg_db::stories::by_category(&s.db, cat, p.limit()).await?,
         None => bg_db::stories::published(&s.db, kind, p.limit(), p.offset()).await?,
     };
@@ -167,7 +176,10 @@ async fn get_story(
     })))
 }
 
-async fn wire(State(s): State<ApiState>, Query(p): Query<Page>) -> ApiResult<Json<serde_json::Value>> {
+async fn wire(
+    State(s): State<ApiState>,
+    Query(p): Query<Page>,
+) -> ApiResult<Json<serde_json::Value>> {
     let entries = bg_db::stories::wire(&s.db, p.limit(), p.offset()).await?;
     Ok(Json(json!({ "count": entries.len(), "wire": entries })))
 }
@@ -185,11 +197,15 @@ async fn get_claim(
         .find(|c| c.claim.id == claim_id)
         .ok_or(ApiError(StatusCode::NOT_FOUND, "claim not found".into()))?;
     let story = bg_db::stories::by_id(&s.db, claim.story_id).await?;
-    Ok(Json(json!({ "claim": with_sources, "story_slug": story.slug })))
+    Ok(Json(
+        json!({ "claim": with_sources, "story_slug": story.slug }),
+    ))
 }
 
 async fn prices(State(s): State<ApiState>) -> ApiResult<Json<serde_json::Value>> {
-    Ok(Json(json!({ "prices": bg_db::prices::latest_all(&s.db).await? })))
+    Ok(Json(
+        json!({ "prices": bg_db::prices::latest_all(&s.db).await? }),
+    ))
 }
 
 async fn asset_stories(

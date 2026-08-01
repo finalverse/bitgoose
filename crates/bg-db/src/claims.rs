@@ -42,12 +42,7 @@ pub struct NewClaim {
 /// Confidence starts at zero on purpose: Sentinel raises it after cross-source
 /// checking. A claim that was never verified therefore reads as unverified
 /// rather than inheriting an optimistic default from whatever wrote it.
-pub async fn insert(
-    db: &Db,
-    story: StoryId,
-    c: &NewClaim,
-    run: Option<RunId>,
-) -> Result<ClaimId> {
+pub async fn insert(db: &Db, story: StoryId, c: &NewClaim, run: Option<RunId>) -> Result<ClaimId> {
     let id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO claims (id, story_id, text, kind, confidence, verification,
@@ -145,7 +140,9 @@ pub async fn source_counts(db: &Db, story: StoryId) -> Result<Vec<(ClaimId, i64)
     .bind(story.into_uuid())
     .fetch_all(&db.pool)
     .await?;
-    rows.iter().map(|r| Ok((claim_id(r, "id")?, r.try_get("n")?))).collect()
+    rows.iter()
+        .map(|r| Ok((claim_id(r, "id")?, r.try_get("n")?)))
+        .collect()
 }
 
 /// Claims with full provenance — what the story page's ledger sidebar renders.

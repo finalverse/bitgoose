@@ -188,7 +188,11 @@ pub fn Change(value: Option<f64>) -> impl IntoView {
     match value {
         None => view! { <span class="tick-chg" style="color:var(--faint)">"—"</span> }.into_any(),
         Some(v) => {
-            let class = if v >= 0.0 { "tick-chg up" } else { "tick-chg down" };
+            let class = if v >= 0.0 {
+                "tick-chg up"
+            } else {
+                "tick-chg down"
+            };
             let sign = if v >= 0.0 { "+" } else { "" };
             view! { <span class=class>{format!("{sign}{v:.2}%")}</span> }.into_any()
         }
@@ -223,7 +227,7 @@ pub fn Ticker(prices: Vec<Tick>) -> impl IntoView {
             </div>
         </div>
     }
-        .into_any()
+    .into_any()
 }
 
 /// Story card, used across every listing.

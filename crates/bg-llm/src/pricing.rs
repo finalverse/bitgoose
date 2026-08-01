@@ -151,6 +151,9 @@ mod tests {
         // Opus 5 and Sonnet 5 return 400 if temperature is sent at all.
         assert!(!ANTHROPIC_TOP.sampling);
         assert!(!ANTHROPIC_MID.sampling);
-        assert!(ANTHROPIC_FAST.sampling, "Haiku 4.5 still accepts temperature");
+        assert!(
+            ANTHROPIC_FAST.sampling,
+            "Haiku 4.5 still accepts temperature"
+        );
     }
 }

@@ -65,7 +65,9 @@ pub async fn by_role(db: &Db, role: AgentRole) -> Result<Agent> {
 }
 
 pub async fn all(db: &Db) -> Result<Vec<Agent>> {
-    let rows = crate::sql(format!("SELECT {COLS} FROM agents")).fetch_all(&db.pool).await?;
+    let rows = crate::sql(format!("SELECT {COLS} FROM agents"))
+        .fetch_all(&db.pool)
+        .await?;
     rows.iter().map(agent_from_row).collect()
 }
 

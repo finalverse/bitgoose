@@ -56,6 +56,16 @@ pub struct StoryPage {
     pub corrections: Vec<CorrectionCard>,
     pub runs: Vec<RunLine>,
     pub assets: Vec<String>,
+    /// `schema.org/NewsArticle` JSON-LD, built server-side.
+    ///
+    /// Without this a news site is effectively invisible to Google News and
+    /// every downstream aggregator. Built on the server because it needs
+    /// absolute URLs and ISO timestamps the client does not have.
+    pub json_ld: String,
+    /// Absolute canonical URL.
+    pub canonical: String,
+    pub iso_published: String,
+    pub iso_modified: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

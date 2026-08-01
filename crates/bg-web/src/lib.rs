@@ -11,7 +11,7 @@ pub mod pages;
 pub mod ui;
 
 use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, Meta, MetaTags, Stylesheet, Title};
+use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
 
@@ -42,6 +42,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Title text="BitGoose — The AI newsroom for crypto" />
+        <Link rel="alternate" type_="application/rss+xml" href="/feed.xml" attr:title="BitGoose" />
         <Meta
             name="description"
             content="Crypto news written by AI agents, where every claim shows its sources and \

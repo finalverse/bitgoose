@@ -125,10 +125,20 @@ pub struct Violation {
 
 impl Violation {
     fn block(code: ViolationCode, detail: impl Into<String>, subject: Option<String>) -> Self {
-        Self { code, severity: Severity::Block, detail: detail.into(), subject }
+        Self {
+            code,
+            severity: Severity::Block,
+            detail: detail.into(),
+            subject,
+        }
     }
     fn warn(code: ViolationCode, detail: impl Into<String>, subject: Option<String>) -> Self {
-        Self { code, severity: Severity::Warn, detail: detail.into(), subject }
+        Self {
+            code,
+            severity: Severity::Warn,
+            detail: detail.into(),
+            subject,
+        }
     }
 }
 
@@ -179,10 +189,14 @@ pub struct PolicyReport {
 
 impl PolicyReport {
     pub fn blocks(&self) -> impl Iterator<Item = &Violation> {
-        self.violations.iter().filter(|v| v.severity == Severity::Block)
+        self.violations
+            .iter()
+            .filter(|v| v.severity == Severity::Block)
     }
     pub fn warnings(&self) -> impl Iterator<Item = &Violation> {
-        self.violations.iter().filter(|v| v.severity == Severity::Warn)
+        self.violations
+            .iter()
+            .filter(|v| v.severity == Severity::Warn)
     }
     pub fn block_count(&self) -> usize {
         self.blocks().count()
@@ -206,7 +220,17 @@ impl PolicyReport {
         }
         self.violations
             .iter()
-            .map(|v| format!("{}{}", v.code, if v.severity == Severity::Block { "!" } else { "?" }))
+            .map(|v| {
+                format!(
+                    "{}{}",
+                    v.code,
+                    if v.severity == Severity::Block {
+                        "!"
+                    } else {
+                        "?"
+                    }
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -218,11 +242,18 @@ pub fn review(c: &PublishCandidate<'_>, cfg: &PolicyConfig) -> PolicyReport {
 
     // --- headline sanity ---------------------------------------------------
     if c.headline.trim().is_empty() {
-        v.push(Violation::block(ViolationCode::EmptyHeadline, "headline is empty", None));
+        v.push(Violation::block(
+            ViolationCode::EmptyHeadline,
+            "headline is empty",
+            None,
+        ));
     } else if c.headline.chars().count() > 130 {
         v.push(Violation::warn(
             ViolationCode::HeadlineTooLong,
-            format!("headline is {} chars; SEO truncates near 60", c.headline.chars().count()),
+            format!(
+                "headline is {} chars; SEO truncates near 60",
+                c.headline.chars().count()
+            ),
             None,
         ));
     }
@@ -242,7 +273,10 @@ pub fn review(c: &PublishCandidate<'_>, cfg: &PolicyConfig) -> PolicyReport {
         if cl.source_count == 0 {
             v.push(Violation::block(
                 ViolationCode::ClaimWithoutSource,
-                format!("claim has no source: \"{}\"", crate::text::truncate_words(cl.text, 12)),
+                format!(
+                    "claim has no source: \"{}\"",
+                    crate::text::truncate_words(cl.text, 12)
+                ),
                 Some(cl.id.clone()),
             ));
         }
@@ -257,7 +291,10 @@ pub fn review(c: &PublishCandidate<'_>, cfg: &PolicyConfig) -> PolicyReport {
                 Some(cl.id.clone()),
             ));
         }
-        if matches!(cl.verification, Verification::Unverified | Verification::SingleSource) {
+        if matches!(
+            cl.verification,
+            Verification::Unverified | Verification::SingleSource
+        ) {
             soft += 1;
         }
         for ex in &cl.excerpts {
@@ -361,7 +398,12 @@ mod tests {
     use super::*;
 
     fn src<'a>(slug: &'a str, body: Option<&'a str>) -> SourceView<'a> {
-        SourceView { slug, url: "https://example.com/x", body, linked_out: true }
+        SourceView {
+            slug,
+            url: "https://example.com/x",
+            body,
+            linked_out: true,
+        }
     }
 
     fn claim<'a>(id: &str, text: &'a str, v: Verification, n: usize) -> ClaimView<'a> {
@@ -384,8 +426,18 @@ mod tests {
                       put the loss near seventy million dollars.[^c2]",
             body_markers: vec!["c1".into(), "c2".into()],
             claims: vec![
-                claim("c1", "The exchange halted withdrawals.", Verification::Corroborated, 3),
-                claim("c2", "Losses total about $70 million.", Verification::Corroborated, 2),
+                claim(
+                    "c1",
+                    "The exchange halted withdrawals.",
+                    Verification::Corroborated,
+                    3,
+                ),
+                claim(
+                    "c2",
+                    "Losses total about $70 million.",
+                    Verification::Corroborated,
+                    2,
+                ),
             ],
             sources: vec![src("decrypt", None), src("theblock", None)],
             has_disclosure: true,
@@ -416,7 +468,9 @@ mod tests {
         c.claims[1].source_count = 0;
         let r = review(&c, &PolicyConfig::default());
         assert!(!r.passed());
-        assert!(r.blocks().any(|v| v.code == ViolationCode::ClaimWithoutSource));
+        assert!(r
+            .blocks()
+            .any(|v| v.code == ViolationCode::ClaimWithoutSource));
     }
 
     #[test]
@@ -443,7 +497,9 @@ mod tests {
         let mut c = candidate();
         c.claims[0].verification = Verification::Refuted;
         let r = review(&c, &PolicyConfig::default());
-        assert!(r.blocks().any(|v| v.code == ViolationCode::RefutedClaimPublished));
+        assert!(r
+            .blocks()
+            .any(|v| v.code == ViolationCode::RefutedClaimPublished));
     }
 
     #[test]
@@ -451,7 +507,9 @@ mod tests {
         let mut c = candidate();
         c.sources = vec![src("decrypt", None)];
         let r = review(&c, &PolicyConfig::default());
-        assert!(r.blocks().any(|v| v.code == ViolationCode::InsufficientSources));
+        assert!(r
+            .blocks()
+            .any(|v| v.code == ViolationCode::InsufficientSources));
     }
 
     #[test]
@@ -488,7 +546,9 @@ mod tests {
         let mut c = candidate();
         c.body_markers.push("c9".into());
         let r = review(&c, &PolicyConfig::default());
-        assert!(r.blocks().any(|v| v.code == ViolationCode::DanglingCitation));
+        assert!(r
+            .blocks()
+            .any(|v| v.code == ViolationCode::DanglingCitation));
     }
 
     #[test]

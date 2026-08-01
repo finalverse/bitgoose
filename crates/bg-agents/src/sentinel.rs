@@ -63,7 +63,10 @@ fn schema(n: usize) -> serde_json::Value {
                 sch::object(
                     vec![
                         ("claim_index", sch::integer_index("index of the claim")),
-                        ("verification", sch::enumeration_stub(&v, "verification state", "corroborated")),
+                        (
+                            "verification",
+                            sch::enumeration_stub(&v, "verification state", "corroborated"),
+                        ),
                         ("confidence", sch::number_range("confidence", 0.0, 1.0)),
                         ("note", sch::string_hinted("one sentence", "reason")),
                     ],
@@ -113,49 +116,60 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<usize> {
         return Ok(0);
     }
     let items = bg_db::items::by_story(&ctx.db, story).await?;
-    let counts: HashMap<_, _> = bg_db::claims::source_counts(&ctx.db, story).await?.into_iter().collect();
+    let counts: HashMap<_, _> = bg_db::claims::source_counts(&ctx.db, story)
+        .await?
+        .into_iter()
+        .collect();
     let system = crate::system_prompt(ctx, AgentRole::Sentinel).await;
 
-    stage(ctx, AgentRole::Sentinel, Some(story), "verify", |_run| async move {
-        let mut prompt = String::from("Source material:\n\n");
-        for (i, it) in items.iter().enumerate() {
-            prompt.push_str(&format!("=== SOURCE [{i}] ===\n{}\n", it.title));
-            if let Some(b) = it.body_raw.as_deref().or(it.summary_raw.as_deref()) {
-                prompt.push_str(&format!("{}\n", bg_core::text::truncate_words(b, 400)));
+    stage(
+        ctx,
+        AgentRole::Sentinel,
+        Some(story),
+        "verify",
+        |_run| async move {
+            let mut prompt = String::from("Source material:\n\n");
+            for (i, it) in items.iter().enumerate() {
+                prompt.push_str(&format!("=== SOURCE [{i}] ===\n{}\n", it.title));
+                if let Some(b) = it.body_raw.as_deref().or(it.summary_raw.as_deref()) {
+                    prompt.push_str(&format!("{}\n", bg_core::text::truncate_words(b, 400)));
+                }
+                prompt.push('\n');
             }
-            prompt.push('\n');
-        }
-        prompt.push_str("\nClaims to verify:\n");
-        for (i, c) in claims.iter().enumerate() {
-            prompt.push_str(&format!("[{i}] {}\n", c.text));
-        }
-
-        let req = Request::new("sentinel.verify", ModelTier::Top, system, prompt)
-            .with_schema(schema(claims.len()))
-            .with_max_tokens(6_000);
-        let (parsed, completion) = ctx.llm.complete_json::<Verdicts>(&req).await?;
-
-        let mut n = 0usize;
-        let mut disputed = 0usize;
-        for v in parsed.verdicts {
-            let Some(claim) = claims.get(v.claim_index as usize) else { continue };
-            let model_verdict =
-                Verification::from_str(&v.verification).unwrap_or(Verification::Unverified);
-            let sources = counts.get(&claim.id).copied().unwrap_or(0);
-            let (final_v, conf) = apply_floor(model_verdict, v.confidence as f32, sources);
-
-            if matches!(final_v, Verification::Disputed | Verification::Refuted) {
-                disputed += 1;
+            prompt.push_str("\nClaims to verify:\n");
+            for (i, c) in claims.iter().enumerate() {
+                prompt.push_str(&format!("[{i}] {}\n", c.text));
             }
-            bg_db::claims::set_verification(&ctx.db, claim.id, final_v, conf).await?;
-            let _ = &v.note;
-            n += 1;
-        }
 
-        let note = format!("{n} claims verified, {disputed} disputed or refuted");
-        info!(story = %story, verified = n, disputed, "sentinel pass");
-        Ok(StageOutput::with(n, completion, note))
-    })
+            let req = Request::new("sentinel.verify", ModelTier::Top, system, prompt)
+                .with_schema(schema(claims.len()))
+                .with_max_tokens(6_000);
+            let (parsed, completion) = ctx.llm.complete_json::<Verdicts>(&req).await?;
+
+            let mut n = 0usize;
+            let mut disputed = 0usize;
+            for v in parsed.verdicts {
+                let Some(claim) = claims.get(v.claim_index as usize) else {
+                    continue;
+                };
+                let model_verdict =
+                    Verification::from_str(&v.verification).unwrap_or(Verification::Unverified);
+                let sources = counts.get(&claim.id).copied().unwrap_or(0);
+                let (final_v, conf) = apply_floor(model_verdict, v.confidence as f32, sources);
+
+                if matches!(final_v, Verification::Disputed | Verification::Refuted) {
+                    disputed += 1;
+                }
+                bg_db::claims::set_verification(&ctx.db, claim.id, final_v, conf).await?;
+                let _ = &v.note;
+                n += 1;
+            }
+
+            let note = format!("{n} claims verified, {disputed} disputed or refuted");
+            info!(story = %story, verified = n, disputed, "sentinel pass");
+            Ok(StageOutput::with(n, completion, note))
+        },
+    )
     .await
 }
 

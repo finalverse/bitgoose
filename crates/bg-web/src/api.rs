@@ -28,7 +28,8 @@ mod server_impl {
     /// global, cheap to clone, and threading it through every render would add
     /// plumbing without adding safety.
     pub fn db() -> &'static Db {
-        DB.get().expect("database pool not initialised — call set_db() at startup")
+        DB.get()
+            .expect("database pool not initialised — call set_db() at startup")
     }
 }
 
@@ -87,7 +88,9 @@ fn render_body(md: &str) -> String {
                 tok.push(chars[j]);
                 j += 1;
             }
-            if j < chars.len() && chars[j] == ']' && !tok.is_empty()
+            if j < chars.len()
+                && chars[j] == ']'
+                && !tok.is_empty()
                 && tok.chars().all(|c| c.is_ascii_alphanumeric())
             {
                 result.push_str(&format!(
@@ -114,7 +117,10 @@ pub async fn get_front_page() -> Result<FrontPage, ServerFnError> {
 
     let mut lead = None;
     let mut desk = Vec::new();
-    for s in ranked.iter().filter(|s| s.kind == bg_core::domain::StoryKind::Desk) {
+    for s in ranked
+        .iter()
+        .filter(|s| s.kind == bg_core::domain::StoryKind::Desk)
+    {
         let c = card(s, None);
         if lead.is_none() {
             lead = Some(c);
@@ -167,7 +173,13 @@ pub async fn get_front_page() -> Result<FrontPage, ServerFnError> {
         })
         .map(|s| card(s, None));
 
-    Ok(FrontPage { lead, desk, wire, prices, honk })
+    Ok(FrontPage {
+        lead,
+        desk,
+        wire,
+        prices,
+        honk,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +212,9 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
             })
             .collect());
     }
-    let stories = bg_db::stories::published(db, k, limit, 0).await.map_err(e)?;
+    let stories = bg_db::stories::published(db, k, limit, 0)
+        .await
+        .map_err(e)?;
     Ok(stories.iter().map(|s| card(s, None)).collect())
 }
 
@@ -217,11 +231,17 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         Err(err) => return Err(e(err)),
     };
 
-    let article = bg_db::articles::latest_for_story(db, story.id).await.map_err(e)?;
+    let article = bg_db::articles::latest_for_story(db, story.id)
+        .await
+        .map_err(e)?;
     let claims = bg_db::claims::with_sources(db, story.id).await.map_err(e)?;
     let refs = bg_db::stories::source_refs(db, story.id).await.map_err(e)?;
-    let corrections = bg_db::articles::corrections_for_story(db, story.id).await.map_err(e)?;
-    let runs = bg_db::agents::runs_for_story(db, story.id).await.map_err(e)?;
+    let corrections = bg_db::articles::corrections_for_story(db, story.id)
+        .await
+        .map_err(e)?;
+    let runs = bg_db::agents::runs_for_story(db, story.id)
+        .await
+        .map_err(e)?;
 
     let claim_cards = claims
         .iter()
@@ -264,20 +284,69 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         .collect();
 
     let published = story.published_at.unwrap_or(story.first_seen_at);
+    let headline = article
+        .as_ref()
+        .map(|a| a.headline.clone())
+        .unwrap_or(story.title.clone());
+    let base = std::env::var("BG_PUBLIC_BASE_URL")
+        .unwrap_or_else(|_| format!("https://{}", bg_core::brand::DOMAIN));
+    let canonical = format!("{}/story/{}", base.trim_end_matches('/'), story.slug);
+
+    // schema.org NewsArticle. `citation` carries every source URL, which is
+    // both honest and the structured-data way to say "this is synthesis over
+    // other people's reporting, and here is whose".
+    let json_ld = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        "headline": headline,
+        "description": article.as_ref().map(|a| a.dek.clone()).unwrap_or_default(),
+        "url": canonical,
+        "mainEntityOfPage": { "@type": "WebPage", "@id": canonical },
+        "datePublished": published.to_rfc3339(),
+        "dateModified": story.updated_at.to_rfc3339(),
+        "articleSection": story.category.label(),
+        "inLanguage": "en",
+        "isAccessibleForFree": true,
+        "author": {
+            "@type": "Organization",
+            "name": "The BitGoose Flock",
+            "description": bg_core::brand::AI_DISCLOSURE,
+            "url": format!("{}/flock", base.trim_end_matches('/')),
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": bg_core::brand::NAME,
+            "url": base,
+        },
+        "citation": refs.iter().map(|r| serde_json::json!({
+            "@type": "CreativeWork",
+            "name": r.title,
+            "url": r.url,
+            "publisher": { "@type": "Organization", "name": r.name },
+        })).collect::<Vec<_>>(),
+    })
+    .to_string();
+
     Ok(Some(StoryPage {
         slug: story.slug.clone(),
-        headline: article.as_ref().map(|a| a.headline.clone()).unwrap_or(story.title.clone()),
+        headline,
         dek: article
             .as_ref()
             .map(|a| a.dek.clone())
             .filter(|d| !d.is_empty())
             .or(story.summary.clone())
             .unwrap_or_default(),
-        body_html: article.as_ref().map(|a| render_body(&a.body_md)).unwrap_or_default(),
+        body_html: article
+            .as_ref()
+            .map(|a| render_body(&a.body_md))
+            .unwrap_or_default(),
         category_label: story.category.label().into(),
         published_at: published.format("%B %-d, %Y at %H:%M UTC").to_string(),
         ago: ago(published),
-        reading_time_min: article.as_ref().map(|a| (a.reading_time_s / 60).max(1)).unwrap_or(1),
+        reading_time_min: article
+            .as_ref()
+            .map(|a| (a.reading_time_s / 60).max(1))
+            .unwrap_or(1),
         kind: story.kind.as_str().into(),
         claims: claim_cards,
         sources: refs
@@ -301,6 +370,10 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
             .collect(),
         runs: runs.iter().map(run_line).collect(),
         assets: story.assets.clone(),
+        json_ld,
+        canonical,
+        iso_published: published.to_rfc3339(),
+        iso_modified: story.updated_at.to_rfc3339(),
     }))
 }
 
@@ -375,14 +448,21 @@ pub async fn get_prices() -> Result<PricesPage, ServerFnError> {
             .find(|a| a.symbol == t.symbol)
             .map(|a| a.name.clone())
             .unwrap_or_else(|| t.symbol.clone());
-        let story_count = bg_db::stories::by_asset(db, &t.symbol, 100).await.map(|v| v.len() as i64).unwrap_or(0);
+        let story_count = bg_db::stories::by_asset(db, &t.symbol, 100)
+            .await
+            .map(|v| v.len() as i64)
+            .unwrap_or(0);
         rows.push(PriceRow {
             symbol: t.symbol.clone(),
             name,
             price: fmt_price(t.price_usd.to_string().parse().unwrap_or(0.0)),
             change: t.change_24h_pct,
-            market_cap: t.market_cap.map(|m| compact_usd(m.to_string().parse().unwrap_or(0.0))),
-            volume: t.volume_24h.map(|v| compact_usd(v.to_string().parse().unwrap_or(0.0))),
+            market_cap: t
+                .market_cap
+                .map(|m| compact_usd(m.to_string().parse().unwrap_or(0.0))),
+            volume: t
+                .volume_24h
+                .map(|v| compact_usd(v.to_string().parse().unwrap_or(0.0))),
             story_count,
         });
     }
@@ -390,7 +470,9 @@ pub async fn get_prices() -> Result<PricesPage, ServerFnError> {
 }
 
 #[server(name = GetAsset, prefix = "/rpc")]
-pub async fn get_asset(ticker: String) -> Result<(Option<PriceRow>, Vec<StoryCard>), ServerFnError> {
+pub async fn get_asset(
+    ticker: String,
+) -> Result<(Option<PriceRow>, Vec<StoryCard>), ServerFnError> {
     let db = db();
     let stories = bg_db::stories::by_asset(db, &ticker, 40).await.map_err(e)?;
     let tick = bg_db::prices::latest(db, &ticker).await.map_err(e)?;
@@ -405,8 +487,12 @@ pub async fn get_asset(ticker: String) -> Result<(Option<PriceRow>, Vec<StoryCar
             .unwrap_or_else(|| t.symbol.clone()),
         price: fmt_price(t.price_usd.to_string().parse().unwrap_or(0.0)),
         change: t.change_24h_pct,
-        market_cap: t.market_cap.map(|m| compact_usd(m.to_string().parse().unwrap_or(0.0))),
-        volume: t.volume_24h.map(|v| compact_usd(v.to_string().parse().unwrap_or(0.0))),
+        market_cap: t
+            .market_cap
+            .map(|m| compact_usd(m.to_string().parse().unwrap_or(0.0))),
+        volume: t
+            .volume_24h
+            .map(|v| compact_usd(v.to_string().parse().unwrap_or(0.0))),
         story_count: stories.len() as i64,
     });
 
@@ -477,7 +563,12 @@ pub async fn get_flyway() -> Result<FlywayPage, ServerFnError> {
             let label = bg_core::domain::Category::from_str(&cat)
                 .map(|c| c.label().to_string())
                 .unwrap_or_else(|_| cat.clone());
-            CategoryTrend { category: cat, label, total: series.iter().sum(), series }
+            CategoryTrend {
+                category: cat,
+                label,
+                total: series.iter().sum(),
+                series,
+            }
         })
         .collect();
     categories.sort_by(|a, b| b.total.cmp(&a.total));
@@ -489,5 +580,9 @@ pub async fn get_flyway() -> Result<FlywayPage, ServerFnError> {
         .map(|(ent, n)| (ent.name, ent.slug, n))
         .collect();
 
-    Ok(FlywayPage { categories, entities, days: DAYS })
+    Ok(FlywayPage {
+        categories,
+        entities,
+        days: DAYS,
+    })
 }

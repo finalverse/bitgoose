@@ -101,7 +101,10 @@ pub fn integer_bounded(desc: &str, n: usize) -> Value {
 /// semantic ordering in the prompt — reordering the list to put a convenient
 /// value first would nudge real models too.
 pub fn enumeration_stub(values: &[&str], desc: &str, stub_value: &str) -> Value {
-    debug_assert!(values.contains(&stub_value), "stub value must be one of the variants");
+    debug_assert!(
+        values.contains(&stub_value),
+        "stub value must be one of the variants"
+    );
     json!({ "type": "string", "enum": values, "description": desc, "x-stub-enum": stub_value })
 }
 
@@ -149,7 +152,10 @@ fn check(value: &Value, schema: &Value, path: &str) -> Result<(), String> {
                 Err(e) => errs.push(format!("[{i}] {e}")),
             }
         }
-        return Err(format!("{path}: matched no anyOf branch ({})", errs.join("; ")));
+        return Err(format!(
+            "{path}: matched no anyOf branch ({})",
+            errs.join("; ")
+        ));
     }
 
     if let Some(allowed) = schema.get("enum").and_then(|v| v.as_array()) {
@@ -213,8 +219,7 @@ fn check(value: &Value, schema: &Value, path: &str) -> Result<(), String> {
             .ok_or_else(|| format!("{path}: expected string, got {}", kind(value))),
         "integer" => {
             // A JSON number that happens to be integral counts; 1.5 does not.
-            let ok = value.as_i64().is_some()
-                || value.as_f64().is_some_and(|f| f.fract() == 0.0);
+            let ok = value.as_i64().is_some() || value.as_f64().is_some_and(|f| f.fract() == 0.0);
             ok.then_some(())
                 .ok_or_else(|| format!("{path}: expected integer, got {}", kind(value)))
         }
@@ -253,7 +258,10 @@ mod tests {
         object(
             vec![
                 ("text", string("the claim")),
-                ("kind", enumeration(&["fact", "figure", "quote", "forecast"], "kind")),
+                (
+                    "kind",
+                    enumeration(&["fact", "figure", "quote", "forecast"], "kind"),
+                ),
                 ("confidence", number("0-1")),
                 ("sources", array(integer("index"), "backing source indices")),
             ],

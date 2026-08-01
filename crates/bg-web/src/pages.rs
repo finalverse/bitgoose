@@ -4,7 +4,7 @@ use crate::api::*;
 use crate::model::*;
 use crate::ui::*;
 use leptos::prelude::*;
-use leptos_meta::Title;
+use leptos_meta::{Link, Meta, Title};
 use leptos_router::hooks::use_params_map;
 
 /// Load a resource and render it, with loading and empty states handled once.
@@ -298,6 +298,7 @@ fn StoryView(story: StoryPage) -> impl IntoView {
 
     view! {
         <Title text=format!("{} — BitGoose", story.headline) />
+        <StoryMeta story=story.clone() />
         <div class="shell page">
             <div class="split">
                 <div>
@@ -415,6 +416,42 @@ fn StoryView(story: StoryPage) -> impl IntoView {
     }
 }
 
+/// Head metadata for a story: canonical URL, OpenGraph, Twitter card, JSON-LD.
+///
+/// Every one of these is load-bearing for a news property. Without the canonical
+/// a story is duplicated across query-string variants; without OpenGraph it
+/// shares as a bare URL; without the `NewsArticle` JSON-LD it is invisible to
+/// Google News.
+#[component]
+fn StoryMeta(story: StoryPage) -> impl IntoView {
+    let desc = if story.dek.is_empty() {
+        story.headline.clone()
+    } else {
+        story.dek.clone()
+    };
+    view! {
+        <Link rel="canonical" href=story.canonical.clone() />
+        <Meta name="description" content=desc.clone() />
+
+        <Meta property="og:type" content="article" />
+        <Meta property="og:site_name" content="BitGoose" />
+        <Meta property="og:title" content=story.headline.clone() />
+        <Meta property="og:description" content=desc.clone() />
+        <Meta property="og:url" content=story.canonical.clone() />
+        <Meta property="article:published_time" content=story.iso_published.clone() />
+        <Meta property="article:modified_time" content=story.iso_modified.clone() />
+        <Meta property="article:section" content=story.category_label.clone() />
+
+        <Meta name="twitter:card" content="summary_large_image" />
+        <Meta name="twitter:title" content=story.headline.clone() />
+        <Meta name="twitter:description" content=desc />
+
+        // Rendered as a raw script body: JSON-LD must reach the crawler as
+        // literal JSON, and escaping it as text content would break it.
+        <script type="application/ld+json" inner_html=story.json_ld.clone()></script>
+    }
+}
+
 #[component]
 fn ClaimBlock(claim: ClaimCard) -> impl IntoView {
     let disputed = claim.disputed_by.clone();
@@ -499,7 +536,7 @@ fn ProvenanceStrip(runs: Vec<RunLine>) -> impl IntoView {
             </div>
         </section>
     }
-        .into_any()
+    .into_any()
 }
 
 // ---------------------------------------------------------------------------
@@ -1126,7 +1163,7 @@ GET /v1/standards           # policy + enforcement record"#
                     </p>
                     <pre>
                         r#"curl -s localhost:3000/mcp \
-  -H 'content-type: application/json' \
+    -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
        "params":{"name":"verify_claim",
                  "arguments":{"query":"exchange froze attacker funds"}}}'"#

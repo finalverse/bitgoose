@@ -49,15 +49,24 @@ fn dec(v: f64) -> Option<Decimal> {
 }
 
 /// Pull every tracked asset from CoinGecko in one request.
-pub async fn fetch_coingecko(client: &reqwest::Client) -> Result<Vec<(PriceTick, String, String, Option<i32>)>> {
-    let ids = TRACKED.iter().map(|(_, _, id)| *id).collect::<Vec<_>>().join(",");
+pub async fn fetch_coingecko(
+    client: &reqwest::Client,
+) -> Result<Vec<(PriceTick, String, String, Option<i32>)>> {
+    let ids = TRACKED
+        .iter()
+        .map(|(_, _, id)| *id)
+        .collect::<Vec<_>>()
+        .join(",");
     let url = format!(
         "https://api.coingecko.com/api/v3/coins/markets\
          ?vs_currency=usd&ids={ids}&order=market_cap_desc&per_page=250&page=1&sparkline=false"
     );
     let resp = client.get(&url).send().await?;
     if !resp.status().is_success() {
-        return Err(IngestError::Http { status: resp.status().as_u16(), url });
+        return Err(IngestError::Http {
+            status: resp.status().as_u16(),
+            url,
+        });
     }
     let markets: Vec<GeckoMarket> = resp.json().await?;
     let ts = Utc::now();
@@ -99,7 +108,10 @@ pub async fn fetch_coinbase(client: &reqwest::Client, symbol: &str) -> Result<Pr
     let url = format!("https://api.coinbase.com/v2/prices/{symbol}-USD/spot");
     let resp = client.get(&url).send().await?;
     if !resp.status().is_success() {
-        return Err(IngestError::Http { status: resp.status().as_u16(), url });
+        return Err(IngestError::Http {
+            status: resp.status().as_u16(),
+            url,
+        });
     }
     let body: CoinbaseSpot = resp.json().await?;
     Ok(PriceTick {
@@ -152,7 +164,11 @@ pub async fn refresh(db: &Db, client: &reqwest::Client) -> usize {
                     Err(e) => warn!(symbol = %sym, error = %e, "coinbase fallback failed"),
                 }
             }
-            info!(count = n, source = "coinbase", "prices refreshed via fallback");
+            info!(
+                count = n,
+                source = "coinbase",
+                "prices refreshed via fallback"
+            );
             n
         }
     }

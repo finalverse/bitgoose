@@ -53,7 +53,13 @@ pub struct RunOpts {
 
 impl Default for RunOpts {
     fn default() -> Self {
-        Self { ingest: true, prices: true, ombuds: true, max_triage: 100, max_cluster: 60 }
+        Self {
+            ingest: true,
+            prices: true,
+            ombuds: true,
+            max_triage: 100,
+            max_cluster: 60,
+        }
     }
 }
 

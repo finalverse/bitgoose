@@ -111,7 +111,9 @@ pub async fn insert_new(db: &Db, it: &NewItem) -> Result<Option<RawItemId>> {
 }
 
 pub async fn count(db: &Db) -> Result<i64> {
-    Ok(sqlx::query_scalar("SELECT count(*) FROM raw_items").fetch_one(&db.pool).await?)
+    Ok(sqlx::query_scalar("SELECT count(*) FROM raw_items")
+        .fetch_one(&db.pool)
+        .await?)
 }
 
 /// Items Gosling has not yet read, newest first.
@@ -242,11 +244,13 @@ pub async fn recent_public(db: &Db, limit: i64) -> Result<Vec<RawItemPublic>> {
 
 /// Source text for claim extraction. Never rendered, never serialized.
 pub async fn body_for_analysis(db: &Db, id: RawItemId) -> Result<Option<String>> {
-    Ok(sqlx::query_scalar("SELECT body_raw FROM raw_items WHERE id = $1")
-        .bind(id.into_uuid())
-        .fetch_optional(&db.pool)
-        .await?
-        .flatten())
+    Ok(
+        sqlx::query_scalar("SELECT body_raw FROM raw_items WHERE id = $1")
+            .bind(id.into_uuid())
+            .fetch_optional(&db.pool)
+            .await?
+            .flatten(),
+    )
 }
 
 /// `(source_slug, body)` for every item on a story, for the policy engine's
@@ -260,5 +264,8 @@ pub async fn bodies_for_story(db: &Db, story: StoryId) -> Result<Vec<(String, St
     .bind(story.into_uuid())
     .fetch_all(&db.pool)
     .await?;
-    Ok(rows.iter().map(|r| (r.get("slug"), r.get("body"))).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (r.get("slug"), r.get("body")))
+        .collect())
 }

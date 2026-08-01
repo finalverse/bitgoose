@@ -109,8 +109,17 @@ pub const SOURCES: &[SeedSource] = &[
 
 pub async fn seed_sources(db: &Db) -> Result<usize> {
     for s in SOURCES {
-        sources::upsert(db, s.slug, s.name, s.kind, s.url, s.homepage, s.trust, s.poll_interval_s)
-            .await?;
+        sources::upsert(
+            db,
+            s.slug,
+            s.name,
+            s.kind,
+            s.url,
+            s.homepage,
+            s.trust,
+            s.poll_interval_s,
+        )
+        .await?;
     }
     Ok(SOURCES.len())
 }
@@ -128,18 +137,54 @@ pub async fn seed_assets(db: &Db) -> Result<usize> {
 /// hub pages are populated on day one instead of waiting for extraction.
 pub async fn seed_entities(db: &Db) -> Result<usize> {
     use bg_core::domain::EntityKind::*;
-    let rows: &[(bg_core::domain::EntityKind, &str, &str, Option<&str>, &[&str])] = &[
+    let rows: &[(
+        bg_core::domain::EntityKind,
+        &str,
+        &str,
+        Option<&str>,
+        &[&str],
+    )] = &[
         (Token, "Bitcoin", "bitcoin", Some("BTC"), &["XBT"]),
         (Token, "Ethereum", "ethereum", Some("ETH"), &["Ether"]),
         (Chain, "Solana", "solana", Some("SOL"), &[]),
-        (Regulator, "Securities and Exchange Commission", "sec", None, &["SEC", "the SEC"]),
-        (Regulator, "Commodity Futures Trading Commission", "cftc", None, &["CFTC"]),
+        (
+            Regulator,
+            "Securities and Exchange Commission",
+            "sec",
+            None,
+            &["SEC", "the SEC"],
+        ),
+        (
+            Regulator,
+            "Commodity Futures Trading Commission",
+            "cftc",
+            None,
+            &["CFTC"],
+        ),
         (Exchange, "Coinbase", "coinbase", None, &["Coinbase Global"]),
         (Exchange, "Binance", "binance", None, &[]),
         (Exchange, "Kraken", "kraken", None, &["Payward"]),
-        (Company, "Tether", "tether", Some("USDT"), &["Tether Limited"]),
-        (Company, "Circle", "circle", Some("USDC"), &["Circle Internet Financial"]),
-        (Company, "MicroStrategy", "microstrategy", None, &["Strategy"]),
+        (
+            Company,
+            "Tether",
+            "tether",
+            Some("USDT"),
+            &["Tether Limited"],
+        ),
+        (
+            Company,
+            "Circle",
+            "circle",
+            Some("USDC"),
+            &["Circle Internet Financial"],
+        ),
+        (
+            Company,
+            "MicroStrategy",
+            "microstrategy",
+            None,
+            &["Strategy"],
+        ),
         (Fund, "BlackRock", "blackrock", None, &["IBIT"]),
         (Protocol, "Uniswap", "uniswap", Some("UNI"), &[]),
         (Protocol, "Lido", "lido", Some("LDO"), &[]),

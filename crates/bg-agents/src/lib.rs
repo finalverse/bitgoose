@@ -129,7 +129,9 @@ impl Ctx {
 
     /// Spend in the last hour, the window the run budget is measured over.
     pub async fn spent_recently(&self) -> Decimal {
-        agents_repo::cost_since(&self.db, 60).await.unwrap_or_default()
+        agents_repo::cost_since(&self.db, 60)
+            .await
+            .unwrap_or_default()
     }
 
     async fn check_budget(&self) -> Result<()> {
@@ -158,10 +160,18 @@ pub struct StageOutput<T> {
 
 impl<T> StageOutput<T> {
     pub fn plain(value: T, note: impl Into<String>) -> Self {
-        Self { value, completion: None, note: Some(note.into()) }
+        Self {
+            value,
+            completion: None,
+            note: Some(note.into()),
+        }
     }
     pub fn with(value: T, completion: Completion, note: impl Into<String>) -> Self {
-        Self { value, completion: Some(completion), note: Some(note.into()) }
+        Self {
+            value,
+            completion: Some(completion),
+            note: Some(note.into()),
+        }
     }
 }
 

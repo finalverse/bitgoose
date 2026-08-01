@@ -81,8 +81,14 @@ mod tests {
 
     #[test]
     fn basic_slugs() {
-        assert_eq!(slugify("SEC Approves Spot Ether ETFs"), "sec-approves-spot-ether-etfs");
-        assert_eq!(slugify("  Bitcoin's $100,000 Day!  "), "bitcoins-100-000-day");
+        assert_eq!(
+            slugify("SEC Approves Spot Ether ETFs"),
+            "sec-approves-spot-ether-etfs"
+        );
+        assert_eq!(
+            slugify("  Bitcoin's $100,000 Day!  "),
+            "bitcoins-100-000-day"
+        );
         // Apostrophes close up rather than splitting: "whats", not "what-s".
         assert_eq!(slugify("DeFi / NFT: what's next?"), "defi-nft-whats-next");
     }

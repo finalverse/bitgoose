@@ -131,8 +131,16 @@ async fn handle(State(s): State<ApiState>, Json(req): Json<RpcRequest>) -> Json<
         "ping" => ok(id, json!({})),
         "tools/list" => ok(id, json!({ "tools": tools() })),
         "tools/call" => {
-            let name = req.params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let args = req.params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let name = req
+                .params
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let args = req
+                .params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             match call_tool(&s, name, &args).await {
                 Ok(v) => ok(id, tool_text(v)),
                 Err(e) => ok(
@@ -152,7 +160,10 @@ async fn handle(State(s): State<ApiState>, Json(req): Json<RpcRequest>) -> Json<
 
 async fn call_tool(s: &ApiState, name: &str, args: &Value) -> Result<Value, String> {
     let limit = |default: i64, max: i64| -> i64 {
-        args.get("limit").and_then(|v| v.as_i64()).unwrap_or(default).clamp(1, max)
+        args.get("limit")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(default)
+            .clamp(1, max)
     };
 
     match name {
@@ -190,10 +201,15 @@ async fn call_tool(s: &ApiState, name: &str, args: &Value) -> Result<Value, Stri
                 .get("slug")
                 .and_then(|v| v.as_str())
                 .ok_or("slug is required")?;
-            let story = bg_db::stories::by_slug(&s.db, slug).await.map_err(|e| e.to_string())?;
-            let claims = bg_db::claims::with_sources(&s.db, story.id).await.map_err(|e| e.to_string())?;
-            let article =
-                bg_db::articles::latest_for_story(&s.db, story.id).await.map_err(|e| e.to_string())?;
+            let story = bg_db::stories::by_slug(&s.db, slug)
+                .await
+                .map_err(|e| e.to_string())?;
+            let claims = bg_db::claims::with_sources(&s.db, story.id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let article = bg_db::articles::latest_for_story(&s.db, story.id)
+                .await
+                .map_err(|e| e.to_string())?;
 
             Ok(json!({
                 "slug": story.slug,
@@ -219,7 +235,10 @@ async fn call_tool(s: &ApiState, name: &str, args: &Value) -> Result<Value, Stri
         }
 
         "verify_claim" => {
-            let query = args.get("query").and_then(|v| v.as_str()).ok_or("query is required")?;
+            let query = args
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or("query is required")?;
             // Trigram similarity over claim text. Postgres does the ranking,
             // so this stays one round trip regardless of archive size.
             let rows = sqlx::query_as::<_, (uuid::Uuid, String, String, f32, String, f32)>(
@@ -274,13 +293,19 @@ async fn call_tool(s: &ApiState, name: &str, args: &Value) -> Result<Value, Stri
         }
 
         "get_prices" => {
-            let prices = bg_db::prices::latest_all(&s.db).await.map_err(|e| e.to_string())?;
+            let prices = bg_db::prices::latest_all(&s.db)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(json!({ "prices": prices }))
         }
 
         "newsroom_status" => {
-            let stats = bg_db::agents::flock_stats(&s.db).await.map_err(|e| e.to_string())?;
-            let totals = bg_db::agents::newsroom_totals(&s.db).await.map_err(|e| e.to_string())?;
+            let stats = bg_db::agents::flock_stats(&s.db)
+                .await
+                .map_err(|e| e.to_string())?;
+            let totals = bg_db::agents::newsroom_totals(&s.db)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(json!({
                 "runs_24h": totals.runs_24h,
                 "failures_24h": totals.failures_24h,

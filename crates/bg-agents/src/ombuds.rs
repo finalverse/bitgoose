@@ -71,8 +71,14 @@ fn schema(n: usize) -> serde_json::Value {
                     n,
                 ),
             ),
-            ("needs_correction", sch::boolean("would a reader have been misled")),
-            ("correction_reason", sch::string_hinted("what changed, or empty", "reason")),
+            (
+                "needs_correction",
+                sch::boolean("would a reader have been misled"),
+            ),
+            (
+                "correction_reason",
+                sch::string_hinted("what changed, or empty", "reason"),
+            ),
         ],
         &["findings", "needs_correction", "correction_reason"],
     )
@@ -91,7 +97,10 @@ pub async fn recheck(ctx: &Ctx, story: StoryId) -> Result<bool> {
 
     // Only worth a model call if evidence arrived after we published.
     let published_at = article.published_at.unwrap_or(article.created_at);
-    let fresh: Vec<_> = items.iter().filter(|i| i.fetched_at > published_at).collect();
+    let fresh: Vec<_> = items
+        .iter()
+        .filter(|i| i.fetched_at > published_at)
+        .collect();
     if fresh.is_empty() {
         return Ok(false);
     }
@@ -119,54 +128,67 @@ pub async fn recheck(ctx: &Ctx, story: StoryId) -> Result<bool> {
     let article_version = article.version;
     let article_id = article.id;
 
-    stage(ctx, AgentRole::Ombuds, Some(story), "recheck", |_run| async move {
-        let prompt = format!(
-            "Published claims:\n{}\n\nSource material that arrived after publication:\n{}\n\n\
+    stage(
+        ctx,
+        AgentRole::Ombuds,
+        Some(story),
+        "recheck",
+        |_run| async move {
+            let prompt = format!(
+                "Published claims:\n{}\n\nSource material that arrived after publication:\n{}\n\n\
              Does any claim need revising?",
-            claim_list.join("\n"),
-            fresh_text.join("\n")
-        );
-        let req = Request::new("ombuds.recheck", ModelTier::Mid, system, prompt)
-            .with_schema(schema(claims_for_update.len()))
-            .with_max_tokens(3_000);
-        let (r, completion) = ctx.llm.complete_json::<Recheck>(&req).await?;
+                claim_list.join("\n"),
+                fresh_text.join("\n")
+            );
+            let req = Request::new("ombuds.recheck", ModelTier::Mid, system, prompt)
+                .with_schema(schema(claims_for_update.len()))
+                .with_max_tokens(3_000);
+            let (r, completion) = ctx.llm.complete_json::<Recheck>(&req).await?;
 
-        let mut changed = 0usize;
-        for f in &r.findings {
-            let Some(c) = claims_for_update.get(f.claim_index as usize) else { continue };
-            if f.standing == "unchanged" {
-                continue;
+            let mut changed = 0usize;
+            for f in &r.findings {
+                let Some(c) = claims_for_update.get(f.claim_index as usize) else {
+                    continue;
+                };
+                if f.standing == "unchanged" {
+                    continue;
+                }
+                let nv =
+                    Verification::from_str(&f.new_verification).unwrap_or(c.claim.verification);
+                if nv != c.claim.verification {
+                    bg_db::claims::set_verification(&ctx.db, c.claim.id, nv, c.claim.confidence)
+                        .await?;
+                    changed += 1;
+                }
             }
-            let nv = Verification::from_str(&f.new_verification).unwrap_or(c.claim.verification);
-            if nv != c.claim.verification {
-                bg_db::claims::set_verification(&ctx.db, c.claim.id, nv, c.claim.confidence).await?;
-                changed += 1;
+
+            if r.needs_correction && !r.correction_reason.trim().is_empty() {
+                // Append-only: the correction row records the change; the reader
+                // can always see that the page moved and why.
+                bg_db::articles::add_correction(
+                    &ctx.db,
+                    article_id,
+                    article_version,
+                    article_version + 1,
+                    r.correction_reason.trim(),
+                    "",
+                    None,
+                )
+                .await?;
+                warn!(story = %story, reason = %r.correction_reason, "CORRECTION ISSUED");
             }
-        }
 
-        if r.needs_correction && !r.correction_reason.trim().is_empty() {
-            // Append-only: the correction row records the change; the reader
-            // can always see that the page moved and why.
-            bg_db::articles::add_correction(
-                &ctx.db,
-                article_id,
-                article_version,
-                article_version + 1,
-                r.correction_reason.trim(),
-                "",
-                None,
-            )
-            .await?;
-            warn!(story = %story, reason = %r.correction_reason, "CORRECTION ISSUED");
-        }
-
-        let note = if r.needs_correction {
-            format!("correction issued: {}", bg_core::text::truncate_words(&r.correction_reason, 15))
-        } else {
-            format!("{changed} claim(s) revised, no correction needed")
-        };
-        Ok(StageOutput::with(r.needs_correction, completion, note))
-    })
+            let note = if r.needs_correction {
+                format!(
+                    "correction issued: {}",
+                    bg_core::text::truncate_words(&r.correction_reason, 15)
+                )
+            } else {
+                format!("{changed} claim(s) revised, no correction needed")
+            };
+            Ok(StageOutput::with(r.needs_correction, completion, note))
+        },
+    )
     .await
 }
 

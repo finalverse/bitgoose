@@ -54,7 +54,10 @@ impl Rng {
 /// First sentence of the prompt's user text, for plausible echoed content.
 fn first_sentence(s: &str) -> String {
     let t = s.trim();
-    let end = t.find(['.', '\n']).map(|i| i + 1).unwrap_or(t.len().min(120));
+    let end = t
+        .find(['.', '\n'])
+        .map(|i| i + 1)
+        .unwrap_or(t.len().min(120));
     let out = t[..end].trim().to_string();
     if out.is_empty() {
         "Placeholder text generated offline by the BitGoose stub provider.".into()
@@ -128,7 +131,10 @@ fn synth(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize, ordinal: usize)
         }
     }
 
-    let ty = schema.get("type").and_then(|v| v.as_str()).unwrap_or("string");
+    let ty = schema
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("string");
     match ty {
         "object" => {
             let mut out = Map::new();
@@ -138,7 +144,11 @@ fn synth(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize, ordinal: usize)
             let required: Vec<String> = schema
                 .get("required")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
                 for name in &required {
@@ -150,7 +160,10 @@ fn synth(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize, ordinal: usize)
             Value::Object(out)
         }
         "array" => {
-            let items = schema.get("items").cloned().unwrap_or_else(|| json!({"type": "string"}));
+            let items = schema
+                .get("items")
+                .cloned()
+                .unwrap_or_else(|| json!({"type": "string"}));
             // `x-stub-count` means the caller expects one entry per input (a
             // batched agent). Honouring it is what lets offline runs exercise
             // the pipeline at real volume instead of processing 1 item in 25.
@@ -160,21 +173,37 @@ fn synth(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize, ordinal: usize)
                 // keep offline output readable.
                 None => 1 + rng.pick(3),
             };
-            Value::Array((0..n).map(|i| synth(&items, rng, ctx, depth + 1, i)).collect())
+            Value::Array(
+                (0..n)
+                    .map(|i| synth(&items, rng, ctx, depth + 1, i))
+                    .collect(),
+            )
         }
         "integer" => match schema.get("x-stub").and_then(|v| v.as_str()) {
             Some("ordinal") => json!(ordinal as i64),
             _ => {
-                let lo = schema.get("x-stub-min").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
-                let hi = schema.get("x-stub-max").and_then(|v| v.as_f64()).unwrap_or(99.0) as i64;
+                let lo = schema
+                    .get("x-stub-min")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as i64;
+                let hi = schema
+                    .get("x-stub-max")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(99.0) as i64;
                 json!(lo + rng.pick((hi - lo + 1).max(1) as usize) as i64)
             }
         },
         "number" => {
             // Honour an explicit range; otherwise 0.50..=0.99, which suits the
             // confidence fields that dominate this schema surface.
-            let lo = schema.get("x-stub-min").and_then(|v| v.as_f64()).unwrap_or(0.5);
-            let hi = schema.get("x-stub-max").and_then(|v| v.as_f64()).unwrap_or(0.99);
+            let lo = schema
+                .get("x-stub-min")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5);
+            let hi = schema
+                .get("x-stub-max")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.99);
             let span = (hi - lo).max(0.0);
             let v = lo + (rng.pick(101) as f64 / 100.0) * span;
             json!((v * 100.0).round() / 100.0)
@@ -205,7 +234,10 @@ fn stub_string(hint: &str, ctx: &str, rng: &mut Rng, ordinal: usize) -> String {
             bg_core::text::truncate_words(&subject, 22)
         ),
         "slug" => bg_core::slug::slugify(&bg_core::text::truncate_words(&subject, 7)),
-        "claim" => format!("{}.", bg_core::text::truncate_words(&subject, 14).trim_end_matches('.')),
+        "claim" => format!(
+            "{}.",
+            bg_core::text::truncate_words(&subject, 14).trim_end_matches('.')
+        ),
         "excerpt" => bg_core::text::truncate_words(&subject, 10),
         "body_md" => format!(
             "{}[^c1]\n\nThis story was assembled offline by the BitGoose stub provider, which \
@@ -232,15 +264,19 @@ impl LlmProvider for StubProvider {
 
     async fn complete(&self, req: &Request) -> Result<Completion> {
         let started = std::time::Instant::now();
-        let mut rng = Rng(seed_of(&format!("{}|{}|{}", req.task, req.system, req.user)));
+        let mut rng = Rng(seed_of(&format!(
+            "{}|{}|{}",
+            req.task, req.system, req.user
+        )));
 
         let text = match &req.json_schema {
             Some(schema) => {
                 let v = synthesize(schema, &mut rng, &req.user, 0);
                 // Self-check: a stub that emits non-conforming output would
                 // send the pipeline chasing a phantom bug.
-                crate::schema::validate(&v, schema)
-                    .map_err(|e| crate::LlmError::SchemaViolation(format!("stub self-check: {e}")))?;
+                crate::schema::validate(&v, schema).map_err(|e| {
+                    crate::LlmError::SchemaViolation(format!("stub self-check: {e}"))
+                })?;
                 serde_json::to_string(&v).unwrap_or_else(|_| "{}".into())
             }
             None => format!(
@@ -288,7 +324,10 @@ mod tests {
                         s::object(
                             vec![
                                 ("text", s::string_hinted("claim", "claim")),
-                                ("kind", s::enumeration(&["fact", "figure", "quote", "forecast"], "k")),
+                                (
+                                    "kind",
+                                    s::enumeration(&["fact", "figure", "quote", "forecast"], "k"),
+                                ),
                                 ("confidence", s::number("0-1")),
                                 ("source_indices", s::array(s::integer("i"), "sources")),
                             ],
@@ -308,8 +347,13 @@ mod tests {
         let schema = draft_schema();
         // Many different prompts — the property must hold for all of them.
         for i in 0..200 {
-            let req = Request::new("scribe.draft", ModelTier::Mid, "sys", format!("story number {i} about an exchange hack"))
-                .with_schema(schema.clone());
+            let req = Request::new(
+                "scribe.draft",
+                ModelTier::Mid,
+                "sys",
+                format!("story number {i} about an exchange hack"),
+            )
+            .with_schema(schema.clone());
             let out = p.complete(&req).await.unwrap();
             let v = out.json().unwrap();
             s::validate(&v, &schema).unwrap_or_else(|e| panic!("iteration {i}: {e}\n{}", out.text));
@@ -319,7 +363,8 @@ mod tests {
     #[tokio::test]
     async fn the_stub_is_deterministic() {
         let p = StubProvider;
-        let req = Request::new("t", ModelTier::Mid, "sys", "same input").with_schema(draft_schema());
+        let req =
+            Request::new("t", ModelTier::Mid, "sys", "same input").with_schema(draft_schema());
         let a = p.complete(&req).await.unwrap();
         let b = p.complete(&req).await.unwrap();
         assert_eq!(a.text, b.text);
@@ -330,11 +375,16 @@ mod tests {
         let p = StubProvider;
         let schema = draft_schema();
         let a = p
-            .complete(&Request::new("t", ModelTier::Mid, "sys", "solana outage").with_schema(schema.clone()))
+            .complete(
+                &Request::new("t", ModelTier::Mid, "sys", "solana outage")
+                    .with_schema(schema.clone()),
+            )
             .await
             .unwrap();
         let b = p
-            .complete(&Request::new("t", ModelTier::Mid, "sys", "sec approves etf").with_schema(schema))
+            .complete(
+                &Request::new("t", ModelTier::Mid, "sys", "sec approves etf").with_schema(schema),
+            )
             .await
             .unwrap();
         assert_ne!(a.text, b.text);
@@ -344,22 +394,38 @@ mod tests {
     async fn the_stub_never_charges() {
         let p = StubProvider;
         let out = p
-            .complete(&Request::new("t", ModelTier::Top, "sys", "expensive-looking prompt"))
+            .complete(&Request::new(
+                "t",
+                ModelTier::Top,
+                "sys",
+                "expensive-looking prompt",
+            ))
             .await
             .unwrap();
         assert_eq!(out.cost_usd, Decimal::ZERO);
-        assert!(out.prompt_tokens > 0, "should still estimate tokens for the ledger");
+        assert!(
+            out.prompt_tokens > 0,
+            "should still estimate tokens for the ledger"
+        );
     }
 
     #[tokio::test]
     async fn plain_text_requests_return_prose_not_json() {
         let p = StubProvider;
         let out = p
-            .complete(&Request::new("copydesk.headline", ModelTier::Fast, "sys", "Exchange halts withdrawals."))
+            .complete(&Request::new(
+                "copydesk.headline",
+                ModelTier::Fast,
+                "sys",
+                "Exchange halts withdrawals.",
+            ))
             .await
             .unwrap();
         assert!(out.text.contains("stub"));
-        assert!(out.json().is_err(), "a schemaless request should not return JSON");
+        assert!(
+            out.json().is_err(),
+            "a schemaless request should not return JSON"
+        );
     }
 
     #[test]

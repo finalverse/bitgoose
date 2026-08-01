@@ -94,11 +94,16 @@ pub async fn trending(db: &Db, days: i32, limit: i64) -> Result<Vec<(Entity, i64
          GROUP BY e.id
          ORDER BY n DESC, e.name
          LIMIT $2",
-        COLS.split(", ").map(|c| format!("e.{c}")).collect::<Vec<_>>().join(", ")
+        COLS.split(", ")
+            .map(|c| format!("e.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     ))
     .bind(days)
     .bind(limit)
     .fetch_all(&db.pool)
     .await?;
-    rows.iter().map(|r| Ok((from_row(r)?, r.try_get("n")?))).collect()
+    rows.iter()
+        .map(|r| Ok((from_row(r)?, r.try_get("n")?)))
+        .collect()
 }

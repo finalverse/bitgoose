@@ -16,9 +16,28 @@ use url::Url;
 const TRACKING_PREFIXES: &[&str] = &["utm_", "mc_", "pk_", "ga_", "_hs", "hsa_", "at_"];
 
 const TRACKING_EXACT: &[&str] = &[
-    "fbclid", "gclid", "dclid", "msclkid", "twclid", "igshid", "ref", "ref_src", "referrer",
-    "source", "cmpid", "campaign", "sr_share", "__twitter_impression", "guccounter", "amp",
-    "s", "spm", "yclid", "wickedid", "rss", "feed",
+    "fbclid",
+    "gclid",
+    "dclid",
+    "msclkid",
+    "twclid",
+    "igshid",
+    "ref",
+    "ref_src",
+    "referrer",
+    "source",
+    "cmpid",
+    "campaign",
+    "sr_share",
+    "__twitter_impression",
+    "guccounter",
+    "amp",
+    "s",
+    "spm",
+    "yclid",
+    "wickedid",
+    "rss",
+    "feed",
 ];
 
 fn is_tracking(key: &str) -> bool {
@@ -49,7 +68,10 @@ pub fn canonicalize(raw: &str) -> String {
     }
 
     // Default ports carry no information.
-    if matches!((u.scheme(), u.port()), ("https", Some(443)) | ("http", Some(80))) {
+    if matches!(
+        (u.scheme(), u.port()),
+        ("https", Some(443)) | ("http", Some(80))
+    ) {
         let _ = u.set_port(None);
     }
 
@@ -144,8 +166,14 @@ mod tests {
 
     #[test]
     fn distinct_articles_do_not_collide() {
-        assert_ne!(url_hash("https://decrypt.co/1/a"), url_hash("https://decrypt.co/2/b"));
-        assert_ne!(url_hash("https://decrypt.co/1/a"), url_hash("https://theblock.co/1/a"));
+        assert_ne!(
+            url_hash("https://decrypt.co/1/a"),
+            url_hash("https://decrypt.co/2/b")
+        );
+        assert_ne!(
+            url_hash("https://decrypt.co/1/a"),
+            url_hash("https://theblock.co/1/a")
+        );
     }
 
     #[test]

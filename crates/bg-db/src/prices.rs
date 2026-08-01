@@ -27,11 +27,13 @@ pub async fn upsert_asset(
     let mut tx = db.pool.begin().await?;
 
     if let Some(gid) = coingecko_id {
-        sqlx::query("UPDATE assets SET coingecko_id = NULL WHERE coingecko_id = $1 AND symbol <> $2")
-            .bind(gid)
-            .bind(&symbol)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE assets SET coingecko_id = NULL WHERE coingecko_id = $1 AND symbol <> $2",
+        )
+        .bind(gid)
+        .bind(&symbol)
+        .execute(&mut *tx)
+        .await?;
     }
 
     let row = sqlx::query(
@@ -61,9 +63,11 @@ pub async fn upsert_asset(
 }
 
 pub async fn assets(db: &Db) -> Result<Vec<Asset>> {
-    let rows = sqlx::query("SELECT id, symbol, name, coingecko_id, rank FROM assets ORDER BY rank NULLS LAST, symbol")
-        .fetch_all(&db.pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, symbol, name, coingecko_id, rank FROM assets ORDER BY rank NULLS LAST, symbol",
+    )
+    .fetch_all(&db.pool)
+    .await?;
     rows.iter()
         .map(|r| {
             Ok(Asset {
@@ -123,7 +127,11 @@ pub async fn latest_all(db: &Db) -> Result<Vec<PriceTick>> {
     .await?;
     let mut ticks: Vec<PriceTick> = rows.iter().map(tick_from_row).collect::<Result<_>>()?;
     // Order by market cap so the strip leads with what matters, not alphabetically.
-    ticks.sort_by(|a, b| b.market_cap.unwrap_or_default().cmp(&a.market_cap.unwrap_or_default()));
+    ticks.sort_by(|a, b| {
+        b.market_cap
+            .unwrap_or_default()
+            .cmp(&a.market_cap.unwrap_or_default())
+    });
     Ok(ticks)
 }
 
@@ -148,5 +156,8 @@ pub async fn history(db: &Db, symbol: &str, hours: i32) -> Result<Vec<(DateTime<
     .bind(hours)
     .fetch_all(&db.pool)
     .await?;
-    Ok(rows.iter().map(|r| (r.get("ts"), r.get("price_usd"))).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (r.get("ts"), r.get("price_usd")))
+        .collect())
 }

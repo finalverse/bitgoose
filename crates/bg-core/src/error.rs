@@ -19,10 +19,16 @@ pub enum CoreError {
 
 impl CoreError {
     pub fn parse(kind: &'static str, value: impl Into<String>) -> Self {
-        Self::Parse { kind, value: value.into() }
+        Self::Parse {
+            kind,
+            value: value.into(),
+        }
     }
 
     pub fn config(key: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::Config { key: key.into(), reason: reason.into() }
+        Self::Config {
+            key: key.into(),
+            reason: reason.into(),
+        }
     }
 }

@@ -184,7 +184,12 @@ pub async fn open(db: &Db, limit: i64) -> Result<Vec<Story>> {
 }
 
 /// Published stories of a given kind, newest first.
-pub async fn published(db: &Db, kind: Option<StoryKind>, limit: i64, offset: i64) -> Result<Vec<Story>> {
+pub async fn published(
+    db: &Db,
+    kind: Option<StoryKind>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Story>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM stories
          WHERE status = 'published' AND ($1::text IS NULL OR kind = $1)
@@ -276,7 +281,9 @@ pub async fn wire(db: &Db, limit: i64, offset: i64) -> Result<Vec<WireEntry>> {
                 story_id: story_id(r, "id")?,
                 slug: r.try_get("slug")?,
                 title: r.try_get("title")?,
-                summary: r.try_get::<Option<String>, _>("summary")?.unwrap_or_default(),
+                summary: r
+                    .try_get::<Option<String>, _>("summary")?
+                    .unwrap_or_default(),
                 category: enum_col::<Category>(r, "category")?,
                 source_name: r.try_get("source_name")?,
                 source_slug: r.try_get("source_slug")?,
@@ -331,5 +338,8 @@ pub async fn flyway(db: &Db, days: i32) -> Result<Vec<(String, chrono::NaiveDate
     .bind(days)
     .fetch_all(&db.pool)
     .await?;
-    Ok(rows.iter().map(|r| (r.get("category"), r.get("day"), r.get("n"))).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (r.get("category"), r.get("day"), r.get("n")))
+        .collect())
 }

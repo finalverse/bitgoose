@@ -24,6 +24,7 @@ leptos_router.workspace = true
 serde.workspace = true
 chrono.workspace = true
 rust_decimal.workspace = true
+serde_json.workspace = true
 
 console_error_panic_hook = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }

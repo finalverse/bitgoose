@@ -70,9 +70,11 @@ pub async fn upsert(
 }
 
 pub async fn all(db: &Db) -> Result<Vec<Source>> {
-    let rows = crate::sql(format!("SELECT {COLS} FROM sources ORDER BY trust DESC, slug"))
-        .fetch_all(&db.pool)
-        .await?;
+    let rows = crate::sql(format!(
+        "SELECT {COLS} FROM sources ORDER BY trust DESC, slug"
+    ))
+    .fetch_all(&db.pool)
+    .await?;
     rows.iter().map(from_row).collect()
 }
 
@@ -129,13 +131,11 @@ pub async fn record_success(
 /// Record a failed poll. `last_polled_at` still advances so one broken feed
 /// cannot monopolise the scheduler by staying permanently "due".
 pub async fn record_failure(db: &Db, id: bg_core::SourceId, err: &str) -> Result<()> {
-    sqlx::query(
-        "UPDATE sources SET last_polled_at = now(), last_error = $2 WHERE id = $1",
-    )
-    .bind(id.into_uuid())
-    .bind(&err.chars().take(500).collect::<String>())
-    .execute(&db.pool)
-    .await?;
+    sqlx::query("UPDATE sources SET last_polled_at = now(), last_error = $2 WHERE id = $1")
+        .bind(id.into_uuid())
+        .bind(&err.chars().take(500).collect::<String>())
+        .execute(&db.pool)
+        .await?;
     Ok(())
 }
 

@@ -64,7 +64,10 @@ struct SameEvent {
 fn schema() -> serde_json::Value {
     sch::object(
         vec![
-            ("same_event", sch::boolean("true only if the same underlying occurrence")),
+            (
+                "same_event",
+                sch::boolean("true only if the same underlying occurrence"),
+            ),
             ("reason", sch::string_hinted("one sentence", "reason")),
         ],
         &["same_event", "reason"],
@@ -93,21 +96,28 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
                 let cand_title = cand.title.clone();
                 let item_title = item.title.clone();
                 let system = system.clone();
-                let same = stage(ctx, AgentRole::Curator, cand.story_id, "adjudicate", |_run| async move {
-                    let prompt = format!(
-                        "Item A: {item_title}\nItem B: {cand_title}\n\n\
+                let same = stage(
+                    ctx,
+                    AgentRole::Curator,
+                    cand.story_id,
+                    "adjudicate",
+                    |_run| async move {
+                        let prompt = format!(
+                            "Item A: {item_title}\nItem B: {cand_title}\n\n\
                          Do A and B report the same underlying event?"
-                    );
-                    let req = Request::new("curator.same_event", ModelTier::Fast, system, prompt)
-                        .with_schema(schema())
-                        .with_max_tokens(500);
-                    let (parsed, completion) = ctx.llm.complete_json::<SameEvent>(&req).await?;
-                    let note = format!(
-                        "same_event={} (simhash {}, trigram {:.2})",
-                        parsed.same_event, score.hamming, score.trigram
-                    );
-                    Ok(StageOutput::with(parsed.same_event, completion, note))
-                })
+                        );
+                        let req =
+                            Request::new("curator.same_event", ModelTier::Fast, system, prompt)
+                                .with_schema(schema())
+                                .with_max_tokens(500);
+                        let (parsed, completion) = ctx.llm.complete_json::<SameEvent>(&req).await?;
+                        let note = format!(
+                            "same_event={} (simhash {}, trigram {:.2})",
+                            parsed.same_event, score.hamming, score.trigram
+                        );
+                        Ok(StageOutput::with(parsed.same_event, completion, note))
+                    },
+                )
                 .await
                 // A failed adjudication must not merge by default — a split is
                 // the safe failure.
@@ -123,21 +133,17 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
 
         let story_id = match target {
             Some(id) => {
-                bg_db::items::attach_to_story(&ctx.db, item.id, id, ItemRole::Corroborating).await?;
+                bg_db::items::attach_to_story(&ctx.db, item.id, id, ItemRole::Corroborating)
+                    .await?;
                 debug!(item = %item.title, "attached to existing story");
                 id
             }
             None => {
                 let category = item_category(ctx, &item).await;
                 let slug = bg_core::slug::slugify(&item.title);
-                let story = bg_db::stories::create(
-                    &ctx.db,
-                    &slug,
-                    StoryKind::Wire,
-                    &item.title,
-                    category,
-                )
-                .await?;
+                let story =
+                    bg_db::stories::create(&ctx.db, &slug, StoryKind::Wire, &item.title, category)
+                        .await?;
                 bg_db::items::attach_to_story(&ctx.db, item.id, story.id, ItemRole::Seed).await?;
                 story.id
             }
@@ -181,7 +187,11 @@ fn best_match<'a>(item: &RawItem, candidates: &'a [RawItem]) -> Option<(&'a RawI
         // Both signals agreeing is what makes it decisive; either alone is the
         // ambiguous band the model adjudicates.
         let decisive = h <= SIMHASH_SAME && t >= TRIGRAM_SAME;
-        let score = MatchScore { hamming: h, trigram: t, decisive };
+        let score = MatchScore {
+            hamming: h,
+            trigram: t,
+            decisive,
+        };
 
         let better = match &best {
             None => true,
@@ -201,7 +211,8 @@ async fn item_category(ctx: &Ctx, item: &RawItem) -> Category {
         .await
         .ok()
         .flatten();
-    raw.and_then(|c| Category::from_str(&c).ok()).unwrap_or(Category::Markets)
+    raw.and_then(|c| Category::from_str(&c).ok())
+        .unwrap_or(Category::Markets)
 }
 
 /// Recompute a story's newsworthiness and velocity from its evidence.
@@ -236,7 +247,11 @@ pub async fn rescore(ctx: &Ctx, story: StoryId) -> Result<i16> {
     let trust_adj = (avg_trust - 60.0) * 0.25;
 
     // Velocity: independent sources per hour since the story was first seen.
-    let first = items.iter().map(|i| i.published_at).min().unwrap_or_else(Utc::now);
+    let first = items
+        .iter()
+        .map(|i| i.published_at)
+        .min()
+        .unwrap_or_else(Utc::now);
     let hours = ((Utc::now() - first).num_minutes() as f32 / 60.0).max(0.25);
     let velocity = sources / hours;
     let velocity_bonus = (velocity * 4.0).min(12.0);
@@ -282,22 +297,37 @@ mod tests {
         let a = item(a_src, "Solana outage halts block production for four hours");
         let b = item(b_src, "Solana outage halts block production for four hours");
         let (_, score) = best_match(&a, std::slice::from_ref(&b)).expect("should match");
-        assert!(score.decisive, "identical headlines must not need a model call");
+        assert!(
+            score.decisive,
+            "identical headlines must not need a model call"
+        );
     }
 
     #[test]
     fn unrelated_stories_do_not_match_at_all() {
         let a = item(SourceId::new(), "Solana outage halts block production");
-        let b = item(SourceId::new(), "SEC approves three spot ether ETF applications");
+        let b = item(
+            SourceId::new(),
+            "SEC approves three spot ether ETF applications",
+        );
         assert!(best_match(&a, std::slice::from_ref(&b)).is_none());
     }
 
     #[test]
     fn a_paraphrase_lands_in_the_ambiguous_band_for_adjudication() {
-        let a = item(SourceId::new(), "Exchange freezes attacker funds after $70M exploit");
-        let b = item(SourceId::new(), "Venue halts withdrawals following seventy million dollar breach");
+        let a = item(
+            SourceId::new(),
+            "Exchange freezes attacker funds after $70M exploit",
+        );
+        let b = item(
+            SourceId::new(),
+            "Venue halts withdrawals following seventy million dollar breach",
+        );
         match best_match(&a, std::slice::from_ref(&b)) {
-            Some((_, s)) => assert!(!s.decisive, "a loose paraphrase should be adjudicated, not auto-merged"),
+            Some((_, s)) => assert!(
+                !s.decisive,
+                "a loose paraphrase should be adjudicated, not auto-merged"
+            ),
             None => { /* also acceptable — errs toward splitting */ }
         }
     }

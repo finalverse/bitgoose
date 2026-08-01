@@ -35,8 +35,17 @@ struct AssetPick {
 fn schema() -> serde_json::Value {
     sch::object(
         vec![
-            ("assets", sch::array(sch::string_hinted("ticker", "asset"), "tickers the story is about")),
-            ("primary_asset", sch::string_hinted("main ticker or empty", "asset")),
+            (
+                "assets",
+                sch::array(
+                    sch::string_hinted("ticker", "asset"),
+                    "tickers the story is about",
+                ),
+            ),
+            (
+                "primary_asset",
+                sch::string_hinted("main ticker or empty", "asset"),
+            ),
         ],
         &["assets", "primary_asset"],
     )
@@ -56,48 +65,64 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<MarketContext> {
     let claims = bg_db::claims::by_story(&ctx.db, story).await?;
     let system = crate::system_prompt(ctx, AgentRole::Quant).await;
 
-    stage(ctx, AgentRole::Quant, Some(story), "market", |_run| async move {
-        let mut prompt = format!("Story: {}\n\nClaims:\n", s.title);
-        for c in &claims {
-            prompt.push_str(&format!("- {}\n", c.text));
-        }
-        prompt.push_str("\nWhich assets is this story materially about?");
+    stage(
+        ctx,
+        AgentRole::Quant,
+        Some(story),
+        "market",
+        |_run| async move {
+            let mut prompt = format!("Story: {}\n\nClaims:\n", s.title);
+            for c in &claims {
+                prompt.push_str(&format!("- {}\n", c.text));
+            }
+            prompt.push_str("\nWhich assets is this story materially about?");
 
-        let req = Request::new("quant.assets", ModelTier::Mid, system, prompt)
-            .with_schema(schema())
-            .with_max_tokens(1_000);
-        let (pick, completion) = ctx.llm.complete_json::<AssetPick>(&req).await?;
+            let req = Request::new("quant.assets", ModelTier::Mid, system, prompt)
+                .with_schema(schema())
+                .with_max_tokens(1_000);
+            let (pick, completion) = ctx.llm.complete_json::<AssetPick>(&req).await?;
 
-        let assets: Vec<String> = pick
-            .assets
-            .iter()
-            .map(|a| a.trim().trim_start_matches('$').to_uppercase())
-            .filter(|a| !a.is_empty() && a.len() <= 10)
-            .collect();
-        let primary = Some(pick.primary_asset.trim().trim_start_matches('$').to_uppercase())
+            let assets: Vec<String> = pick
+                .assets
+                .iter()
+                .map(|a| a.trim().trim_start_matches('$').to_uppercase())
+                .filter(|a| !a.is_empty() && a.len() <= 10)
+                .collect();
+            let primary = Some(
+                pick.primary_asset
+                    .trim()
+                    .trim_start_matches('$')
+                    .to_uppercase(),
+            )
             .filter(|p| !p.is_empty())
             .or_else(|| assets.first().cloned());
 
-        let mut snapshot = Vec::new();
-        for sym in assets.iter().take(4) {
-            if let Ok(Some(tick)) = bg_db::prices::latest(&ctx.db, sym).await {
-                snapshot.push((tick.symbol, tick.price_usd, tick.change_24h_pct));
+            let mut snapshot = Vec::new();
+            for sym in assets.iter().take(4) {
+                if let Ok(Some(tick)) = bg_db::prices::latest(&ctx.db, sym).await {
+                    snapshot.push((tick.symbol, tick.price_usd, tick.change_24h_pct));
+                }
             }
-        }
 
-        bg_db::stories::set_meta(&ctx.db, story, None, primary.as_deref(), &assets, None).await?;
+            bg_db::stories::set_meta(&ctx.db, story, None, primary.as_deref(), &assets, None)
+                .await?;
 
-        let note = if assets.is_empty() {
-            "no assets — story is not market-specific".to_string()
-        } else {
-            format!("assets: {}", assets.join(", "))
-        };
-        info!(story = %story, ?assets, "quant pass");
-        Ok(StageOutput::with(
-            MarketContext { primary_asset: primary, assets, snapshot },
-            completion,
-            note,
-        ))
-    })
+            let note = if assets.is_empty() {
+                "no assets — story is not market-specific".to_string()
+            } else {
+                format!("assets: {}", assets.join(", "))
+            };
+            info!(story = %story, ?assets, "quant pass");
+            Ok(StageOutput::with(
+                MarketContext {
+                    primary_asset: primary,
+                    assets,
+                    snapshot,
+                },
+                completion,
+                note,
+            ))
+        },
+    )
     .await
 }

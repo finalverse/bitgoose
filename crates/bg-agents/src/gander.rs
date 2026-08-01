@@ -48,9 +48,18 @@ struct Decision {
 fn schema() -> serde_json::Value {
     sch::object(
         vec![
-            ("decision", sch::enumeration_stub(&["publish", "hold", "kill"], "the call", "publish")),
-            ("front_page_rank", sch::number_range("prominence", 0.0, 100.0)),
-            ("reason", sch::string_hinted("one or two sentences", "reason")),
+            (
+                "decision",
+                sch::enumeration_stub(&["publish", "hold", "kill"], "the call", "publish"),
+            ),
+            (
+                "front_page_rank",
+                sch::number_range("prominence", 0.0, 100.0),
+            ),
+            (
+                "reason",
+                sch::string_hinted("one or two sentences", "reason"),
+            ),
         ],
         &["decision", "front_page_rank", "reason"],
     )
@@ -73,7 +82,10 @@ pub fn markers_in(body: &str) -> Vec<String> {
                 token.push(bytes[j]);
                 j += 1;
             }
-            if j < bytes.len() && !token.is_empty() && token.chars().all(|c| c.is_ascii_alphanumeric()) {
+            if j < bytes.len()
+                && !token.is_empty()
+                && token.chars().all(|c| c.is_ascii_alphanumeric())
+            {
                 if !out.contains(&token) {
                     out.push(token);
                 }
@@ -141,7 +153,11 @@ pub async fn review_desk(
                     .map(|s| s.source_slug.as_str())
                     .collect::<std::collections::HashSet<_>>()
                     .len(),
-                excerpts: c.sources.iter().filter_map(|s| s.excerpt.as_deref()).collect(),
+                excerpts: c
+                    .sources
+                    .iter()
+                    .filter_map(|s| s.excerpt.as_deref())
+                    .collect(),
                 cited_in_body: markers.contains(&marker),
             }
         })
@@ -152,7 +168,10 @@ pub async fn review_desk(
         .map(|s| SourceView {
             slug: &s.slug,
             url: &s.url,
-            body: bodies.iter().find(|(slug, _)| slug == &s.slug).map(|(_, b)| b.as_str()),
+            body: bodies
+                .iter()
+                .find(|(slug, _)| slug == &s.slug)
+                .map(|(_, b)| b.as_str()),
             linked_out: final_body.contains(&s.url),
         })
         .collect();
@@ -203,21 +222,34 @@ pub async fn review_desk(
         })
         .collect();
 
-    let decision = stage(ctx, AgentRole::Gander, Some(story), "review", |_run| async move {
-        let mut prompt = format!("Headline: {headline}\nDek: {dek}\n\nVerified claims:\n");
-        prompt.push_str(&claims_summary.join("\n"));
-        if !warnings.is_empty() {
-            prompt.push_str(&format!("\n\nPolicy warnings:\n- {}", warnings.join("\n- ")));
-        }
-        prompt.push_str("\n\nPublish, hold, or kill?");
+    let decision = stage(
+        ctx,
+        AgentRole::Gander,
+        Some(story),
+        "review",
+        |_run| async move {
+            let mut prompt = format!("Headline: {headline}\nDek: {dek}\n\nVerified claims:\n");
+            prompt.push_str(&claims_summary.join("\n"));
+            if !warnings.is_empty() {
+                prompt.push_str(&format!(
+                    "\n\nPolicy warnings:\n- {}",
+                    warnings.join("\n- ")
+                ));
+            }
+            prompt.push_str("\n\nPublish, hold, or kill?");
 
-        let req = Request::new("gander.review", ModelTier::Top, system, prompt)
-            .with_schema(schema())
-            .with_max_tokens(1_500);
-        let (d, completion) = ctx.llm.complete_json::<Decision>(&req).await?;
-        let note = format!("{}: {}", d.decision, bg_core::text::truncate_words(&d.reason, 18));
-        Ok(StageOutput::with(d, completion, note))
-    })
+            let req = Request::new("gander.review", ModelTier::Top, system, prompt)
+                .with_schema(schema())
+                .with_max_tokens(1_500);
+            let (d, completion) = ctx.llm.complete_json::<Decision>(&req).await?;
+            let note = format!(
+                "{}: {}",
+                d.decision,
+                bg_core::text::truncate_words(&d.reason, 18)
+            );
+            Ok(StageOutput::with(d, completion, note))
+        },
+    )
     .await?;
 
     match decision.decision.as_str() {
@@ -248,8 +280,13 @@ pub async fn review_desk(
             bg_db::articles::publish(&ctx.db, article.id).await?;
 
             bg_db::stories::set_kind(&ctx.db, story, StoryKind::Desk).await?;
-            bg_db::stories::set_status(&ctx.db, story, StoryStatus::Published, Some(&decision.reason))
-                .await?;
+            bg_db::stories::set_status(
+                &ctx.db,
+                story,
+                StoryStatus::Published,
+                Some(&decision.reason),
+            )
+            .await?;
             bg_db::stories::set_scores(
                 &ctx.db,
                 story,
@@ -265,12 +302,16 @@ pub async fn review_desk(
         "kill" => {
             bg_db::stories::set_status(&ctx.db, story, StoryStatus::Killed, Some(&decision.reason))
                 .await?;
-            Ok(Outcome::Killed { reason: decision.reason })
+            Ok(Outcome::Killed {
+                reason: decision.reason,
+            })
         }
         _ => {
             bg_db::stories::set_status(&ctx.db, story, StoryStatus::Held, Some(&decision.reason))
                 .await?;
-            Ok(Outcome::Held { reason: decision.reason })
+            Ok(Outcome::Held {
+                reason: decision.reason,
+            })
         }
     }
 }
@@ -317,7 +358,11 @@ pub async fn publish_wire(ctx: &Ctx, story: StoryId, summary: &str) -> Result<Ou
     let report = policy::review(&candidate, &PolicyConfig::default());
     bg_db::violations::record(&ctx.db, &report, Some(story), None, None).await?;
     if !report.passed() {
-        let reason = report.blocks().map(|v| v.detail.clone()).collect::<Vec<_>>().join("; ");
+        let reason = report
+            .blocks()
+            .map(|v| v.detail.clone())
+            .collect::<Vec<_>>()
+            .join("; ");
         bg_db::stories::set_status(&ctx.db, story, StoryStatus::Held, Some(&reason)).await?;
         return Ok(Outcome::Held { reason });
     }

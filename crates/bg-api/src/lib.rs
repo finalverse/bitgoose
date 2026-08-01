@@ -11,6 +11,7 @@
 
 pub mod mcp;
 pub mod rest;
+pub mod syndication;
 
 use axum::Router;
 use bg_db::Db;
@@ -27,8 +28,14 @@ pub fn router(db: Db) -> Router {
     Router::new()
         .merge(rest::routes())
         .merge(mcp::routes())
+        .merge(syndication::routes())
         // Open CORS: this is a public read-only API meant to be called from
         // anywhere, including other people's browsers and agents.
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .with_state(state)
 }

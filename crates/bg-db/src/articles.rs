@@ -128,7 +128,9 @@ pub async fn citations(db: &Db, article: ArticleId) -> Result<Vec<(String, Claim
     .bind(article.into_uuid())
     .fetch_all(&db.pool)
     .await?;
-    rows.iter().map(|r| Ok((r.try_get("marker")?, claim_id(r, "claim_id")?))).collect()
+    rows.iter()
+        .map(|r| Ok((r.try_get("marker")?, claim_id(r, "claim_id")?)))
+        .collect()
 }
 
 // -- corrections ------------------------------------------------------------

@@ -26,7 +26,9 @@ pub fn words(s: &str) -> Vec<String> {
 
 /// Word count as the policy engine counts it.
 pub fn word_count(s: &str) -> usize {
-    s.split_whitespace().filter(|w| !w.trim().is_empty()).count()
+    s.split_whitespace()
+        .filter(|w| !w.trim().is_empty())
+        .count()
 }
 
 /// Truncates to at most `max` words, appending an ellipsis if it cut anything.
@@ -156,7 +158,11 @@ pub fn longest_common_word_run(a: &str, b: &str) -> usize {
     let mut best = 0usize;
     for i in 1..=wa.len() {
         for j in 1..=wb.len() {
-            cur[j] = if wa[i - 1] == wb[j - 1] { prev[j - 1] + 1 } else { 0 };
+            cur[j] = if wa[i - 1] == wb[j - 1] {
+                prev[j - 1] + 1
+            } else {
+                0
+            };
             if cur[j] > best {
                 best = cur[j];
             }
@@ -186,7 +192,9 @@ pub fn strip_html(s: &str) -> String {
             _ => {}
         }
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    out.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
         .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
@@ -214,7 +222,11 @@ mod tests {
     #[test]
     fn simhash_survives_the_empty_string() {
         assert_eq!(simhash64(""), 0);
-        assert_eq!(simhash64("the and of"), 0, "all-stopword input has no signal");
+        assert_eq!(
+            simhash64("the and of"),
+            0,
+            "all-stopword input has no signal"
+        );
     }
 
     #[test]

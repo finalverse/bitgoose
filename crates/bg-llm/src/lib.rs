@@ -34,10 +34,17 @@ pub type Result<T, E = LlmError> = std::result::Result<T, E>;
 #[derive(Debug, Error)]
 pub enum LlmError {
     #[error("{provider} returned HTTP {status}: {body}")]
-    Api { provider: &'static str, status: u16, body: String },
+    Api {
+        provider: &'static str,
+        status: u16,
+        body: String,
+    },
 
     #[error("{provider} is not configured: {reason}")]
-    NotConfigured { provider: &'static str, reason: String },
+    NotConfigured {
+        provider: &'static str,
+        reason: String,
+    },
 
     /// The model declined on safety grounds. A normal HTTP 200 — not a
     /// transport failure — so it is modelled as its own variant rather than
@@ -92,7 +99,12 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn new(task: impl Into<String>, tier: ModelTier, system: impl Into<String>, user: impl Into<String>) -> Self {
+    pub fn new(
+        task: impl Into<String>,
+        tier: ModelTier,
+        system: impl Into<String>,
+        user: impl Into<String>,
+    ) -> Self {
         Self {
             system: system.into(),
             user: user.into(),
@@ -176,7 +188,10 @@ pub struct Llm {
 
 impl Llm {
     pub fn new(chain: Vec<Arc<dyn LlmProvider>>) -> Self {
-        assert!(!chain.is_empty(), "LLM chain must have at least one provider");
+        assert!(
+            !chain.is_empty(),
+            "LLM chain must have at least one provider"
+        );
         Self { chain }
     }
 
@@ -190,7 +205,12 @@ impl Llm {
         let fallback = std::env::var("BG_LLM_FALLBACK").unwrap_or_default();
 
         let mut names: Vec<String> = vec![primary];
-        names.extend(fallback.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+        names.extend(
+            fallback
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        );
         names.dedup();
 
         let mut chain: Vec<Arc<dyn LlmProvider>> = Vec::new();
@@ -245,7 +265,8 @@ impl Llm {
             }
         }
         Err(LlmError::AllProvidersFailed(
-            last.map(|e| e.to_string()).unwrap_or_else(|| "empty chain".into()),
+            last.map(|e| e.to_string())
+                .unwrap_or_else(|| "empty chain".into()),
         ))
     }
 
@@ -263,7 +284,9 @@ impl Llm {
 
 impl std::fmt::Debug for Llm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Llm").field("chain", &self.provider_names()).finish()
+        f.debug_struct("Llm")
+            .field("chain", &self.provider_names())
+            .finish()
     }
 }
 
@@ -284,16 +307,38 @@ mod tests {
 
     #[test]
     fn refusals_and_schema_violations_are_not_retried() {
-        assert!(!LlmError::Refused { category: "cyber".into() }.is_retryable());
+        assert!(!LlmError::Refused {
+            category: "cyber".into()
+        }
+        .is_retryable());
         assert!(!LlmError::SchemaViolation("missing field".into()).is_retryable());
-        assert!(!LlmError::BadJson { detail: "x".into(), raw: String::new() }.is_retryable());
+        assert!(!LlmError::BadJson {
+            detail: "x".into(),
+            raw: String::new()
+        }
+        .is_retryable());
     }
 
     #[test]
     fn rate_limits_and_server_errors_are_retried() {
-        assert!(LlmError::Api { provider: "anthropic", status: 429, body: String::new() }.is_retryable());
-        assert!(LlmError::Api { provider: "anthropic", status: 529, body: String::new() }.is_retryable());
-        assert!(!LlmError::Api { provider: "anthropic", status: 400, body: String::new() }.is_retryable());
+        assert!(LlmError::Api {
+            provider: "anthropic",
+            status: 429,
+            body: String::new()
+        }
+        .is_retryable());
+        assert!(LlmError::Api {
+            provider: "anthropic",
+            status: 529,
+            body: String::new()
+        }
+        .is_retryable());
+        assert!(!LlmError::Api {
+            provider: "anthropic",
+            status: 400,
+            body: String::new()
+        }
+        .is_retryable());
     }
 
     #[tokio::test]
@@ -309,14 +354,21 @@ mod tests {
                 pricing::STUB
             }
             async fn complete(&self, _: &Request) -> Result<Completion> {
-                Err(LlmError::Api { provider: "broken", status: 503, body: "down".into() })
+                Err(LlmError::Api {
+                    provider: "broken",
+                    status: 503,
+                    body: "down".into(),
+                })
             }
             async fn health(&self) -> Result<()> {
                 Ok(())
             }
         }
 
-        let llm = Llm::new(vec![Arc::new(Broken), Arc::new(stub::StubProvider::default())]);
+        let llm = Llm::new(vec![
+            Arc::new(Broken),
+            Arc::new(stub::StubProvider::default()),
+        ]);
         let req = Request::new("t", ModelTier::Fast, "sys", "user");
         let out = llm.complete(&req).await.unwrap();
         assert_eq!(out.provider, "stub", "should have fallen through");
@@ -334,14 +386,19 @@ mod tests {
                 pricing::STUB
             }
             async fn complete(&self, _: &Request) -> Result<Completion> {
-                Err(LlmError::Refused { category: "cyber".into() })
+                Err(LlmError::Refused {
+                    category: "cyber".into(),
+                })
             }
             async fn health(&self) -> Result<()> {
                 Ok(())
             }
         }
 
-        let llm = Llm::new(vec![Arc::new(Refuser), Arc::new(stub::StubProvider::default())]);
+        let llm = Llm::new(vec![
+            Arc::new(Refuser),
+            Arc::new(stub::StubProvider::default()),
+        ]);
         let req = Request::new("t", ModelTier::Fast, "sys", "user");
         assert!(matches!(
             llm.complete(&req).await,
