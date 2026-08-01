@@ -218,6 +218,19 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
     Ok(stories.iter().map(|s| card(s, None)).collect())
 }
 
+#[server(name = GetSection, prefix = "/rpc")]
+pub async fn get_section(category: String) -> Result<(String, Vec<StoryCard>), ServerFnError> {
+    use std::str::FromStr;
+    let db = db();
+    let cat = bg_core::domain::Category::from_str(&category)
+        .map_err(|_| ServerFnError::new(format!("no such section: {category}")))?;
+    let stories = bg_db::stories::by_category(db, cat, 60).await.map_err(e)?;
+    Ok((
+        cat.label().to_string(),
+        stories.iter().map(|s| card(s, None)).collect(),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // story page
 // ---------------------------------------------------------------------------

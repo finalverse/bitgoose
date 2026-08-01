@@ -55,6 +55,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/") view=pages::Home />
                     <Route path=path!("/wire") view=pages::Wire />
                     <Route path=path!("/desk") view=pages::Desk />
+                    <Route path=path!("/section/:category") view=pages::Section />
                     <Route path=path!("/story/:slug") view=pages::Story />
                     <Route path=path!("/flock") view=pages::Flock />
                     <Route path=path!("/prices") view=pages::Prices />

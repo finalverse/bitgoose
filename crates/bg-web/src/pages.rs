@@ -154,6 +154,7 @@ pub fn Desk() -> impl IntoView {
                      Each one decomposes into individual claims you can check."
                 </p>
             </div>
+            <SectionNav />
             {loaded!(
                 data,
                 |stories| {
@@ -195,6 +196,7 @@ pub fn Wire() -> impl IntoView {
                      straight back to whoever did the reporting."
                 </p>
             </div>
+            <SectionNav />
             {loaded!(
                 data,
                 |stories| {
@@ -255,6 +257,78 @@ fn WireRow(story: StoryCard) -> impl IntoView {
                 </div>
             </div>
         </article>
+    }
+}
+
+/// A section (desk) page — Markets, Policy, DeFi and so on.
+///
+/// Every card's kicker links here. Without these pages a reader who wants only
+/// policy coverage has no way to get it, which is table stakes for a news site.
+#[component]
+pub fn Section() -> impl IntoView {
+    let params = use_params_map();
+    let data = Resource::new(
+        move || params.read().get("category").unwrap_or_default(),
+        get_section,
+    );
+    view! {
+        {loaded!(
+            data,
+            |pair| {
+                let (label, stories) = pair;
+                view! {
+                    <Title text=format!("{label} — BitGoose") />
+                    <div class="shell page">
+                        <div class="page-head">
+                            <h1>{label.clone()}</h1>
+                            <p class="lede">
+                                {format!("Everything the newsroom has filed under {label}.")}
+                            </p>
+                        </div>
+                        <SectionNav />
+                        {if stories.is_empty() {
+                            view! {
+                                <Empty
+                                    message="Nothing filed to this section yet."
+                                    hint="bg run"
+                                />
+                            }
+                                .into_any()
+                        } else {
+                            view! {
+                                <div class="card-grid">
+                                    {stories
+                                        .into_iter()
+                                        .map(|s| view! { <Card story=s /> })
+                                        .collect_view()}
+                                </div>
+                            }
+                                .into_any()
+                        }}
+                    </div>
+                }
+            }
+        )}
+    }
+}
+
+/// Chips for every section. Rendered from the enum so a new desk cannot be
+/// added to the domain and silently left out of the navigation.
+#[component]
+pub fn SectionNav() -> impl IntoView {
+    view! {
+        <div class="chip-row" style="margin-bottom:1.5rem">
+            {bg_core::domain::Category::ALL
+                .iter()
+                .map(|c| {
+                    view! {
+                        <a class="chip" href=format!("/section/{}", c.as_str())>
+                            {c.label()}
+                        </a>
+                    }
+                })
+                .collect_view()}
+        </div>
     }
 }
 

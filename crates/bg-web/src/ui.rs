@@ -238,7 +238,7 @@ pub fn Card(story: StoryCard) -> impl IntoView {
     view! {
         <article class="card">
             <div class="meta">
-                <a href=format!("/#{}", story.category) class="kicker">
+                <a href=format!("/section/{}", story.category) class="kicker">
                     {story.category_label.clone()}
                 </a>
                 <span class="dot">"·"</span>

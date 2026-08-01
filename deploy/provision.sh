@@ -122,19 +122,32 @@ else
 fi
 
 # -- rust (as the service user, not root) -----------------------------------
-if [ ! -x "$APP_HOME/.cargo/bin/cargo" ]; then
+# Tested by actually running `cargo --version`, not by the binary existing:
+# rustup drops a shim at that path before the toolchain finishes downloading,
+# so an interrupted install leaves a cargo that is present but unusable, and an
+# existence check would skip right past it.
+if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo" --version >/dev/null 2>&1; then
   log "installing rust toolchain for $APP_USER"
   sudo -u "$APP_USER" -H bash -lc \
     "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path" \
-    >/dev/null
-  sudo -u "$APP_USER" -H bash -lc "$APP_HOME/.cargo/bin/rustup target add wasm32-unknown-unknown" >/dev/null
+    >/dev/null 2>&1 || true
+  # Repair the case where rustup is present but has no default toolchain.
+  sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/rustup" default stable >/dev/null 2>&1 || true
 fi
-echo "    $($APP_HOME/.cargo/bin/cargo --version)"
+echo "    $(sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo" --version 2>&1)"
 
-if [ ! -x "$APP_HOME/.cargo/bin/cargo-leptos" ]; then
-  log "installing cargo-leptos (this takes a few minutes)"
-  sudo -u "$APP_USER" -H bash -lc "$APP_HOME/.cargo/bin/cargo install --locked cargo-leptos" >/dev/null 2>&1
+if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/rustup" target list --installed 2>/dev/null | grep -q wasm32; then
+  log "adding wasm32 target"
+  sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/rustup" target add wasm32-unknown-unknown >/dev/null 2>&1
 fi
-echo "    $($APP_HOME/.cargo/bin/cargo-leptos --version 2>&1 | head -1)"
+echo "    wasm32 target present"
+
+if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version >/dev/null 2>&1; then
+  log "installing cargo-leptos (several minutes)"
+  sudo -u "$APP_USER" -H bash -lc \
+    "PATH=$APP_HOME/.cargo/bin:\$PATH CARGO_HOME=$APP_HOME/.cargo $APP_HOME/.cargo/bin/cargo install --locked cargo-leptos" \
+    >/dev/null 2>&1
+fi
+echo "    $(sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version 2>&1 | head -1)"
 
 log "provision complete"
