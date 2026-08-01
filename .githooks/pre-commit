@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# Block commits that contain credentials.
+#
+# Scans the *staged patch* rather than the working tree, so it catches a secret
+# that was added and then reverted on disk — and it costs nothing on a commit
+# that touches no matching lines.
+#
+# Install:  git config core.hooksPath .githooks
+# Bypass:   git commit --no-verify   (do not)
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+fail=0
+red() { printf '\033[31m%s\033[0m\n' "$1"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# -- 1. files that must never be committed at all ---------------------------
+while IFS= read -r f; do
+  case "$f" in
+    .env|.env.*)
+      [ "$f" = ".env.example" ] && continue
+      red "BLOCKED: $f is an environment file and must never be committed."
+      fail=1
+      ;;
+    *.pem|*.key|*.p12|*.pfx|id_rsa*|id_ed25519*|.netrc|*.keystore)
+      red "BLOCKED: $f looks like a credential file."
+      fail=1
+      ;;
+  esac
+done <<< "$staged"
+
+# -- 2. credential patterns in added lines ----------------------------------
+# Only `+` lines are scanned: removing a secret should never be blocked.
+added=$(git diff --cached -U0 | grep '^+' | grep -v '^+++' || true)
+
+scan() {
+  local label="$1" pattern="$2"
+  local hits
+  hits=$(printf '%s\n' "$added" | grep -nEo "$pattern" 2>/dev/null | head -3 || true)
+  if [ -n "$hits" ]; then
+    red "BLOCKED: possible $label in staged changes:"
+    # Print only a prefix — echoing the whole secret into a terminal and shell
+    # history would defeat the point of catching it.
+    printf '%s\n' "$hits" | sed -E 's/(.{24}).*/\1…/' | sed 's/^/    /'
+    fail=1
+  fi
+}
+
+scan "GitHub personal access token"  'gh[pousr]_[A-Za-z0-9]{30,}'
+scan "GitHub fine-grained token"     'github_pat_[A-Za-z0-9_]{50,}'
+scan "Anthropic API key"             'sk-ant-[A-Za-z0-9_-]{20,}'
+scan "OpenAI API key"                'sk-[A-Za-z0-9]{40,}'
+scan "AWS access key id"             'AKIA[0-9A-Z]{16}'
+scan "Slack token"                   'xox[baprs]-[A-Za-z0-9-]{10,}'
+scan "private key block"             'BEGIN [A-Z ]*PRIVATE KEY'
+scan "credential in a URL"           'https?://[A-Za-z0-9._~-]+:[^@/[:space:]]+@'
+
+# -- 3. hard-coded connection strings with a real password ------------------
+# The local docker-compose default is fine; anything else is suspicious.
+pg=$(printf '%s\n' "$added" | grep -oE 'postgres(ql)?://[^[:space:]"'"'"']+' | grep -v 'bitgoose:bitgoose@127.0.0.1' | grep -v 'bitgoose:bitgoose@localhost' | head -3 || true)
+if [ -n "$pg" ]; then
+  yellow "WARNING: non-default Postgres URL in staged changes:"
+  printf '%s\n' "$pg" | sed -E 's#://[^@]*@#://***@#' | sed 's/^/    /'
+  yellow "  If the password is real, move it to .env and commit only .env.example."
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  red "Commit aborted. Move the secret into .env (which is gitignored)."
+  red "If a secret was already pushed, REVOKE IT — removing the commit is not enough."
+  exit 1
+fi
+
+exit 0

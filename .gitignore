@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Secrets. Nothing in this block may ever be committed.
+#
+# `.env.*` is deny-all-then-allow rather than an explicit deny list: a new
+# `.env.production` created six months from now is ignored by default instead
+# of being committed because nobody remembered to add a rule for it.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# credentials of every shape
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id_rsa*
+id_ed25519*
+*.ppk
+.netrc
+.npmrc
+credentials
+credentials.json
+secrets.json
+secrets.yaml
+secrets.yml
+*.secret
+*_secret*
+*.token
+.ssh/
+.gnupg/
+
+# deploy artefacts that tend to embed hosts and keys
+deploy/*.local.sh
+deploy/*.env
+ansible/inventory
+terraform.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ---------------------------------------------------------------------------
+# build output
+# ---------------------------------------------------------------------------
+/target
+/web-target
+**/*.rs.bk
+Cargo.lock.bak
+
+# cargo-leptos
+/target/site
+/target/front
+/style/main.css
+/style/main.css.map
+
+# ---------------------------------------------------------------------------
+# local noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+node_modules/
+*.log
+*.pid
+/tmp/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~

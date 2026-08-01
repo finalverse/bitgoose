@@ -1,0 +1,26 @@
+name: bitgoose
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: bitgoose-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bitgoose
+      POSTGRES_PASSWORD: bitgoose
+      POSTGRES_DB: bitgoose
+      # deterministic collation so slugs/sorts behave the same everywhere
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      # 55432 is taken by another project's Postgres on this machine.
+      - "55434:5432"
+    volumes:
+      - bitgoose-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bitgoose -d bitgoose"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  bitgoose-pgdata:

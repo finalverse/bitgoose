@@ -1,0 +1,19 @@
+[package]
+name = "bg-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "BitGoose domain model, editorial policy engine and text primitives. WASM-safe."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+rust_decimal.workspace = true
+
+# NOTE: this crate is compiled to wasm32-unknown-unknown as part of the Leptos
+# hydrate build. Do NOT add tokio, sqlx, reqwest or any other native-only
+# dependency here. `just check-wasm` guards this.

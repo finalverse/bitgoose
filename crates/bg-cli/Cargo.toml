@@ -1,0 +1,28 @@
+[package]
+name = "bg-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "BitGoose operations CLI."
+
+[[bin]]
+name = "bg"
+path = "src/main.rs"
+
+[dependencies]
+bg-core.workspace = true
+bg-db.workspace = true
+bg-llm.workspace = true
+bg-ingest.workspace = true
+bg-agents.workspace = true
+tokio.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true

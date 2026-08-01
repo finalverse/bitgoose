@@ -1,0 +1,29 @@
+[package]
+name = "bg-agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The BitGoose Flock: ten AI agents and the newsroom pipeline that runs them."
+
+[dependencies]
+bg-core.workspace = true
+bg-db.workspace = true
+bg-llm.workspace = true
+bg-ingest.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+futures.workspace = true
+sha2.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+sqlx.workspace = true
