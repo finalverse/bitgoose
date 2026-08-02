@@ -346,6 +346,15 @@ pub async fn publish_wire(ctx: &Ctx, story: StoryId, summary: &str) -> Result<Ou
     }
     let body = finalize_body(summary, &source_refs);
 
+    // The Desk path passes source bodies here; the Wire path passed `None`,
+    // which quietly disabled the one check that matters most for an aggregator.
+    // `policy::review` was still running — it just had nothing to compare the
+    // summary against, so the verbatim-overlap tripwire could never fire and a
+    // summary that lifted a publisher's sentence wholesale would sail through.
+    // The Wire is precisely where that risk lives: it is the surface built to
+    // retell other people's reporting.
+    let bodies = bg_db::items::bodies_for_story(&ctx.db, story).await?;
+
     let candidate = PublishCandidate {
         kind: StoryKind::Wire,
         headline: &bg_db::stories::by_id(&ctx.db, story).await?.title,
@@ -358,7 +367,10 @@ pub async fn publish_wire(ctx: &Ctx, story: StoryId, summary: &str) -> Result<Ou
             .map(|s| SourceView {
                 slug: &s.slug,
                 url: &s.url,
-                body: None,
+                body: bodies
+                    .iter()
+                    .find(|(slug, _)| slug == &s.slug)
+                    .map(|(_, b)| b.as_str()),
                 linked_out: body.contains(&s.url),
             })
             .collect(),
