@@ -83,10 +83,32 @@ echo "    revision $(cat "$RELEASE/REVISION" 2>/dev/null | cut -c1-12), built $(
 # Before the switch, so a failing migration stops the deploy while the
 # previous release is still serving.
 log "applying migrations"
-sudo -u "$APP_USER" env $(grep -v '^#' "$APP_HOME/shared/bitgoose.env" | grep . | xargs -d '\n') \
-  "$RELEASE/bin/bg" migrate
-sudo -u "$APP_USER" env $(grep -v '^#' "$APP_HOME/shared/bitgoose.env" | grep . | xargs -d '\n') \
-  "$RELEASE/bin/bg" seed
+
+# The env file is sourced *inside* the child, never expanded into the command
+# line. The previous form —
+#     sudo -u bg env $(grep -v '^#' "$ENV_FILE" | ...) "$BG" migrate
+# — put DATABASE_URL, password and all, into argv. sudo logs every command it
+# runs to the journal, so the production database password was written to
+# /var/log/journal in cleartext (readable by anyone in `adm`, which includes the
+# service account itself), and was visible in /proc/<pid>/cmdline to every local
+# user for as long as the process lived.
+#
+# `set -a` exports each assignment as it is read, so `bg` receives exactly the
+# same environment as the systemd units, which use EnvironmentFile= and never
+# had this problem.
+run_as_app() {
+  sudo -u "$APP_USER" bash -c '
+    set -a
+    # shellcheck disable=SC1090
+    . "$1"
+    set +a
+    shift
+    exec "$@"
+  ' _ "$APP_HOME/shared/bitgoose.env" "$@"
+}
+
+run_as_app "$RELEASE/bin/bg" migrate
+run_as_app "$RELEASE/bin/bg" seed
 
 # -- activate ---------------------------------------------------------------
 log "activating"
