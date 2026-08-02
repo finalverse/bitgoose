@@ -40,6 +40,17 @@ jobs:
         with:
           tool: cargo-leptos@0.3.7
 
+      # cargo-leptos fetches dart-sass-<ver>-linux-x64-MUSL for any x86_64
+      # Linux, and the `sass` wrapper it ships execs a musl-linked `src/dart`.
+      # On a glibc runner that fails as
+      #     exec: .../dart-sass/src/dart: not found
+      # which reads like a missing file but is the kernel reporting a missing
+      # ELF interpreter. Installing the musl loader makes the binary runnable.
+      # This is the whole reason the release bundle would not build while every
+      # cargo build in it succeeded.
+      - name: Install musl loader for cargo-leptos' dart-sass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl
+
       # Builds the server binary and the WASM/CSS bundle in one pass. Building
       # them separately risks a skew between the hydration bundle and the
       # server that renders the markup it hydrates.
