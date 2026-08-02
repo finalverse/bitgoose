@@ -10,7 +10,7 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-APP_USER="bitgoose"
+APP_USER="bg"
 APP_HOME="/opt/bitgoose"
 
 log() { printf '\n\033[1;33m==> %s\033[0m\n' "$1"; }
@@ -38,17 +38,23 @@ apt-get install -y -qq --no-install-recommends \
 
 systemctl enable --now postgresql
 
-# -- service user -----------------------------------------------------------
-# A dedicated unprivileged user: the newsroom fetches untrusted content from
-# the open internet all day, so it should own as little as possible.
+# -- service account --------------------------------------------------------
+# Runs as an existing login account by request. Note the tradeoff: the newsroom
+# fetches and parses untrusted content from the open internet continuously, and
+# a dedicated nologin service user would confine a parser bug to an account
+# that owns nothing else. The systemd hardening in the unit files is doing more
+# of that work as a result.
+#
+# The account must already exist — this script will not create or reshape a
+# login user.
 if ! id -u "$APP_USER" >/dev/null 2>&1; then
-  log "creating service user $APP_USER"
-  useradd --system --create-home --home-dir "$APP_HOME" --shell /usr/sbin/nologin "$APP_USER"
-else
-  log "service user $APP_USER already exists"
+  echo "user '$APP_USER' does not exist; create it before provisioning" >&2
+  exit 1
 fi
+log "running as existing account $APP_USER"
+APP_GROUP="$(id -gn "$APP_USER")"
 mkdir -p "$APP_HOME"/{releases,shared}
-chown -R "$APP_USER:$APP_USER" "$APP_HOME"
+chown -R "$APP_USER:$APP_GROUP" "$APP_HOME"
 
 # -- database ---------------------------------------------------------------
 log "configuring database"
@@ -62,7 +68,7 @@ if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER
   sudo -u postgres psql -qc "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';"
   echo "$DB_PASS" > "$APP_HOME/shared/.dbpass"
   chmod 600 "$APP_HOME/shared/.dbpass"
-  chown "$APP_USER:$APP_USER" "$APP_HOME/shared/.dbpass"
+  chown "$APP_USER:$APP_GROUP" "$APP_HOME/shared/.dbpass"
   echo "    created role ${DB_USER} with a generated password"
 else
   DB_PASS="$(cat "$APP_HOME/shared/.dbpass" 2>/dev/null || true)"
@@ -72,7 +78,7 @@ else
     sudo -u postgres psql -qc "ALTER ROLE ${DB_USER} PASSWORD '${DB_PASS}';"
     echo "$DB_PASS" > "$APP_HOME/shared/.dbpass"
     chmod 600 "$APP_HOME/shared/.dbpass"
-    chown "$APP_USER:$APP_USER" "$APP_HOME/shared/.dbpass"
+    chown "$APP_USER:$APP_GROUP" "$APP_HOME/shared/.dbpass"
     echo "    rotated password for existing role ${DB_USER}"
   else
     echo "    role ${DB_USER} already present"
@@ -120,7 +126,7 @@ BG_INGEST_CONCURRENCY=4
 RUST_LOG=info,sqlx=warn
 ENVEOF
   chmod 600 "$ENV_FILE"
-  chown "$APP_USER:$APP_USER" "$ENV_FILE"
+  chown "$APP_USER:$APP_GROUP" "$ENV_FILE"
 else
   log "$ENV_FILE already exists — leaving it alone"
 fi
@@ -177,7 +183,7 @@ if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version >/dev/
         tar xzf "$tmp/$asset" -C "$tmp"
         bin="$(find "$tmp" -maxdepth 2 -name cargo-leptos -type f | head -1)"
         if [ -n "$bin" ]; then
-          install -m 755 -o "$APP_USER" -g "$APP_USER" "$bin" "$APP_HOME/.cargo/bin/cargo-leptos"
+          install -m 755 -o "$APP_USER" -g "$APP_GROUP" "$bin" "$APP_HOME/.cargo/bin/cargo-leptos"
           installed=1
         fi
       else
@@ -196,7 +202,7 @@ if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version >/dev/
     # user's home, which a uid switch does not carry over.
     systemctl reset-failed bg-leptos-install 2>/dev/null || true
     systemd-run --unit=bg-leptos-install --collect --wait \
-      --uid="$APP_USER" --gid="$APP_USER" \
+      --uid="$APP_USER" --gid="$APP_GROUP" \
       --setenv=HOME="$APP_HOME" \
       --setenv=PATH="$APP_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin" \
       --setenv=CARGO_HOME="$APP_HOME/.cargo" \

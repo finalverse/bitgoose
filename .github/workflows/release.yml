@@ -1,0 +1,89 @@
+name: Build release bundle
+
+# Builds the deployable bundle on GitHub's runners and publishes it as a
+# release asset.
+#
+# Why: the production host is behind a slow consumer uplink (~12 KB/s measured).
+# Building there means pulling ~400 MB of crates, which is most of a day. One
+# ~40 MB self-contained tarball is a few minutes instead, and it makes every
+# deploy a download-and-symlink rather than a compile — so a rollback costs
+# nothing and the host needs no Rust toolchain at all.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish the bundle under"
+        required: false
+        default: "nightly"
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: Build bundle (x86_64-linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-leptos
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-leptos@0.3.7
+
+      # Builds the server binary and the WASM/CSS bundle in one pass. Building
+      # them separately risks a skew between the hydration bundle and the
+      # server that renders the markup it hydrates.
+      - name: Build site
+        run: cargo leptos build --release
+
+      - name: Build CLI
+        run: cargo build --release -p bg-cli
+
+      - name: Assemble bundle
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/bin
+          cp target/release/bg-web bundle/bin/
+          cp target/release/bg     bundle/bin/
+          cp -r target/site        bundle/site
+          cp -r migrations         bundle/migrations
+          git rev-parse HEAD > bundle/REVISION
+          date -u +%Y-%m-%dT%H:%M:%SZ > bundle/BUILT_AT
+          strip bundle/bin/bg-web bundle/bin/bg || true
+          tar czf bitgoose-x86_64-linux.tar.gz -C bundle .
+          sha256sum bitgoose-x86_64-linux.tar.gz > bitgoose-x86_64-linux.tar.gz.sha256
+          ls -lh bitgoose-x86_64-linux.tar.gz
+          cat bitgoose-x86_64-linux.tar.gz.sha256
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitgoose-x86_64-linux
+          path: |
+            bitgoose-x86_64-linux.tar.gz
+            bitgoose-x86_64-linux.tar.gz.sha256
+          retention-days: 30
+
+      # A release asset gives the host a stable URL it can curl directly,
+      # which a workflow artifact does not (those need an authenticated API
+      # call to fetch).
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: BitGoose ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            bitgoose-x86_64-linux.tar.gz
+            bitgoose-x86_64-linux.tar.gz.sha256
+          generate_release_notes: true
+          prerelease: ${{ github.event.inputs.tag == 'nightly' }}

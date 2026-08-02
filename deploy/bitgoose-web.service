@@ -7,8 +7,8 @@ Requires=postgresql.service
 
 [Service]
 Type=simple
-User=bitgoose
-Group=bitgoose
+User=bg
+Group=bg
 WorkingDirectory=/opt/bitgoose/current
 EnvironmentFile=/opt/bitgoose/shared/bitgoose.env
 ExecStart=/opt/bitgoose/current/bin/bg-web
