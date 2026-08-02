@@ -61,6 +61,16 @@ enum Cmd {
         #[arg(long, default_value_t = 10)]
         limit: i64,
     },
+    /// Write summaries for Wire stories published without one.
+    ///
+    /// Everything published while the offline stub was the only provider has a
+    /// story page consisting of a headline and a source list, because the
+    /// stub's summaries only restated the headline and were dropped. This
+    /// re-runs Herald over them with whatever provider is now configured.
+    RefreshWire {
+        #[arg(long, default_value_t = 25)]
+        limit: i64,
+    },
 }
 
 #[tokio::main]
@@ -170,6 +180,27 @@ async fn main() -> Result<()> {
             let ctx = context(&url, None).await?;
             let n = bg_agents::ombuds::run(&ctx, limit).await?;
             println!("{n} correction(s) issued");
+        }
+        Cmd::RefreshWire { limit } => {
+            let ctx = context(&url, None).await?;
+            let stories = bg_db::stories::needing_summary(&ctx.db, limit).await?;
+            println!("{} wire stor(ies) without a summary", stories.len());
+            let (mut done, mut failed) = (0usize, 0usize);
+            for s in &stories {
+                // One story's model failing must not abandon the rest of the
+                // batch; local inference is slow enough that a rerun is costly.
+                match bg_agents::herald::run(&ctx, s.id).await {
+                    Ok(_) => {
+                        done += 1;
+                        println!("  ok   {}", s.slug);
+                    }
+                    Err(e) => {
+                        failed += 1;
+                        println!("  FAIL {} — {e}", s.slug);
+                    }
+                }
+            }
+            println!("{done} refreshed, {failed} failed");
         }
     }
 

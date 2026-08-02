@@ -183,6 +183,25 @@ pub async fn open(db: &Db, limit: i64) -> Result<Vec<Story>> {
     rows.iter().map(from_row).collect()
 }
 
+/// Published Wire stories that never got a usable summary, newest first.
+///
+/// The offline stub could only restate the headline, and a dek that restates
+/// the headline is dropped at publish time — which leaves the story page with
+/// nothing on it but a source list. These are the ones worth re-running once a
+/// real model is reachable.
+pub async fn needing_summary(db: &Db, limit: i64) -> Result<Vec<Story>> {
+    let rows = crate::sql(format!(
+        "SELECT {COLS} FROM stories
+         WHERE status = 'published' AND kind = 'wire'
+           AND coalesce(length(summary), 0) = 0
+         ORDER BY published_at DESC LIMIT $1"
+    ))
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+    rows.iter().map(from_row).collect()
+}
+
 /// Published stories of a given kind, newest first.
 pub async fn published(
     db: &Db,
