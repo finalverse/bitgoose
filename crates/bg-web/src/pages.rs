@@ -577,7 +577,7 @@ fn ClaimBlock(claim: ClaimCard) -> impl IntoView {
 #[component]
 fn ProvenanceStrip(runs: Vec<RunLine>) -> impl IntoView {
     if runs.is_empty() {
-        return view! {}.into_any();
+        return None::<AnyView>.into_any();
     }
     view! {
         <section class="mt-2">

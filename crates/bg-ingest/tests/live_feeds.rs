@@ -11,6 +11,17 @@
 //! no duplicate keys.
 //!
 //! Skips cleanly when Postgres or the network is unavailable.
+//!
+//! **`#[ignore]` by default.** Its assertions are about other people's servers,
+//! so as a merge gate it reports the wrong thing: several of these publishers
+//! sit behind Cloudflare and answer 403 to datacenter IPs, which turns every CI
+//! run red for a reason that has nothing to do with the code under test. It is
+//! a monitor, not a gate. CI runs it in a separate non-blocking job, and it is
+//! run on demand locally with:
+//!
+//! ```text
+//! cargo test -p bg-ingest --test live_feeds -- --ignored --nocapture
+//! ```
 
 use bg_db::Db;
 use bg_ingest::{feeds, http, market, seed};
@@ -44,6 +55,7 @@ async fn setup() -> Option<Db> {
 }
 
 #[tokio::test]
+#[ignore = "hits live third-party feeds; run explicitly (see module docs)"]
 async fn real_feeds_ingest_end_to_end() {
     let Some(db) = setup().await else {
         eprintln!("SKIP: no Postgres");

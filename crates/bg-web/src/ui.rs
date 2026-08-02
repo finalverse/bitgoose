@@ -202,7 +202,10 @@ pub fn Change(value: Option<f64>) -> impl IntoView {
 #[component]
 pub fn Ticker(prices: Vec<Tick>) -> impl IntoView {
     if prices.is_empty() {
-        return view! {}.into_any();
+        // `view! {}` is a unit expression, which clippy rejects. `None` over an
+        // AnyView is the idiomatic "render nothing" and is genuinely clearer
+        // about the intent.
+        return None::<AnyView>.into_any();
     }
     // The marquee translates by -50%, so the list is rendered twice to make the
     // wrap seamless rather than snapping back to the start.

@@ -53,7 +53,49 @@ jobs:
       - name: Unit and integration tests
         # Single-threaded: the integration tests create and drop their own
         # scratch databases, and parallel runs would race on them.
-        run: cargo test --workspace -- --test-threads=1
+        shell: bash
+        run: |
+          set -o pipefail   # not on by default in Actions' bash; `tee` would eat the failure
+          cargo test --workspace -- --test-threads=1 2>&1 | tee /tmp/test.log
+
+      # Reading this repo's Actions logs requires a signed-in session. Check-run
+      # annotations are public, so on failure the tail is re-emitted as an error
+      # and becomes readable without credentials.
+      - name: Surface the failure in annotations
+        if: failure()
+        shell: bash
+        run: |
+          tail -c 4000 /tmp/test.log 2>/dev/null \
+            | python3 -c 'import sys; print("::error title=cargo test --workspace::" + sys.stdin.read().replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+
+  # The live-feed test is a monitor, not a gate, so it gets its own job and is
+  # allowed to fail. Several publishers front their feeds with Cloudflare and
+  # answer 403 to datacenter IPs; blocking merges on that would be reporting
+  # someone else's bot policy as our regression. It still runs on every push —
+  # a feed URL that has genuinely moved shows up as a warning on the run.
+  live-sources:
+    name: Live sources (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: bitgoose
+          POSTGRES_PASSWORD: bitgoose
+          POSTGRES_DB: bitgoose
+        ports: ["55434:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bitgoose"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://bitgoose:bitgoose@127.0.0.1:55434/bitgoose_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Poll every source for real
+        run: cargo test -p bg-ingest --test live_feeds -- --ignored --nocapture
 
   lint:
     name: Format & clippy

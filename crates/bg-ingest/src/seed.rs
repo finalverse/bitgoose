@@ -137,13 +137,15 @@ pub async fn seed_assets(db: &Db) -> Result<usize> {
 /// hub pages are populated on day one instead of waiting for extraction.
 pub async fn seed_entities(db: &Db) -> Result<usize> {
     use bg_core::domain::EntityKind::*;
-    let rows: &[(
+    /// kind, display name, slug, ticker, aliases.
+    type SeedEntity<'a> = (
         bg_core::domain::EntityKind,
-        &str,
-        &str,
-        Option<&str>,
-        &[&str],
-    )] = &[
+        &'a str,
+        &'a str,
+        Option<&'a str>,
+        &'a [&'a str],
+    );
+    let rows: &[SeedEntity] = &[
         (Token, "Bitcoin", "bitcoin", Some("BTC"), &["XBT"]),
         (Token, "Ethereum", "ethereum", Some("ETH"), &["Ether"]),
         (Chain, "Solana", "solana", Some("SOL"), &[]),

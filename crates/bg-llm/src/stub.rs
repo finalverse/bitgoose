@@ -98,13 +98,12 @@ fn subject_of(prompt: &str) -> String {
 /// `x-stub` hints select what a string field is filled with, so offline output
 /// resembles the real shape (a headline looks like a headline) rather than a
 /// wall of `lorem`.
-pub fn synthesize(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize) -> Value {
+fn synthesize(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize) -> Value {
     synth(schema, rng, ctx, depth, 0)
 }
 
 /// `ordinal` is the element's position within its enclosing array, so index
 /// fields (`x-stub: "ordinal"`) echo the input they refer to.
-
 fn synth(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize, ordinal: usize) -> Value {
     if depth > 8 {
         return Value::Null;
@@ -208,7 +207,7 @@ fn synth(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize, ordinal: usize)
             let v = lo + (rng.pick(101) as f64 / 100.0) * span;
             json!((v * 100.0).round() / 100.0)
         }
-        "boolean" => json!(rng.next() % 2 == 0),
+        "boolean" => json!(rng.next().is_multiple_of(2)),
         "null" => Value::Null,
         _ => {
             let hint = schema.get("x-stub").and_then(|v| v.as_str()).unwrap_or("");

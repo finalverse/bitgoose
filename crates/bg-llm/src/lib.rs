@@ -224,14 +224,14 @@ impl Llm {
                     Ok(p) => chain.push(Arc::new(p)),
                     Err(e) => warn!(provider = "openai", error = %e, "skipping provider"),
                 },
-                "stub" => chain.push(Arc::new(stub::StubProvider::default())),
+                "stub" => chain.push(Arc::new(stub::StubProvider)),
                 other => warn!(provider = %other, "unknown provider, ignoring"),
             }
         }
 
         if chain.is_empty() {
             warn!("no LLM provider could be configured; falling back to the offline stub");
-            chain.push(Arc::new(stub::StubProvider::default()));
+            chain.push(Arc::new(stub::StubProvider));
         }
         info!(
             chain = %chain.iter().map(|p| p.name()).collect::<Vec<_>>().join(" -> "),
@@ -365,10 +365,7 @@ mod tests {
             }
         }
 
-        let llm = Llm::new(vec![
-            Arc::new(Broken),
-            Arc::new(stub::StubProvider::default()),
-        ]);
+        let llm = Llm::new(vec![Arc::new(Broken), Arc::new(stub::StubProvider)]);
         let req = Request::new("t", ModelTier::Fast, "sys", "user");
         let out = llm.complete(&req).await.unwrap();
         assert_eq!(out.provider, "stub", "should have fallen through");
@@ -395,10 +392,7 @@ mod tests {
             }
         }
 
-        let llm = Llm::new(vec![
-            Arc::new(Refuser),
-            Arc::new(stub::StubProvider::default()),
-        ]);
+        let llm = Llm::new(vec![Arc::new(Refuser), Arc::new(stub::StubProvider)]);
         let req = Request::new("t", ModelTier::Fast, "sys", "user");
         assert!(matches!(
             llm.complete(&req).await,

@@ -44,7 +44,25 @@ jobs:
       # them separately risks a skew between the hydration bundle and the
       # server that renders the markup it hydrates.
       - name: Build site
-        run: cargo leptos build --release
+        shell: bash
+        run: |
+          set -o pipefail   # not on by default in Actions' bash; `tee` would eat the failure
+          cargo leptos build --release 2>&1 | tee /tmp/build-site.log
+
+      # Reading this repo's Actions logs requires a signed-in session, which
+      # rules out fetching them from a script. Check-run annotations, by
+      # contrast, are served by the public API — so on failure the tail of the
+      # build output is re-emitted as a workflow error and becomes readable
+      # without credentials.
+      - name: Surface the failure in annotations
+        if: failure()
+        shell: bash
+        run: |
+          # Disk is reported alongside the tail because "no space left on
+          # device" during a release link shows up as an unrelated-looking
+          # linker error, and this build writes two full target trees.
+          { df -h / ; echo ; tail -c 3500 /tmp/build-site.log ; } 2>/dev/null \
+            | python3 -c 'import sys; print("::error title=cargo leptos build --release::" + sys.stdin.read().replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
 
       - name: Build CLI
         run: cargo build --release -p bg-cli

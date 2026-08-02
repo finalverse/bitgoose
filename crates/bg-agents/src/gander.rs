@@ -115,9 +115,17 @@ fn finalize_body(body: &str, sources: &[bg_core::domain::SourceRef]) -> String {
 }
 
 pub enum Outcome {
-    Published { article: bg_core::domain::Article },
-    Held { reason: String },
-    Killed { reason: String },
+    /// Boxed: an `Article` is ~30x the size of the two `String` variants, so
+    /// inlining it would make every hold and kill carry the publish payload.
+    Published {
+        article: Box<bg_core::domain::Article>,
+    },
+    Held {
+        reason: String,
+    },
+    Killed {
+        reason: String,
+    },
 }
 
 /// Review a Desk draft and publish, hold, or kill it.
@@ -297,7 +305,9 @@ pub async fn review_desk(
 
             let _ = claim_ids;
             info!(story = %story, headline = %copy.headline, "PUBLISHED");
-            Ok(Outcome::Published { article })
+            Ok(Outcome::Published {
+                article: Box::new(article),
+            })
         }
         "kill" => {
             bg_db::stories::set_status(&ctx.db, story, StoryStatus::Killed, Some(&decision.reason))
@@ -371,21 +381,23 @@ pub async fn publish_wire(ctx: &Ctx, story: StoryId, summary: &str) -> Result<Ou
     bg_db::stories::set_kind(&ctx.db, story, StoryKind::Wire).await?;
     bg_db::stories::set_status(&ctx.db, story, StoryStatus::Published, Some("wire")).await?;
     Ok(Outcome::Published {
-        article: bg_db::articles::insert_version(
-            &ctx.db,
-            story,
-            &bg_db::articles::NewArticle {
-                headline: bg_db::stories::by_id(&ctx.db, story).await?.title,
-                dek: summary.to_string(),
-                slug: bg_db::stories::by_id(&ctx.db, story).await?.slug,
-                body_md: body.clone(),
-                seo_title: String::new(),
-                seo_desc: summary.chars().take(158).collect(),
-                content_hash: sha256_hex(&body),
-            },
-            None,
-        )
-        .await?,
+        article: Box::new(
+            bg_db::articles::insert_version(
+                &ctx.db,
+                story,
+                &bg_db::articles::NewArticle {
+                    headline: bg_db::stories::by_id(&ctx.db, story).await?.title,
+                    dek: summary.to_string(),
+                    slug: bg_db::stories::by_id(&ctx.db, story).await?.slug,
+                    body_md: body.clone(),
+                    seo_title: String::new(),
+                    seo_desc: summary.chars().take(158).collect(),
+                    content_hash: sha256_hex(&body),
+                },
+                None,
+            )
+            .await?,
+        ),
     })
 }
 

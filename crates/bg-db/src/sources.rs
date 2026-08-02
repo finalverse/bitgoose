@@ -133,7 +133,7 @@ pub async fn record_success(
 pub async fn record_failure(db: &Db, id: bg_core::SourceId, err: &str) -> Result<()> {
     sqlx::query("UPDATE sources SET last_polled_at = now(), last_error = $2 WHERE id = $1")
         .bind(id.into_uuid())
-        .bind(&err.chars().take(500).collect::<String>())
+        .bind(err.chars().take(500).collect::<String>())
         .execute(&db.pool)
         .await?;
     Ok(())

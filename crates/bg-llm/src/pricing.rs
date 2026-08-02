@@ -148,12 +148,20 @@ mod tests {
 
     #[test]
     fn frontier_models_are_marked_as_rejecting_sampling_params() {
-        // Opus 5 and Sonnet 5 return 400 if temperature is sent at all.
-        assert!(!ANTHROPIC_TOP.sampling);
-        assert!(!ANTHROPIC_MID.sampling);
-        assert!(
-            ANTHROPIC_FAST.sampling,
-            "Haiku 4.5 still accepts temperature"
-        );
+        // Opus 5 and Sonnet 5 return 400 if temperature is sent at all; Haiku
+        // 4.5 still accepts it. Checked through slices rather than directly on
+        // the consts so the assertions are not compile-time constants, which
+        // clippy rejects — and so a new model is one list entry, not one line.
+        for (m, accepts_temperature) in [
+            (ANTHROPIC_TOP, false),
+            (ANTHROPIC_MID, false),
+            (ANTHROPIC_FAST, true),
+        ] {
+            assert_eq!(
+                m.sampling, accepts_temperature,
+                "{} sampling-parameter support",
+                m.id
+            );
+        }
     }
 }
