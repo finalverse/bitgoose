@@ -146,21 +146,65 @@ if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/rustup" target list --installe
 fi
 echo "    wasm32 target present"
 
+# cargo-leptos: prefer the upstream prebuilt binary over `cargo install`.
+#
+# Building it from source pulls ~400 crates, and on a host behind a consumer
+# link that is both slow and unreliable — cargo's sparse-index requests were
+# resetting mid-TLS-handshake here, leaving the install wedged with no output.
+# One checksummed tarball is a few seconds of network instead of many minutes,
+# and it either succeeds or fails loudly. Source build stays as the fallback
+# for architectures with no published asset.
+CARGO_LEPTOS_VERSION="0.3.7"
+
 if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version >/dev/null 2>&1; then
-  log "installing cargo-leptos (several minutes)"
-  # RUSTUP_HOME must be explicit. The cargo binary is a rustup shim that
-  # resolves the toolchain relative to it, and under `sudo -u` it does not
-  # inherit the service user's home — without this the shim reports "could not
-  # choose a version of cargo to run" and the install fails. Output goes to a
-  # log rather than /dev/null, because the previous version of this script
-  # discarded exactly that error and failed silently.
-  sudo -u "$APP_USER" -H env \
-    PATH="$APP_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin" \
-    CARGO_HOME="$APP_HOME/.cargo" \
-    RUSTUP_HOME="$APP_HOME/.rustup" \
-    "$APP_HOME/.cargo/bin/cargo" install --locked cargo-leptos \
-    > /tmp/bg-leptos-install.log 2>&1 \
-    || { echo "cargo-leptos install failed; see /tmp/bg-leptos-install.log" >&2; tail -20 /tmp/bg-leptos-install.log >&2; exit 1; }
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64)  asset="cargo-leptos-x86_64-unknown-linux-gnu.tar.gz" ;;
+    aarch64) asset="cargo-leptos-aarch64-unknown-linux-gnu.tar.gz" ;;
+    *)       asset="" ;;
+  esac
+
+  installed=0
+  if [ -n "$asset" ]; then
+    log "installing cargo-leptos ${CARGO_LEPTOS_VERSION} (prebuilt)"
+    base="https://github.com/leptos-rs/cargo-leptos/releases/download/v${CARGO_LEPTOS_VERSION}"
+    tmp="$(mktemp -d)"
+    if curl -sL --retry 5 --retry-all-errors -m 300 -o "$tmp/$asset" "$base/$asset" \
+       && curl -sL --retry 5 --retry-all-errors -m 60 -o "$tmp/$asset.sha256" "$base/$asset.sha256"; then
+      expected="$(awk '{print $1}' "$tmp/$asset.sha256")"
+      actual="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
+      if [ "$expected" = "$actual" ]; then
+        tar xzf "$tmp/$asset" -C "$tmp"
+        bin="$(find "$tmp" -maxdepth 2 -name cargo-leptos -type f | head -1)"
+        if [ -n "$bin" ]; then
+          install -m 755 -o "$APP_USER" -g "$APP_USER" "$bin" "$APP_HOME/.cargo/bin/cargo-leptos"
+          installed=1
+        fi
+      else
+        echo "    checksum mismatch — refusing the binary, falling back to source" >&2
+      fi
+    fi
+    rm -rf "$tmp"
+  fi
+
+  if [ "$installed" -ne 1 ]; then
+    log "building cargo-leptos from source (slow)"
+    # Runs as a transient systemd unit so it survives the SSH session ending —
+    # a backgrounded `sudo ... &` child gets reaped on disconnect, leaving a
+    # truncated install and an empty log. RUSTUP_HOME must be explicit because
+    # `cargo` is a rustup shim that resolves the toolchain from the invoking
+    # user's home, which a uid switch does not carry over.
+    systemctl reset-failed bg-leptos-install 2>/dev/null || true
+    systemd-run --unit=bg-leptos-install --collect --wait \
+      --uid="$APP_USER" --gid="$APP_USER" \
+      --setenv=HOME="$APP_HOME" \
+      --setenv=PATH="$APP_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin" \
+      --setenv=CARGO_HOME="$APP_HOME/.cargo" \
+      --setenv=RUSTUP_HOME="$APP_HOME/.rustup" \
+      --setenv=CARGO_NET_RETRY=5 \
+      "$APP_HOME/.cargo/bin/cargo" install --locked cargo-leptos \
+      || { echo "cargo-leptos install failed:" >&2; journalctl -u bg-leptos-install --no-pager -n 30 >&2; exit 1; }
+  fi
 fi
 echo "    $(sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version 2>&1 | head -1)"
 
