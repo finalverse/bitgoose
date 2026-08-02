@@ -8,7 +8,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 const COLS: &str = "id, slug, kind, status, title, summary, category, newsworthiness, velocity, \
-                    source_count, primary_asset, assets, image_url, first_seen_at, published_at, \
+                    source_count, primary_asset, assets, image_url, video_id, first_seen_at, published_at, \
                     updated_at, editor_note";
 
 fn from_row(r: &PgRow) -> Result<Story> {
@@ -26,6 +26,7 @@ fn from_row(r: &PgRow) -> Result<Story> {
         primary_asset: r.try_get("primary_asset")?,
         assets: r.try_get("assets")?,
         image_url: r.try_get("image_url")?,
+        video_id: r.try_get("video_id")?,
         first_seen_at: r.try_get("first_seen_at")?,
         published_at: r.try_get("published_at")?,
         updated_at: r.try_get("updated_at")?,
@@ -150,6 +151,7 @@ pub async fn set_meta(
     primary_asset: Option<&str>,
     assets: &[String],
     image_url: Option<&str>,
+    video_id: Option<&str>,
 ) -> Result<()> {
     sqlx::query(
         "UPDATE stories SET
@@ -157,6 +159,7 @@ pub async fn set_meta(
             primary_asset = COALESCE($3, primary_asset),
             assets = CASE WHEN cardinality($4::text[]) > 0 THEN $4 ELSE assets END,
             image_url = COALESCE($5, image_url),
+            video_id = COALESCE($6, video_id),
             updated_at = now()
          WHERE id = $1",
     )
@@ -165,6 +168,7 @@ pub async fn set_meta(
     .bind(primary_asset)
     .bind(assets)
     .bind(image_url)
+    .bind(video_id)
     .execute(&db.pool)
     .await?;
     Ok(())

@@ -428,13 +428,31 @@ fn StoryView(story: StoryPage) -> impl IntoView {
                                 })}
                         </div>
                     </header>
-                    <SourcedImage
-                        url=story.image_url.clone()
-                        alt=story.headline.clone()
-                        credit=story.image_credit.clone()
-                        credit_url=story.image_credit_url.clone()
-                        shape="media-hero"
-                    />
+                    // A video story leads with the player; everything else
+                    // leads with the still. Showing both would push the story
+                    // itself below the fold for no gain.
+                    {if story.video_id.is_empty() {
+                        view! {
+                            <SourcedImage
+                                url=story.image_url.clone()
+                                alt=story.headline.clone()
+                                credit=story.image_credit.clone()
+                                credit_url=story.image_credit_url.clone()
+                                shape="media-hero"
+                            />
+                        }
+                            .into_any()
+                    } else {
+                        view! {
+                            <VideoEmbed
+                                video_id=story.video_id.clone()
+                                title=story.headline.clone()
+                                credit=story.image_credit.clone()
+                                credit_url=story.image_credit_url.clone()
+                            />
+                        }
+                            .into_any()
+                    }}
 
                     {(!corrections.is_empty())
                         .then(|| {

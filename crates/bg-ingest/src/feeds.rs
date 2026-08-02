@@ -138,6 +138,21 @@ async fn poll_inner(
             continue;
         };
 
+        // Mainstream finance sources are filtered for crypto relevance before
+        // anything else looks at them, so a day of equities coverage costs one
+        // string scan per item rather than a triage model call.
+        if src.kind == bg_core::domain::SourceKind::Finance {
+            let blurb = entry
+                .summary
+                .as_ref()
+                .map(|s| strip_html(&s.content))
+                .unwrap_or_default();
+            if !crate::relevance::is_crypto(&format!("{title} {blurb}")) {
+                rep.skipped += 1;
+                continue;
+            }
+        }
+
         let published: DateTime<Utc> = entry.published.or(entry.updated).unwrap_or(now);
         if published > too_new || published < too_old {
             debug!(source = %src.slug, %title, %published, "dropping implausible timestamp");
@@ -179,6 +194,15 @@ async fn poll_inner(
                     .map(|t| t.image.uri.clone())
             });
 
+        // Only consulted for video sources: a text publisher linking to a
+        // YouTube page is citing it, not syndicating it, and should not turn
+        // into a player on our page.
+        let video_id = if src.kind == bg_core::domain::SourceKind::Video {
+            crate::video::youtube_id(&link, &entry.id)
+        } else {
+            None
+        };
+
         // Fingerprint over title + lede: enough signal to spot a rewrite of the
         // same event, short enough that a long article does not swamp it.
         let fingerprint_input = match &summary {
@@ -203,6 +227,7 @@ async fn poll_inner(
             simhash: simhash64(&fingerprint_input),
             lang: feed.language.clone().unwrap_or_else(|| "en".into()),
             image_url: image,
+            video_id,
         };
 
         match bg_db::items::insert_new(db, &item).await {

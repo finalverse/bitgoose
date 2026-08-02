@@ -66,6 +66,13 @@ str_enum! {
         /// Chain data — large transfers, contract deploys, governance votes.
         Onchain => "onchain",
         Social => "social",
+        /// Mainstream financial press. Ingested only when an item is
+        /// crypto-relevant — their feeds are mostly equities and rates, and
+        /// taking them wholesale would bury the coverage we want.
+        Finance => "finance",
+        /// A channel that syndicates video (YouTube channel feeds today).
+        /// Entries carry a provider video id and are embedded, never rehosted.
+        Video => "video",
         /// First-party press releases. Treated as interested parties, never as
         /// corroboration for a claim they are the subject of.
         Wire => "wire",
@@ -160,6 +167,8 @@ pub struct RawItem {
     pub simhash: i64,
     pub lang: String,
     pub image_url: Option<String>,
+    /// Provider video id when this came from a video source; `None` otherwise.
+    pub video_id: Option<String>,
     pub story_id: Option<StoryId>,
     pub triaged: bool,
 }
@@ -175,6 +184,7 @@ impl RawItem {
             authors: self.authors.clone(),
             published_at: self.published_at,
             image_url: self.image_url.clone(),
+            video_id: self.video_id.clone(),
         }
     }
 }
@@ -189,6 +199,7 @@ pub struct RawItemPublic {
     pub authors: Vec<String>,
     pub published_at: DateTime<Utc>,
     pub image_url: Option<String>,
+    pub video_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +258,9 @@ pub struct Story {
     pub primary_asset: Option<String>,
     pub assets: Vec<String>,
     pub image_url: Option<String>,
+    /// Provider video id when this story came from a video source. An id, not
+    /// a URL — the embed host is chosen at render time.
+    pub video_id: Option<String>,
     pub first_seen_at: DateTime<Utc>,
     pub published_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
@@ -742,6 +756,7 @@ mod tests {
             simhash: 0,
             lang: "en".into(),
             image_url: None,
+            video_id: None,
             story_id: None,
             triaged: false,
         })

@@ -105,6 +105,118 @@ pub const SOURCES: &[SeedSource] = &[
         trust: 58,
         poll_interval_s: 600,
     },
+    // -- mainstream finance ---------------------------------------------------
+    // When Bloomberg or the FT covers crypto it is itself news: it signals the
+    // story has reached the institutional audience, and their sourcing is often
+    // better than the crypto desks'. But their feeds are overwhelmingly
+    // equities and rates, so every item passes `relevance::is_crypto` before it
+    // is stored — see that module for why the gate is a word list and not a
+    // model call.
+    //
+    // Reuters and CNN Money were tested and dropped: Reuters' public RSS
+    // endpoints 404 and CNN's money feed no longer resolves.
+    //
+    // Trust is high — these are large newsrooms with real corrections policies.
+    SeedSource {
+        slug: "yahoofinance",
+        name: "Yahoo Finance",
+        kind: SourceKind::Finance,
+        url: "https://finance.yahoo.com/news/rssindex",
+        homepage: "https://finance.yahoo.com",
+        trust: 68,
+        poll_interval_s: 600,
+    },
+    SeedSource {
+        slug: "bloomberg",
+        name: "Bloomberg",
+        kind: SourceKind::Finance,
+        url: "https://feeds.bloomberg.com/markets/news.rss",
+        homepage: "https://www.bloomberg.com/markets",
+        trust: 90,
+        poll_interval_s: 600,
+    },
+    SeedSource {
+        slug: "cnbc",
+        name: "CNBC",
+        kind: SourceKind::Finance,
+        url: "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+        homepage: "https://www.cnbc.com/finance",
+        trust: 80,
+        poll_interval_s: 600,
+    },
+    SeedSource {
+        slug: "marketwatch",
+        name: "MarketWatch",
+        kind: SourceKind::Finance,
+        url: "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+        homepage: "https://www.marketwatch.com",
+        trust: 79,
+        poll_interval_s: 600,
+    },
+    SeedSource {
+        slug: "ft",
+        name: "Financial Times",
+        kind: SourceKind::Finance,
+        url: "https://www.ft.com/companies?format=rss",
+        homepage: "https://www.ft.com",
+        trust: 90,
+        poll_interval_s: 900,
+    },
+    // -- video ---------------------------------------------------------------
+    // None of the text feeds above carry any video: no video MIME types, no
+    // YouTube links, no iframes — every enclosure is an image. Video therefore
+    // comes from channels that syndicate it directly. These are public RSS
+    // feeds, and playback goes through YouTube's own embed, so the creator
+    // keeps control and their analytics. Trust scores are lower than the news
+    // desks on purpose: these are commentary, useful as colour and context,
+    // never as corroboration for a claim.
+    //
+    // Polled every 30 minutes; channels publish a few times a day at most.
+    SeedSource {
+        slug: "yt-coinbureau",
+        name: "Coin Bureau",
+        kind: SourceKind::Video,
+        url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCnThE8FLrlN-tYvZhZL0uaA",
+        homepage: "https://www.youtube.com/@coinbureau",
+        trust: 70,
+        poll_interval_s: 1800,
+    },
+    SeedSource {
+        slug: "yt-bankless",
+        name: "Bankless",
+        kind: SourceKind::Video,
+        url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCCRxYlYOmLE2l5wxs3ckJtg",
+        homepage: "https://www.youtube.com/@Bankless",
+        trust: 72,
+        poll_interval_s: 1800,
+    },
+    SeedSource {
+        slug: "yt-milkroad",
+        name: "Milk Road",
+        kind: SourceKind::Video,
+        url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCWPil6c2lnmMbh2cJRwuHzQ",
+        homepage: "https://www.youtube.com/@MilkRoadDaily",
+        trust: 65,
+        poll_interval_s: 1800,
+    },
+    SeedSource {
+        slug: "yt-unchained",
+        name: "Unchained",
+        kind: SourceKind::Video,
+        url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCuKiSkbYrUOOEEiYQEVPniQ",
+        homepage: "https://www.youtube.com/@unchainedcrypto",
+        trust: 75,
+        poll_interval_s: 1800,
+    },
+    SeedSource {
+        slug: "yt-cryptobanter",
+        name: "Crypto Banter",
+        kind: SourceKind::Video,
+        url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCybasP-2D2b5kTLAb_kvhWQ",
+        homepage: "https://www.youtube.com/@CryptoBanterGroup",
+        trust: 55,
+        poll_interval_s: 1800,
+    },
 ];
 
 pub async fn seed_sources(db: &Db) -> Result<usize> {

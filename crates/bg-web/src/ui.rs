@@ -260,6 +260,69 @@ pub fn Ticker(prices: Vec<Tick>) -> impl IntoView {
 /// `shape` picks the aspect ratio, so a missing or slow image reserves its space
 /// instead of shoving the headline down the page when it arrives.
 #[component]
+pub fn VideoEmbed(
+    video_id: String,
+    title: String,
+    credit: String,
+    credit_url: String,
+) -> impl IntoView {
+    if video_id.is_empty() {
+        return None::<AnyView>.into_any();
+    }
+    // youtube-nocookie is YouTube's privacy-enhanced host: it holds off on
+    // profiling cookies until the visitor actually presses play.
+    //
+    // The frame is emitted as markup because Leptos 0.8 has no typed `loading`,
+    // `allow` or `allowfullscreen` for `iframe`, and an iframe without
+    // `loading="lazy"` costs every reader a player download they may never
+    // watch. This is only safe because `video_id` cannot contain anything that
+    // escapes the attribute: `bg_ingest::video` accepts exactly 11 characters
+    // of `[A-Za-z0-9_-]`, the database re-checks the same shape, and the title
+    // below is escaped before it is interpolated.
+    let frame = format!(
+        r#"<iframe src="https://www.youtube-nocookie.com/embed/{id}?rel=0" title="{t}" loading="lazy" frameborder="0" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>"#,
+        id = video_id,
+        t = escape_attr(&title),
+    );
+    let watch = format!("https://www.youtube.com/watch?v={video_id}");
+    view! {
+        <figure class="media media-video">
+            <div class="video-frame" inner_html=frame></div>
+            <figcaption>
+                {(!credit.is_empty())
+                    .then(|| {
+                        view! {
+                            <a href=credit_url rel="noopener">
+                                {credit.clone()}
+                            </a>
+                            " — "
+                        }
+                    })}
+                "plays on YouTube. "
+                <a href=watch rel="noopener">"Watch there"</a>
+            </figcaption>
+        </figure>
+    }
+    .into_any()
+}
+
+/// Escape a value destined for a double-quoted HTML attribute.
+fn escape_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+#[component]
 pub fn SourcedImage(
     url: String,
     alt: String,

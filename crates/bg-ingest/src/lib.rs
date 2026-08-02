@@ -12,8 +12,10 @@ pub mod canonical;
 pub mod feeds;
 pub mod http;
 pub mod market;
+pub mod relevance;
 pub mod robots;
 pub mod seed;
+pub mod video;
 
 use thiserror::Error;
 

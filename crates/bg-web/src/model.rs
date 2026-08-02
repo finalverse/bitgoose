@@ -54,6 +54,9 @@ pub struct StoryPage {
     pub image_url: String,
     pub image_credit: String,
     pub image_credit_url: String,
+    /// Provider video id when the story came from a video source. Rendered as
+    /// an embedded player in place of the lead image.
+    pub video_id: String,
     pub headline: String,
     pub dek: String,
     pub body_html: String,

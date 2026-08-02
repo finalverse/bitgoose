@@ -360,6 +360,7 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         image_url,
         image_credit,
         image_credit_url,
+        video_id: story.video_id.clone().unwrap_or_default(),
         headline,
         dek: article
             .as_ref()

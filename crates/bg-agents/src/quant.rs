@@ -104,8 +104,16 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<MarketContext> {
                 }
             }
 
-            bg_db::stories::set_meta(&ctx.db, story, None, primary.as_deref(), &assets, None)
-                .await?;
+            bg_db::stories::set_meta(
+                &ctx.db,
+                story,
+                None,
+                primary.as_deref(),
+                &assets,
+                None,
+                None,
+            )
+            .await?;
 
             let note = if assets.is_empty() {
                 "no assets — story is not market-specific".to_string()

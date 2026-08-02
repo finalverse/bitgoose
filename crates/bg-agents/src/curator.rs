@@ -268,7 +268,12 @@ pub async fn rescore(ctx: &Ctx, story: StoryId) -> Result<i16> {
     // corroborating outlet attached later can supply it, and `set_meta`
     // COALESCEs, so the first usable one wins and later passes leave it alone.
     if let Some(img) = pick_lead_image(&items) {
-        bg_db::stories::set_meta(&ctx.db, story, None, None, &[], Some(&img)).await?;
+        bg_db::stories::set_meta(&ctx.db, story, None, None, &[], Some(&img), None).await?;
+    }
+    // A video story is a video story because its seed item was one; the same
+    // COALESCE rule applies, so the first item to supply an id wins.
+    if let Some(vid) = items.iter().find_map(|i| i.video_id.clone()) {
+        bg_db::stories::set_meta(&ctx.db, story, None, None, &[], None, Some(&vid)).await?;
     }
 
     Ok(score)
@@ -403,6 +408,7 @@ mod tests {
             simhash: simhash64(title) as i64,
             lang: "en".into(),
             image_url: None,
+            video_id: None,
             story_id: Some(StoryId::new()),
             triaged: true,
         }

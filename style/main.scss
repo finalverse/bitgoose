@@ -864,3 +864,164 @@ code { font-family: var(--mono); font-size: 0.88em; }
   .wire-item { grid-template-columns: 1fr; }
   .media-hero { margin: 1rem 0 1.5rem; }
 }
+
+/* ---------------------------------------------------------------------------
+   Video
+   --------------------------------------------------------------------------- */
+
+/* The player owns its box before it loads. Without a reserved aspect box the
+   iframe arrives at zero height and the whole article jumps down the page when
+   it paints — the worst layout shift on the site, on the element the reader is
+   most likely looking at. */
+.video-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(120% 140% at 50% 0%, rgba(245, 179, 1, 0.10), transparent 60%),
+    var(--ink-700);
+  border: 1px solid var(--line);
+}
+
+.video-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.media-video { margin: 1.5rem 0 2rem; }
+.media-video figcaption { justify-content: flex-start; gap: 0.35rem; }
+
+/* Play badge for a video in a list, where the thumbnail is a still and the
+   reader needs to know it moves before they click. */
+.media-play {
+  position: relative;
+}
+
+.media-play::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3rem;
+  height: 3rem;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(11, 13, 16, 0.68);
+  border: 1.5px solid var(--gold);
+  /* The triangle is drawn with a clipped square rather than a glyph so it
+     stays optically centred at any size — the ▶ character is not. */
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.media-play::before {
+  content: "";
+  position: absolute;
+  left: calc(50% + 0.14rem);
+  top: 50%;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+  border-style: solid;
+  border-width: 0.42rem 0 0.42rem 0.7rem;
+  border-color: transparent transparent transparent var(--gold);
+}
+
+a:hover > .media-play::after,
+.card:hover .media-play::after {
+  background: rgba(11, 13, 16, 0.85);
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+/* ---------------------------------------------------------------------------
+   Signature: the skein
+   ---------------------------------------------------------------------------
+   Geese migrate in a V. It is the one shape the brand owns, so it does the
+   work an ornamental rule would otherwise do — separating major sections
+   without another grey line, of which the page already has plenty. */
+
+.skein {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 2.5rem 0 1.75rem;
+  color: var(--faint);
+}
+
+.skein::before,
+.skein::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line), transparent);
+}
+
+.skein span {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.skein-mark {
+  color: var(--gold);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------------------
+   Editorial polish
+   --------------------------------------------------------------------------- */
+
+/* Optical tightening. Large display serif set at body tracking reads loose;
+   the bigger the type, the less space it wants between letters. */
+.lead-story h2 { letter-spacing: -0.021em; }
+.story-title   { letter-spacing: -0.019em; }
+
+/* Images in a card breathe on hover — a small, cheap signal that the whole
+   card is a target, without moving any text. */
+.card .media img,
+.wire-item .media img {
+  transition: transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+  will-change: transform;
+}
+.card:hover .media img,
+.wire-item:hover .media img { transform: scale(1.032); }
+
+@media (prefers-reduced-motion: reduce) {
+  .card:hover .media img,
+  .wire-item:hover .media img { transform: none; }
+  .media-play::after { transition: none; }
+}
+
+/* A hairline of gold on the left of the lead story: the eye's entry point to
+   the page, and the one place the accent is allowed to be structural rather
+   than decorative. */
+.lead-story {
+  position: relative;
+  padding-left: 1.1rem;
+}
+.lead-story::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.35rem;
+  bottom: 1.75rem;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--gold), transparent 85%);
+}
+
+@media (width <= 640px) {
+  .lead-story { padding-left: 0.85rem; }
+  .media-video { margin: 1rem 0 1.5rem; }
+  .media-play::after { width: 2.4rem; height: 2.4rem; }
+}

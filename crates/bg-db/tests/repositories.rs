@@ -155,6 +155,7 @@ async fn the_whole_graph_round_trips() {
         simhash: bg_core::text::simhash64(title),
         lang: "en".into(),
         image_url: None,
+        video_id: None,
     };
 
     let i1 = items::insert_new(
@@ -250,9 +251,17 @@ async fn the_whole_graph_round_trips() {
     stories::set_summary(&db, story.id, "An exchange froze attacker funds.")
         .await
         .unwrap();
-    stories::set_meta(&db, story.id, None, Some("BTC"), &["BTC".to_string()], None)
-        .await
-        .unwrap();
+    stories::set_meta(
+        &db,
+        story.id,
+        None,
+        Some("BTC"),
+        &["BTC".to_string()],
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     stories::set_kind(&db, story.id, StoryKind::Desk)
         .await
         .unwrap();
