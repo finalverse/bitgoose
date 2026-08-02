@@ -241,7 +241,7 @@ pub async fn get_section(category: String) -> Result<(String, Vec<StoryCard>), S
 #[server(name = GetStory, prefix = "/rpc")]
 pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError> {
     let db = db();
-    let story = match bg_db::stories::by_slug(db, &slug).await {
+    let story = match bg_db::stories::published_by_slug(db, &slug).await {
         Ok(s) => s,
         Err(bg_db::DbError::NotFound(_)) => return Ok(None),
         Err(err) => return Err(e(err)),

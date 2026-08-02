@@ -156,7 +156,7 @@ async fn get_story(
     State(s): State<ApiState>,
     Path(slug): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let story = bg_db::stories::by_slug(&s.db, &slug).await?;
+    let story = bg_db::stories::published_by_slug(&s.db, &slug).await?;
     let article = bg_db::articles::latest_for_story(&s.db, story.id).await?;
     let claims = bg_db::claims::with_sources(&s.db, story.id).await?;
     let sources = bg_db::stories::source_refs(&s.db, story.id).await?;

@@ -11,7 +11,7 @@ use bg_core::domain::{AgentRole, ModelTier};
 use bg_core::ids::StoryId;
 use bg_llm::{schema as sch, Request};
 use serde::Deserialize;
-use tracing::info;
+use tracing::{info, warn};
 
 pub const SYSTEM: &str = "Herald writes Wire summaries.
 
@@ -45,6 +45,33 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<crate::gander::Outcome> {
     let system = crate::system_prompt(ctx, AgentRole::Herald).await;
     // Kept out here because `s` moves into the stage closure below.
     let headline = s.title.clone();
+
+    // Never ask a model to summarise nothing.
+    //
+    // This is not a tuning knob, it is a correctness gate. YouTube items were
+    // arriving with no text at all, so Herald was handed a bare title and told
+    // to produce two or three sentences — and a small model with nothing to
+    // work from does not decline, it invents. Thirty stories were published
+    // asserting silver-coin schedules, IBM hiring policy and a Bitcoin price,
+    // none of which appeared in any source. On a site whose disclosure line
+    // reads "every claim links to its sources", that is the worst failure it
+    // can have.
+    //
+    // The threshold is on *source* text, not output: a summary can only be
+    // grounded in what was actually read.
+    const MIN_SOURCE_CHARS: usize = 120;
+    let available: usize = items
+        .iter()
+        .filter_map(|it| it.summary_raw.as_deref().or(it.body_raw.as_deref()))
+        .map(|t| t.trim().len())
+        .sum();
+    if available < MIN_SOURCE_CHARS {
+        warn!(
+            story = %story, available,
+            "not enough source text to summarise; publishing the pointer without one"
+        );
+        return crate::gander::publish_wire(ctx, story, "").await;
+    }
 
     let summary = stage(
         ctx,

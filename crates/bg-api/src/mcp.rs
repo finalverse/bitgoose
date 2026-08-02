@@ -201,7 +201,7 @@ async fn call_tool(s: &ApiState, name: &str, args: &Value) -> Result<Value, Stri
                 .get("slug")
                 .and_then(|v| v.as_str())
                 .ok_or("slug is required")?;
-            let story = bg_db::stories::by_slug(&s.db, slug)
+            let story = bg_db::stories::published_by_slug(&s.db, slug)
                 .await
                 .map_err(|e| e.to_string())?;
             let claims = bg_db::claims::with_sources(&s.db, story.id)

@@ -712,3 +712,51 @@ async fn an_unknown_enum_token_fails_loudly_instead_of_defaulting() {
     let _ = src;
     db.pool.close().await;
 }
+
+/// Withdrawing a story must actually withdraw it.
+///
+/// Holding or killing removed a story from the front page and the feed but left
+/// it fully readable at its own URL, so a story pulled for being wrong stayed up
+/// for anyone holding the link. Every public surface now resolves slugs through
+/// `published_by_slug`; this pins that behaviour.
+#[tokio::test]
+async fn held_stories_are_not_reachable_from_public_surfaces() {
+    let Some(db) = setup().await else { return };
+
+    let story = stories::create(
+        &db,
+        "withdrawal-test",
+        StoryKind::Wire,
+        "T",
+        Category::Markets,
+    )
+    .await
+    .unwrap();
+
+    stories::set_status(&db, story.id, StoryStatus::Published, None)
+        .await
+        .unwrap();
+    assert!(
+        stories::published_by_slug(&db, &story.slug).await.is_ok(),
+        "a published story must be publicly reachable"
+    );
+
+    for withdrawn in [StoryStatus::Held, StoryStatus::Killed] {
+        stories::set_status(&db, story.id, withdrawn, Some("withdrawn"))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                stories::published_by_slug(&db, &story.slug).await,
+                Err(bg_db::DbError::NotFound(_))
+            ),
+            "a {withdrawn:?} story must not be reachable from a public surface"
+        );
+        assert!(
+            stories::by_slug(&db, &story.slug).await.is_ok(),
+            "but internal callers must still see it"
+        );
+    }
+
+    db.pool.close().await;
+}

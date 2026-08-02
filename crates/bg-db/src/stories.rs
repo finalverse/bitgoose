@@ -80,12 +80,37 @@ pub async fn by_id(db: &Db, id: StoryId) -> Result<Story> {
     from_row(&row)
 }
 
+/// Any story, whatever its status. **Internal use only** — agents and ops.
+///
+/// Every public surface must use [`published_by_slug`] instead. See its note.
 pub async fn by_slug(db: &Db, slug: &str) -> Result<Story> {
     let row = crate::sql(format!("SELECT {COLS} FROM stories WHERE slug = $1"))
         .bind(slug)
         .fetch_optional(&db.pool)
         .await?
         .ok_or(DbError::NotFound("story"))?;
+    from_row(&row)
+}
+
+/// A story a reader is allowed to see.
+///
+/// Holding or killing a story used to remove it from the front page and the
+/// feed while leaving it fully readable at its own URL — so a story withdrawn
+/// for being wrong stayed up for anyone with the link, and for any crawler that
+/// had already indexed it. Withdrawal has to mean withdrawn.
+///
+/// This exists as a separate function, rather than a flag on [`by_slug`], for
+/// the same reason `items::recent` is split from `items::body_for_analysis`:
+/// "can the public reach unpublished content?" should be answerable by grepping
+/// for one name.
+pub async fn published_by_slug(db: &Db, slug: &str) -> Result<Story> {
+    let row = crate::sql(format!(
+        "SELECT {COLS} FROM stories WHERE slug = $1 AND status = 'published'"
+    ))
+    .bind(slug)
+    .fetch_optional(&db.pool)
+    .await?
+    .ok_or(DbError::NotFound("story"))?;
     from_row(&row)
 }
 

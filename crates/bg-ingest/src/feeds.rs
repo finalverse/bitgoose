@@ -161,7 +161,23 @@ async fn poll_inner(
             continue;
         }
 
-        let summary = entry.summary.as_ref().map(|s| strip_html(&s.content));
+        // YouTube puts the description in `media:group/media:description`, which
+        // feed-rs surfaces on the media object rather than as `entry.summary` —
+        // so without this every video item arrived with no text at all. That is
+        // not a cosmetic gap: Herald was handed a bare title and asked for two
+        // or three sentences, and a small model given nothing to summarise
+        // invents something. See the guard in `bg_agents::herald`.
+        let summary = entry
+            .summary
+            .as_ref()
+            .map(|s| strip_html(&s.content))
+            .or_else(|| {
+                entry
+                    .media
+                    .iter()
+                    .find_map(|m| m.description.as_ref().map(|d| strip_html(&d.content)))
+            })
+            .filter(|s| !s.trim().is_empty());
         // feed-rs gives us `content` when the publisher syndicates full text.
         // We store it privately for claim extraction and the overlap check; it
         // is never served. See bg-db::items for the accessor boundary.
