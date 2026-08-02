@@ -28,6 +28,7 @@ serde_json.workspace = true
 
 console_error_panic_hook = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
+web-sys.workspace = true
 
 axum = { workspace = true, optional = true }
 leptos_axum = { workspace = true, optional = true }

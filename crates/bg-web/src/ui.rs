@@ -67,11 +67,26 @@ pub fn Masthead() -> impl IntoView {
 pub fn ThemeToggle() -> impl IntoView {
     let toggle = move |_| {
         if let Some(root) = document().document_element() {
-            let next = match root.get_attribute("data-theme").as_deref() {
-                Some("light") => "dark",
-                _ => "light",
+            // Before any explicit choice there is no attribute to read, so fall
+            // back to what the OS is actually showing. Reading the attribute
+            // alone would make the first click a no-op for a reader already in
+            // light mode: it would "switch" them to the light they were in.
+            let showing_light = match root.get_attribute("data-theme").as_deref() {
+                Some("light") => true,
+                Some("dark") => false,
+                _ => window()
+                    .match_media("(prefers-color-scheme: light)")
+                    .ok()
+                    .flatten()
+                    .is_some_and(|m| m.matches()),
             };
+            let next = if showing_light { "dark" } else { "light" };
             let _ = root.set_attribute("data-theme", next);
+            // Persist so the choice survives a reload; the inline script in the
+            // document head reapplies it before first paint.
+            if let Ok(Some(store)) = window().local_storage() {
+                let _ = store.set_item("bg-theme", next);
+            }
         }
     };
     view! {

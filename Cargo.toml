@@ -67,6 +67,10 @@ leptos_axum = { version = "0.8.10" }
 leptos_meta = { version = "0.8.6" }
 leptos_router = { version = "0.8.15" }
 wasm-bindgen = "0.2.106"
+# web-sys gates every browser API behind its own feature, and Leptos enables
+# only the set it needs. These two are ours: the theme toggle reads the OS
+# preference and remembers an explicit choice.
+web-sys = { version = "0.3", features = ["MediaQueryList", "Storage"] }
 console_error_panic_hook = "0.1"
 
 [profile.release]

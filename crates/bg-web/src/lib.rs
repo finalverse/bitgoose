@@ -19,7 +19,13 @@ use leptos_router::path;
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
-        <html lang="en" data-theme="dark">
+        // No `data-theme` here on purpose. Hardcoding one made the stylesheet's
+        // `@media (prefers-color-scheme: light)` block unreachable, since the
+        // `:root[data-theme=…]` rules are written to override it — a reader who
+        // prefers light got dark until they found the toggle. Absent the
+        // attribute the media query governs, and the toggle sets it only when
+        // someone makes an explicit choice.
+        <html lang="en">
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -27,6 +33,10 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <AutoReload options=options.clone() />
                 <HydrationScripts options=options.clone() />
                 <Stylesheet id="leptos" href="/pkg/bitgoose.css" />
+                // Restores a saved theme choice before first paint. Doing this
+                // from the hydrated app instead would show one theme and then
+                // swap it, which is worse than not remembering at all.
+                <script inner_html=r#"try{var t=localStorage.getItem('bg-theme');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}"#></script>
                 <MetaTags />
             </head>
             <body>

@@ -293,6 +293,34 @@ h1, h2, h3, h4 {
 
 .masthead-right { margin-left: auto; display: flex; align-items: center; gap: 0.6rem; }
 
+/* On a phone the brand, six sections and the toggle cannot share one 60px row:
+   the nav was squeezed to about a section and a half and clipped mid-word. It
+   remained scrollable, but with the scrollbar hidden nothing said so — Flyway,
+   The Flock and Standards were effectively unreachable on mobile. Below this
+   width the nav drops onto its own full-width row, and the mask fades its
+   trailing edge so it reads as "there is more this way". */
+@media (max-width: 760px) {
+  .masthead .shell {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 0 1rem;
+    padding-top: 0.55rem;
+    padding-bottom: 0.15rem;
+  }
+  .masthead-right { order: 1; }
+  .nav {
+    order: 2;
+    width: 100%;
+    gap: 1.05rem;
+    padding-bottom: 0.2rem;
+    mask-image: linear-gradient(to right, #000 calc(100% - 1.75rem), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.75rem), transparent);
+  }
+  /* Reclaims the width the fade costs, so the last section can still be read
+     in full once scrolled to the end. */
+  .nav::after { content: ""; flex: 0 0 1.25rem; }
+}
+
 .theme-toggle {
   background: transparent; border: 1px solid var(--line);
   color: var(--muted); border-radius: var(--r);
@@ -306,7 +334,13 @@ h1, h2, h3, h4 {
    layout
    ========================================================================== */
 
-.page { padding: 2rem 0 4rem; }
+/* Vertical only. This is always used as `class="shell page"`, and the shorthand
+   `padding: 2rem 0 4rem` silently reset the 1.25rem side padding `.shell` had
+   just set — same specificity, later rule wins. A wide viewport hid it, since
+   `max-width` plus `margin: 0 auto` left slack either side; once the viewport
+   was narrower than the shell there was no slack and every page ran its text
+   flush into both edges of the screen. */
+.page { padding-top: 2rem; padding-bottom: 4rem; }
 
 .page-head { margin-bottom: 1.75rem; }
 .page-head h1 { font-size: clamp(1.75rem, 4vw, 2.4rem); }
@@ -553,6 +587,16 @@ h1, h2, h3, h4 {
 .stat {
   background: var(--ink-700);
   padding: 0.9rem 1rem;
+}
+/* The grid draws its gaps by letting the container colour show through, so a
+   final row that does not divide evenly leaves a tile-sized block of that
+   colour sitting there looking like a rendering fault. An odd tile at the end
+   spans the remainder instead.
+   Scoped to the width where `auto-fit` is guaranteed to give exactly two
+   columns (below 3 x 130px plus the shell's side padding) — `nth-child(odd)`
+   only identifies a short final row when the count is two. */
+@media (max-width: 430px) {
+  .stat-row > .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
 .stat-label {
   font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.11em;
