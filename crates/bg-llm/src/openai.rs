@@ -13,6 +13,8 @@ use serde_json::json;
 use tracing::debug;
 
 pub struct OpenAiProvider {
+    /// Serving from localhost, so calls are free. See `pricing::LOCAL`.
+    is_local: bool,
     api_key: String,
     base_url: String,
     http: reqwest::Client,
@@ -36,6 +38,7 @@ impl OpenAiProvider {
             });
         }
         Ok(Self {
+            is_local,
             api_key: if api_key.is_empty() {
                 "local".into()
             } else {
@@ -51,6 +54,16 @@ impl OpenAiProvider {
                 std::env::var("BG_MODEL_TOP").ok().filter(|s| !s.is_empty()),
             ],
         })
+    }
+
+    /// Pricing for a tier. A locally served model is free, and saying
+    /// otherwise would put a fabricated figure in the published cost ledger.
+    fn spec_for(&self, tier: ModelTier) -> ModelSpec {
+        if self.is_local {
+            pricing::LOCAL
+        } else {
+            pricing::openai_spec(tier)
+        }
     }
 
     fn resolved_model(&self, tier: ModelTier) -> String {
@@ -105,11 +118,11 @@ impl LlmProvider for OpenAiProvider {
     }
 
     fn spec(&self, tier: ModelTier) -> ModelSpec {
-        pricing::openai_spec(tier)
+        self.spec_for(tier)
     }
 
     async fn complete(&self, req: &Request) -> Result<Completion> {
-        let spec = pricing::openai_spec(req.tier);
+        let spec = self.spec_for(req.tier);
         let model = self.resolved_model(req.tier);
 
         let mut body = json!({
@@ -268,5 +281,42 @@ mod tests {
         let raw = r#"{"choices": [{"message": {"content": null, "refusal": "I cannot help"}}]}"#;
         let p: ChatResponse = serde_json::from_str(raw).unwrap();
         assert!(p.choices[0].message.refusal.is_some());
+    }
+}
+
+#[cfg(test)]
+mod local_pricing_tests {
+    use super::*;
+
+    /// `/flock` publishes the cost ledger as fact, so a locally served model
+    /// must cost nothing there. Pricing an Ollama call at OpenAI's rates would
+    /// put an invented number on the one page whose whole premise is that its
+    /// numbers are real.
+    #[test]
+    fn local_models_are_never_billed() {
+        let local = OpenAiProvider {
+            is_local: true,
+            api_key: "local".into(),
+            base_url: "http://127.0.0.1:11434/v1".into(),
+            http: http_client(),
+            overrides: [None, None, None],
+        };
+        for tier in [ModelTier::Fast, ModelTier::Mid, ModelTier::Top] {
+            let s = local.spec_for(tier);
+            assert_eq!(s.input_per_mtok, 0.0, "local input tokens must be free");
+            assert_eq!(s.output_per_mtok, 0.0, "local output tokens must be free");
+        }
+
+        let hosted = OpenAiProvider {
+            is_local: false,
+            api_key: "sk-test".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            http: http_client(),
+            overrides: [None, None, None],
+        };
+        assert!(
+            hosted.spec_for(ModelTier::Top).output_per_mtok > 0.0,
+            "a hosted model must still be billed"
+        );
     }
 }

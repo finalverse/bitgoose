@@ -85,6 +85,22 @@ pub const STUB: ModelSpec = ModelSpec {
     structured_output: true,
 };
 
+/// A model served locally (Ollama, llama.cpp, LM Studio).
+///
+/// Zero-priced because it genuinely is: the electricity is not a per-token
+/// cost we can honestly attribute. This matters more than it looks — `/flock`
+/// publishes the cost ledger as fact, and pricing an Ollama call at OpenAI's
+/// rates would put an invented number on a page whose entire premise is that
+/// its numbers are real. The model *name* still comes from the server's own
+/// response, so the ledger says what actually ran.
+pub const LOCAL: ModelSpec = ModelSpec {
+    id: "local",
+    input_per_mtok: 0.0,
+    output_per_mtok: 0.0,
+    sampling: true,
+    structured_output: true,
+};
+
 pub fn anthropic_spec(tier: ModelTier) -> ModelSpec {
     match tier {
         ModelTier::Top => ANTHROPIC_TOP,
