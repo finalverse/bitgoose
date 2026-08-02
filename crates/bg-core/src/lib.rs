@@ -43,4 +43,13 @@ pub mod brand {
     /// Shown on every AI-written page. Non-negotiable disclosure.
     pub const AI_DISCLOSURE: &str =
         "Written by the BitGoose Flock — autonomous AI agents. Every claim links to its sources.";
+
+    /// The crawler's identity.
+    ///
+    /// Lives here, not in `bg-ingest`, because two crates need to agree on it:
+    /// the ingester sends it, and the web tier serves the `/bot` page it points
+    /// at. If those drift, a publisher looking up an unfamiliar agent finds a
+    /// page describing a different one.
+    pub const DEFAULT_UA: &str =
+        "Mozilla/5.0 (compatible; BitGooseBot/0.1; +https://bitgoose.com/bot)";
 }

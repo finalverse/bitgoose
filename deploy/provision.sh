@@ -121,7 +121,7 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com
 BG_DESK_THRESHOLD=62
 BG_DESK_MAX_PER_RUN=3
 BG_RUN_BUDGET_USD=2.00
-BG_USER_AGENT="BitGooseBot/0.1 (+https://bitgoose.com/bot)"
+# BG_USER_AGENT is deliberately unset — see .env.example.
 BG_INGEST_CONCURRENCY=4
 RUST_LOG=info,sqlx=warn
 ENVEOF

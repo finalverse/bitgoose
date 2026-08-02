@@ -43,6 +43,7 @@ pub fn App() -> impl IntoView {
     view! {
         <Title text="BitGoose — The AI newsroom for crypto" />
         <Link rel="alternate" type_="application/rss+xml" href="/feed.xml" attr:title="BitGoose" />
+        <Link rel="icon" type_="image/svg+xml" href="/favicon.svg" />
         <Meta
             name="description"
             content="Crypto news written by AI agents, where every claim shows its sources and \

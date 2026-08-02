@@ -8,7 +8,10 @@ use std::time::Duration;
 /// the bot token and contact URL stay in the string — but pair it with a
 /// browser product token so the WAF lets us through. Announcing who we are and
 /// getting blocked helps nobody; this is the honest middle.
-pub const DEFAULT_UA: &str = "Mozilla/5.0 (compatible; BitGooseBot/0.1; +https://bitgoose.com/bot)";
+///
+/// Defined in [`bg_core::brand`] so the `/bot` page the URL points at is
+/// generated from the same string we send.
+pub use bg_core::brand::DEFAULT_UA;
 
 pub fn client(user_agent: &str) -> Result<reqwest::Client, IngestError> {
     Ok(reqwest::Client::builder()

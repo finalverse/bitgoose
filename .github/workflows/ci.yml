@@ -134,8 +134,19 @@ jobs:
           scan "Anthropic key"    'sk-ant-[A-Za-z0-9_-]{20,}'
           scan "AWS key"          'AKIA[0-9A-Z]{16}'
           scan "private key"      'BEGIN [A-Z ]*PRIVATE KEY'
-          if git rev-list --all --objects -- .env | grep -q .; then
-            echo "::error::.env appears in git history"
+          # Look for a blob actually named `.env` in any tree.
+          #
+          # The obvious `git rev-list --all --objects -- .env` does NOT work:
+          # with --objects, rev-list also emits every annotated tag as
+          # "<sha> <tagname>", and the pathspec does not filter those out. So
+          # the check reported ".env is in your history" the moment the repo
+          # got its first annotated tag. Matching on the path field is both
+          # correct and stricter — it catches a nested `config/.env` too, while
+          # leaving `.env.example` alone.
+          if git rev-list --objects --all \
+               | awk '{ $1 = ""; sub(/^ /, ""); if ($0 ~ /(^|\/)\.env$/) found = 1 }
+                      END { exit !found }'; then
+            echo "::error::a file named .env is committed somewhere in git history"
             fail=1
           fi
           exit $fail

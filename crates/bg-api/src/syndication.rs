@@ -19,6 +19,7 @@ use axum::Router;
 pub fn routes() -> Router<ApiState> {
     Router::new()
         .route("/robots.txt", get(robots))
+        .route("/bot", get(bot))
         .route("/feed.xml", get(rss))
         .route("/rss", get(rss))
         .route("/sitemap.xml", get(sitemap))
@@ -86,6 +87,95 @@ async fn robots() -> Response {
         body,
     )
         .into_response()
+}
+
+/// The page our crawler's User-Agent points at.
+///
+/// Every request BitGooseBot makes carries `+https://bitgoose.com/bot`, and the
+/// first thing a publisher does with an unfamiliar agent in their logs is open
+/// that URL. Answering it with a 404 is how a crawler gets blocked. Everything
+/// stated here is enforced in code, not promised: the limits come from
+/// [`bg_core::policy`] and the fetch behaviour from `bg-ingest`.
+async fn bot(State(s): State<ApiState>) -> Response {
+    // A raw literal rather than `\`-continuations: this is a plain-text page a
+    // human reads in a terminal, and `\` swallows the leading whitespace of the
+    // next line, so hanging indents under the bullets silently vanish.
+    const PAGE: &str = r#"{NAME}Bot — the {NAME} newsroom crawler
+
+User-Agent: {UA}
+Operator:   {NAME} ({BASE})
+Contact:    https://github.com/finalverse/bitgoose/issues
+
+WHAT IT FETCHES
+Publisher RSS/Atom feeds only, and no more than one request per feed per poll.
+It does not crawl article pages, follow links out of a feed, or fetch images,
+scripts or stylesheets.
+
+HOW IT BEHAVES
+  * robots.txt is fetched and honoured before any feed request; a Disallow on
+    the feed path drops the source from the roster entirely. Allow/Disallow
+    prefixes and per-agent groups are supported; `$` anchoring is not, and
+    anything it cannot parse is treated as a Disallow.
+  * Conditional GET on every poll (If-None-Match / If-Modified-Since), so an
+    unchanged feed costs you a 304 and no body.
+  * Per-source poll interval, {INTERVAL}s at the fastest, with a small number
+    of feeds in flight at once. It does not burst.
+
+WHAT IT DOES WITH WHAT IT READS
+Feed text is used to identify and cross-check events. It is held as a private
+working copy and is never served. Published articles are original synthesis;
+any direct quotation is capped at {QUOTE_CAP} words, attributed by name, and
+carries a link back to you. These are hard publish gates — output that breaks
+them is blocked, not corrected.
+
+HOW TO LIMIT OR BLOCK IT
+  User-agent: BitGooseBot
+  Disallow: /
+
+Crawl-delay is NOT parsed. The fixed {INTERVAL}s floor above is more
+conservative than the values publishers normally set, but if you need us
+slower or gone, open an issue at the link above and we will change it — no
+argument, no appeal process.
+
+Our own feed, on the same terms we ask of you: {BASE}/feed.xml
+"#;
+    let body = PAGE
+        .replace("{NAME}", bg_core::brand::NAME)
+        .replace("{DOMAIN}", bg_core::brand::DOMAIN)
+        .replace("{UA}", &crawler_ua())
+        .replace("{BASE}", &base_url())
+        .replace("{INTERVAL}", &fastest_poll_interval(&s).await.to_string())
+        .replace("{QUOTE_CAP}", &bg_core::policy::MAX_QUOTE_WORDS.to_string());
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        body,
+    )
+        .into_response()
+}
+
+/// The User-Agent the ingester actually sends.
+///
+/// Resolved the same way the worker resolves it, so the page cannot advertise
+/// one agent while the crawler sends another — which is worse than having no
+/// page at all.
+fn crawler_ua() -> String {
+    std::env::var("BG_USER_AGENT").unwrap_or_else(|_| bg_core::brand::DEFAULT_UA.to_string())
+}
+
+/// The shortest poll interval across the live source roster.
+///
+/// Read from the roster rather than hardcoded: this is a promise about our
+/// request rate made to the people we poll, and adding one fast source must not
+/// be able to turn it into a false one. Falls back to the slowest plausible
+/// claim if the roster cannot be read — understating our politeness is the safe
+/// direction to be wrong in.
+async fn fastest_poll_interval(s: &ApiState) -> i32 {
+    bg_db::sources::all(&s.db)
+        .await
+        .ok()
+        .and_then(|rows| rows.iter().map(|r| r.poll_interval_s).min())
+        .unwrap_or(300)
 }
 
 async fn rss(State(s): State<ApiState>) -> Response {
