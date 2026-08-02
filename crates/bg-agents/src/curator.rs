@@ -258,12 +258,130 @@ pub async fn rescore(ctx: &Ctx, story: StoryId) -> Result<i16> {
 
     let score = (peak_triage + corroboration + trust_adj + velocity_bonus).clamp(0.0, 100.0) as i16;
     bg_db::stories::set_scores(&ctx.db, story, score, velocity).await?;
+
+    // Carry a lead image up from the items.
+    //
+    // Publishers put one in the feed for almost everything — 224 of our first
+    // 234 items had one — but nothing promoted it to the story, so every page
+    // rendered as a wall of text. This runs here rather than at creation
+    // because the seed item is often the one *without* an image: a
+    // corroborating outlet attached later can supply it, and `set_meta`
+    // COALESCEs, so the first usable one wins and later passes leave it alone.
+    if let Some(img) = pick_lead_image(&items) {
+        bg_db::stories::set_meta(&ctx.db, story, None, None, &[], Some(&img)).await?;
+    }
+
     Ok(score)
+}
+
+/// Choose the image to represent a story, or nothing.
+///
+/// Earliest-published first: where several outlets covered one event, the first
+/// to publish is likeliest to own the photograph rather than to have picked up
+/// the same handout.
+fn pick_lead_image(items: &[bg_core::domain::RawItem]) -> Option<String> {
+    let mut with_images: Vec<&bg_core::domain::RawItem> = items
+        .iter()
+        .filter(|i| i.image_url.as_deref().is_some_and(usable_image))
+        .collect();
+    with_images.sort_by_key(|i| i.published_at);
+    with_images
+        .first()
+        .and_then(|i| i.image_url.as_deref())
+        .map(|u| u.trim().to_string())
+}
+
+/// Reject what is not really an editorial image.
+///
+/// Feeds carry tracking pixels, spacers and share-button sprites in the same
+/// fields as photography, and one of those stretched across a lead slot looks
+/// considerably worse than no image at all.
+fn usable_image(url: &str) -> bool {
+    let u = url.trim();
+    if !(u.starts_with("https://") || u.starts_with("http://")) {
+        return false;
+    }
+    let lower = u.to_ascii_lowercase();
+    const JUNK: &[&str] = &[
+        "pixel",
+        "spacer",
+        "blank.",
+        "1x1",
+        "avatar",
+        "gravatar",
+        "logo",
+        "icon",
+        "badge",
+        "feedburner",
+        "doubleclick",
+        "/ad/",
+        "/ads/",
+        "sharethis",
+        "addthis",
+    ];
+    if JUNK.iter().any(|j| lower.contains(j)) {
+        return false;
+    }
+    // In a news feed an SVG is nearly always chrome rather than photography.
+    !lower.split('?').next().unwrap_or("").ends_with(".svg")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracking_pixels_and_chrome_are_not_lead_images() {
+        for bad in [
+            "https://x.test/pixel.gif",
+            "https://x.test/img/1x1.png",
+            "https://x.test/assets/logo-dark.png",
+            "https://x.test/static/icon-share.png",
+            "https://x.test/brand.svg",
+            "https://x.test/brand.svg?v=3",
+            "//x.test/protocol-relative.jpg",
+            "data:image/png;base64,iVBOR",
+        ] {
+            assert!(!usable_image(bad), "should have rejected {bad}");
+        }
+        for good in [
+            "https://cdn.sanity.io/images/6oftkxoa/production/0dfd625aaaf.jpg",
+            "https://www.tbstat.com/wp/uploads/2023/04/20230411_Hack_Generic_1-800x450.jpg",
+        ] {
+            assert!(usable_image(good), "should have accepted {good}");
+        }
+    }
+
+    #[test]
+    fn the_lead_image_comes_from_the_earliest_outlet_that_had_one() {
+        let src = SourceId::new();
+        let mut late = item(src, "Solana outage halts block production");
+        late.published_at = Utc::now();
+        late.image_url = Some("https://x.test/late.jpg".into());
+
+        let mut early = item(src, "Solana outage halts block production");
+        early.published_at = Utc::now() - chrono::Duration::hours(3);
+        early.image_url = Some("https://x.test/early.jpg".into());
+
+        // Earlier still, but only a tracking pixel — must not win.
+        let mut earliest = item(src, "Solana outage halts block production");
+        earliest.published_at = Utc::now() - chrono::Duration::hours(5);
+        earliest.image_url = Some("https://x.test/pixel.gif".into());
+
+        let picked = pick_lead_image(&[late, early, earliest]);
+        assert_eq!(picked.as_deref(), Some("https://x.test/early.jpg"));
+    }
+
+    #[test]
+    fn a_story_with_no_usable_image_gets_none() {
+        let src = SourceId::new();
+        let mut a = item(src, "Quiet story");
+        a.image_url = None;
+        let mut b = item(src, "Quiet story");
+        b.image_url = Some("https://x.test/spacer.gif".into());
+        assert_eq!(pick_lead_image(&[a, b]), None);
+    }
+
     use bg_core::ids::{RawItemId, SourceId};
     use bg_core::text::simhash64;
 

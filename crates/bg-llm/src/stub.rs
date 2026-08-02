@@ -75,22 +75,38 @@ fn first_sentence(s: &str) -> String {
 /// genuine headline out gives realistic offline content.
 fn subject_of(prompt: &str) -> String {
     for line in prompt.lines() {
-        let l = line.trim();
-        for prefix in ["Headline: ", "Story: ", "- ", "[0] "] {
+        let mut l = line.trim();
+        for prefix in ["Headline: ", "Story: ", "- ", "* ", "[0] "] {
             if let Some(rest) = l.strip_prefix(prefix) {
-                // Several prompts annotate each line with a bracketed status
-                // (`- [Corroborated] ...`); that is scaffolding, not subject.
-                let rest = match rest.trim().split_once(']') {
-                    Some((tag, after)) if tag.starts_with('[') => after.trim(),
-                    _ => rest.trim(),
-                };
-                if rest.len() > 12 && !rest.starts_with("===") {
-                    return rest.to_string();
-                }
+                l = rest.trim();
+                break;
             }
         }
+        let l = strip_leading_tag(l);
+        // A line ending in a colon is framing that introduces what comes next
+        // ("Verified claims:"), not the subject. Skipping those is what stopped
+        // the fallback from lifting the label instead of the story.
+        if l.len() > 12 && !l.starts_with("===") && !l.ends_with(':') {
+            return l.to_string();
+        }
     }
-    first_sentence(prompt)
+    strip_leading_tag(&first_sentence(prompt)).to_string()
+}
+
+/// Drop a leading `[Something]` annotation.
+///
+/// Prompts label lines with a bracketed status — `[Corroborated] …` — which is
+/// scaffolding, not subject. This used to run only on lines that also carried a
+/// known prefix like `- `, so a line *starting* with the tag fell through to
+/// `first_sentence` with the tag attached, and a real published headline (and
+/// its `og:title`) went out reading "[Corroborated] Crypto faces 3 barriers…".
+/// Applying it to whatever subject is chosen closes that off for good.
+fn strip_leading_tag(s: &str) -> &str {
+    let t = s.trim();
+    match t.strip_prefix('[').and_then(|r| r.split_once(']')) {
+        Some((_tag, after)) => after.trim(),
+        None => t,
+    }
 }
 
 /// Build a value satisfying `schema`.
@@ -309,6 +325,29 @@ impl LlmProvider for StubProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bracketed_status_never_survives_into_the_subject() {
+        // The shape that reached production: the tag opens the line, so none of
+        // the known prefixes match and it fell through with the tag attached.
+        let prompt = "Verified claims:\n[Corroborated] Crypto faces 3 barriers to next bull run.";
+        assert_eq!(
+            subject_of(prompt),
+            "Crypto faces 3 barriers to next bull run."
+        );
+        // Still handled when it follows a prefix.
+        let prompt = "- [Disputed] Solana outage halts block production for four hours";
+        assert_eq!(
+            subject_of(prompt),
+            "Solana outage halts block production for four hours"
+        );
+        // A headline that merely contains brackets later is left alone.
+        assert_eq!(
+            strip_leading_tag("Coinbase [sic] beats estimates"),
+            "Coinbase [sic] beats estimates"
+        );
+    }
+
     use crate::schema as s;
     use bg_core::domain::ModelTier;
 

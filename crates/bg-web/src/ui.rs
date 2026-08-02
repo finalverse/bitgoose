@@ -248,6 +248,71 @@ pub fn Ticker(prices: Vec<Tick>) -> impl IntoView {
     .into_any()
 }
 
+/// A publisher's image, shown on our page and credited back to them.
+///
+/// Hotlinked deliberately. These come out of the `<media:*>` and `<enclosure>`
+/// fields of a feed — the parts a publisher populates *so that* aggregators
+/// display them — so serving them from the publisher's own CDN keeps their
+/// analytics and their control intact. Copying them onto our storage would take
+/// both away, and would be the point at which showing someone's photograph
+/// starts to look like appropriating it.
+///
+/// `shape` picks the aspect ratio, so a missing or slow image reserves its space
+/// instead of shoving the headline down the page when it arrives.
+#[component]
+pub fn SourcedImage(
+    url: String,
+    alt: String,
+    credit: String,
+    credit_url: String,
+    #[prop(default = "media-wide")] shape: &'static str,
+    #[prop(default = true)] show_credit: bool,
+) -> impl IntoView {
+    if url.is_empty() {
+        return None::<AnyView>.into_any();
+    }
+    // Publishers move and expire images constantly, and a broken-image glyph
+    // where a photograph should be looks worse than a clean text card. On error
+    // the whole figure removes itself.
+    let on_error = move |ev: leptos::ev::ErrorEvent| {
+        // Via web-sys rather than the `wasm-bindgen` crate directly: that one
+        // is an optional dependency enabled only by the `hydrate` feature, and
+        // this component also compiles into the SSR build.
+        use web_sys::wasm_bindgen::JsCast;
+        if let Some(img) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        {
+            if let Some(fig) = img.closest("figure").ok().flatten() {
+                let _ = fig.set_attribute("hidden", "hidden");
+            }
+        }
+    };
+    view! {
+        <figure class=format!("media {shape}")>
+            <img
+                src=url
+                alt=alt
+                loading="lazy"
+                decoding="async"
+                on:error=on_error
+            />
+            {(show_credit && !credit.is_empty())
+                .then(|| {
+                    view! {
+                        <figcaption>
+                            "Image: "
+                            <a href=credit_url.clone() target="_blank" rel="noopener nofollow">
+                                {credit.clone()}
+                            </a>
+                        </figcaption>
+                    }
+                })}
+        </figure>
+    }
+    .into_any()
+}
+
 /// Story card, used across every listing.
 #[component]
 pub fn Card(story: StoryCard) -> impl IntoView {
@@ -255,6 +320,16 @@ pub fn Card(story: StoryCard) -> impl IntoView {
     let is_wire = story.kind == "wire";
     view! {
         <article class="card">
+            <a href=href.clone() class="card-media-link" aria-hidden="true" tabindex="-1">
+                <SourcedImage
+                    url=story.image_url.clone()
+                    alt=String::new()
+                    credit=story.lead_source.clone()
+                    credit_url=story.lead_url.clone()
+                    shape="media-card"
+                    show_credit=false
+                />
+            </a>
             <div class="meta">
                 <a href=format!("/section/{}", story.category) class="kicker">
                     {story.category_label.clone()}

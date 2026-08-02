@@ -793,3 +793,74 @@ code { font-family: var(--mono); font-size: 0.88em; }
 .mt-0 { margin-top: 0; }
 .mt-2 { margin-top: 2rem; }
 .mb-1 { margin-bottom: 1rem; }
+
+/* ==========================================================================
+   media — publishers' images, hotlinked and credited
+   ==========================================================================
+   Every one of these reserves its aspect ratio before the image arrives.
+   Without that, a page of lazy-loaded remote images shoves its own headlines
+   down as each one lands, which on a slow connection is most of the visit. */
+
+.media {
+  margin: 0;
+  overflow: hidden;
+  background: var(--ink-700);
+  border-radius: var(--r);
+  position: relative;
+}
+.media[hidden] { display: none; }
+
+.media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Fades in rather than snapping, which hides the last of the decode. */
+  animation: media-in 0.25s ease both;
+}
+@keyframes media-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .media img { animation: none; }
+}
+
+.media figcaption {
+  font-family: var(--sans);
+  font-size: 0.68rem;
+  color: var(--faint);
+  padding: 0.4rem 0.1rem 0;
+  letter-spacing: 0.01em;
+}
+.media figcaption a { color: var(--muted); }
+.media figcaption a:hover { color: var(--gold); }
+
+/* 16:9 for anything editorial; feeds overwhelmingly ship that ratio, so it
+   crops least. */
+.media-lead, .media-hero { aspect-ratio: 16 / 9; }
+.media-card { aspect-ratio: 16 / 9; margin-bottom: 0.7rem; }
+.media-thumb { aspect-ratio: 1 / 1; }
+
+/* The caption must not be clipped by the ratio box, so the ratio goes on the
+   image rather than the figure wherever a caption is shown. */
+.media-lead, .media-hero { aspect-ratio: auto; }
+.media-lead img, .media-hero img { aspect-ratio: 16 / 9; }
+
+.media-lead { margin-top: 1.25rem; }
+.media-hero { margin: 1.5rem 0 2rem; }
+
+.lead-media-link, .card-media-link, .wire-thumb-link { display: block; }
+
+/* Wire rows gain a third column for the thumb — the base rule is `4.5rem 1fr`,
+   and dropping a third child into a two-column grid would wrap it onto its own
+   row. */
+.wire-item {
+  align-items: start;
+  grid-template-columns: 4.5rem 92px 1fr;
+}
+.wire-thumb-link { width: 92px; }
+
+@media (max-width: 640px) {
+  /* Below this the thumb costs more width than it earns. */
+  .wire-thumb-link { display: none; }
+  .wire-item { grid-template-columns: 1fr; }
+  .media-hero { margin: 1rem 0 1.5rem; }
+}

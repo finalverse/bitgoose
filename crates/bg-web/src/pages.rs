@@ -133,6 +133,15 @@ fn LeadStory(story: StoryCard) -> impl IntoView {
                 <a href=format!("/story/{}", story.slug)>{story.title.clone()}</a>
             </h2>
             {(!story.dek.is_empty()).then(|| view! { <p class="dek">{story.dek.clone()}</p> })}
+            <a href=format!("/story/{}", story.slug) class="lead-media-link">
+                <SourcedImage
+                    url=story.image_url.clone()
+                    alt=story.title.clone()
+                    credit=story.lead_source.clone()
+                    credit_url=story.lead_url.clone()
+                    shape="media-lead"
+                />
+            </a>
         </article>
     }
 }
@@ -224,6 +233,16 @@ fn WireRow(story: StoryCard) -> impl IntoView {
     view! {
         <article class="wire-item">
             <time class="wire-time">{story.ago.clone()}</time>
+            <a href=format!("/story/{}", story.slug) class="wire-thumb-link" aria-hidden="true" tabindex="-1">
+                <SourcedImage
+                    url=story.image_url.clone()
+                    alt=String::new()
+                    credit=story.lead_source.clone()
+                    credit_url=story.lead_url.clone()
+                    shape="media-thumb"
+                    show_credit=false
+                />
+            </a>
             <div>
                 <h3 class="wire-title">
                     <a href=format!("/story/{}", story.slug)>{story.title.clone()}</a>
@@ -409,6 +428,13 @@ fn StoryView(story: StoryPage) -> impl IntoView {
                                 })}
                         </div>
                     </header>
+                    <SourcedImage
+                        url=story.image_url.clone()
+                        alt=story.headline.clone()
+                        credit=story.image_credit.clone()
+                        credit_url=story.image_credit_url.clone()
+                        shape="media-hero"
+                    />
 
                     {(!corrections.is_empty())
                         .then(|| {
@@ -516,6 +542,17 @@ fn StoryMeta(story: StoryPage) -> impl IntoView {
         <Meta property="article:modified_time" content=story.iso_modified.clone() />
         <Meta property="article:section" content=story.category_label.clone() />
 
+        // `summary_large_image` was already declared, but with no image to go
+        // with it every share fell back to a bare text card.
+        {(!story.image_url.is_empty())
+            .then(|| {
+                view! {
+                    <>
+                        <Meta property="og:image" content=story.image_url.clone() />
+                        <Meta name="twitter:image" content=story.image_url.clone() />
+                    </>
+                }
+            })}
         <Meta name="twitter:card" content="summary_large_image" />
         <Meta name="twitter:title" content=story.headline.clone() />
         <Meta name="twitter:description" content=desc />

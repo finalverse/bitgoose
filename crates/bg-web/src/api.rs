@@ -58,6 +58,7 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
         assets: s.assets.clone(),
         lead_source: lead.map(|(n, _)| n.to_string()).unwrap_or_default(),
         lead_url: lead.map(|(_, u)| u.to_string()).unwrap_or_default(),
+        image_url: s.image_url.clone().unwrap_or_default(),
     }
 }
 
@@ -147,6 +148,7 @@ pub async fn get_front_page() -> Result<FrontPage, ServerFnError> {
             assets: w.assets.clone(),
             lead_source: w.source_name.clone(),
             lead_url: w.source_url.clone(),
+            image_url: w.image_url.clone().unwrap_or_default(),
         })
         .collect();
 
@@ -209,6 +211,7 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
                 assets: w.assets.clone(),
                 lead_source: w.source_name.clone(),
                 lead_url: w.source_url.clone(),
+                image_url: w.image_url.clone().unwrap_or_default(),
             })
             .collect());
     }
@@ -305,6 +308,14 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         .unwrap_or_else(|_| format!("https://{}", bg_core::brand::DOMAIN));
     let canonical = format!("{}/story/{}", base.trim_end_matches('/'), story.slug);
 
+    // The lead image and who to credit for it. `refs` is ordered seed-first, so
+    // its head is the outlet the image most likely came from.
+    let image_url = story.image_url.clone().unwrap_or_default();
+    let (image_credit, image_credit_url) = refs
+        .first()
+        .map(|r| (r.name.clone(), r.url.clone()))
+        .unwrap_or_default();
+
     // schema.org NewsArticle. `citation` carries every source URL, which is
     // both honest and the structured-data way to say "this is synthesis over
     // other people's reporting, and here is whose".
@@ -317,6 +328,10 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         "mainEntityOfPage": { "@type": "WebPage", "@id": canonical },
         "datePublished": published.to_rfc3339(),
         "dateModified": story.updated_at.to_rfc3339(),
+        // Google News and most aggregators will not feature an article that
+        // has no image in its structured data.
+        "image": if image_url.is_empty() { serde_json::Value::Null }
+                 else { serde_json::json!([image_url]) },
         "articleSection": story.category.label(),
         "inLanguage": "en",
         "isAccessibleForFree": true,
@@ -342,6 +357,9 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
 
     Ok(Some(StoryPage {
         slug: story.slug.clone(),
+        image_url,
+        image_credit,
+        image_credit_url,
         headline,
         dek: article
             .as_ref()

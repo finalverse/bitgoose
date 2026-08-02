@@ -22,6 +22,11 @@ pub struct StoryCard {
     pub assets: Vec<String>,
     pub lead_source: String,
     pub lead_url: String,
+    /// Lead image, hotlinked from the publisher who syndicated it; empty when
+    /// the feed carried none. Never copied to our own storage — it stays the
+    /// publisher's asset on the publisher's CDN, credited through `lead_source`
+    /// and linked back through `lead_url`.
+    pub image_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,6 +48,12 @@ pub struct Tick {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoryPage {
     pub slug: String,
+    /// Lead image, hotlinked from the publisher who syndicated it. Also the
+    /// `og:image` — without one, every share of this story on X, Telegram or
+    /// Discord renders as a bare text card.
+    pub image_url: String,
+    pub image_credit: String,
+    pub image_credit_url: String,
     pub headline: String,
     pub dek: String,
     pub body_html: String,

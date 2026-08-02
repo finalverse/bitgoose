@@ -128,6 +128,15 @@ any direct quotation is capped at {QUOTE_CAP} words, attributed by name, and
 carries a link back to you. These are hard publish gates — output that breaks
 them is blocked, not corrected.
 
+IMAGES
+Where your feed declares one — <media:content>, <media:thumbnail> or an
+<enclosure> — we may show it beside the headline, credited to you by name and
+linked back to the article. It is referenced from your own CDN, never copied
+onto ours, so the request is the reader's browser and the analytics and the
+control stay yours. Only media you put in the feed is ever used; we do not open
+the article page to look for more. Send us a Disallow, or an issue at the link
+above, and we will stop.
+
 HOW TO LIMIT OR BLOCK IT
   User-agent: BitGooseBot
   Disallow: /

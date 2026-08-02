@@ -14,6 +14,7 @@ use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
+use leptos_router::SsrMode;
 
 /// The HTML document. cargo-leptos calls this to server-render every page.
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -67,7 +68,18 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/wire") view=pages::Wire />
                     <Route path=path!("/desk") view=pages::Desk />
                     <Route path=path!("/section/:category") view=pages::Section />
-                    <Route path=path!("/story/:slug") view=pages::Story />
+                    // The one route that must not stream out of order.
+                    //
+                    // A story's `og:image`, `og:title` and JSON-LD all depend on
+                    // data that lives under `Suspense`, and with the default
+                    // out-of-order mode the `<head>` is flushed before that data
+                    // exists — so none of it reached the initial HTML. Crawlers
+                    // for X, Telegram, Discord and Google News do not run JS and
+                    // read only that first response, which meant every share of
+                    // a BitGoose story rendered as a bare text card no matter
+                    // what the page contained. `Async` waits for the data and
+                    // sends one complete document.
+                    <Route path=path!("/story/:slug") view=pages::Story ssr=SsrMode::Async />
                     <Route path=path!("/flock") view=pages::Flock />
                     <Route path=path!("/prices") view=pages::Prices />
                     <Route path=path!("/asset/:ticker") view=pages::Asset />
