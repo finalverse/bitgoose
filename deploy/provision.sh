@@ -98,6 +98,10 @@ DATABASE_URL=postgres://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}
 LEPTOS_SITE_ADDR=127.0.0.1:3000
 LEPTOS_SITE_ROOT=${APP_HOME}/current/site
 LEPTOS_SITE_PKG_DIR=pkg
+# Resolves /pkg/<name>.{js,css,wasm}. Without it the page renders but the
+# hydration bundle and stylesheet 404, which looks like a broken deploy.
+LEPTOS_OUTPUT_NAME=bitgoose
+LEPTOS_ENV=PROD
 BG_PUBLIC_BASE_URL=https://bitgoose.com
 
 # Offline stub by default: the site runs with real feeds and real market data
@@ -144,9 +148,19 @@ echo "    wasm32 target present"
 
 if ! sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version >/dev/null 2>&1; then
   log "installing cargo-leptos (several minutes)"
-  sudo -u "$APP_USER" -H bash -lc \
-    "PATH=$APP_HOME/.cargo/bin:\$PATH CARGO_HOME=$APP_HOME/.cargo $APP_HOME/.cargo/bin/cargo install --locked cargo-leptos" \
-    >/dev/null 2>&1
+  # RUSTUP_HOME must be explicit. The cargo binary is a rustup shim that
+  # resolves the toolchain relative to it, and under `sudo -u` it does not
+  # inherit the service user's home — without this the shim reports "could not
+  # choose a version of cargo to run" and the install fails. Output goes to a
+  # log rather than /dev/null, because the previous version of this script
+  # discarded exactly that error and failed silently.
+  sudo -u "$APP_USER" -H env \
+    PATH="$APP_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin" \
+    CARGO_HOME="$APP_HOME/.cargo" \
+    RUSTUP_HOME="$APP_HOME/.rustup" \
+    "$APP_HOME/.cargo/bin/cargo" install --locked cargo-leptos \
+    > /tmp/bg-leptos-install.log 2>&1 \
+    || { echo "cargo-leptos install failed; see /tmp/bg-leptos-install.log" >&2; tail -20 /tmp/bg-leptos-install.log >&2; exit 1; }
 fi
 echo "    $(sudo -u "$APP_USER" -H "$APP_HOME/.cargo/bin/cargo-leptos" --version 2>&1 | head -1)"
 

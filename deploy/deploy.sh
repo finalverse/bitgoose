@@ -18,6 +18,10 @@ RELEASE="$APP_HOME/releases/$STAMP"
 
 export PATH="$APP_HOME/.cargo/bin:$PATH"
 export CARGO_HOME="$APP_HOME/.cargo"
+# The cargo binary is a rustup shim; without RUSTUP_HOME it cannot resolve a
+# toolchain when this script runs under `sudo -u` and fails with a misleading
+# "could not choose a version of cargo to run".
+export RUSTUP_HOME="$APP_HOME/.rustup"
 
 log() { printf '\n\033[1;33m==> %s\033[0m\n' "$1"; }
 
