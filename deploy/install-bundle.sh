@@ -94,6 +94,12 @@ ln -sfn "$RELEASE" "$APP_HOME/current.new"
 mv -Tf "$APP_HOME/current.new" "$APP_HOME/current"
 ls -1dt "$APP_HOME"/releases/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf
 
+# Enable before restarting, every time. Nothing else in this repo does it, so a
+# host could be provisioned, deployed, verified and serving happily — and then
+# lose the site for good at the first reboot, with both units sitting there
+# disabled. Idempotent, so reasserting it on every deploy costs nothing.
+systemctl enable bitgoose-web bitgoose-worker >/dev/null 2>&1 || true
+
 systemctl restart bitgoose-web
 sleep 3
 systemctl restart bitgoose-worker || true
