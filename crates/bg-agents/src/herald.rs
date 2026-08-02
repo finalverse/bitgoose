@@ -11,6 +11,7 @@ use bg_core::domain::{AgentRole, ModelTier};
 use bg_core::ids::StoryId;
 use bg_llm::{schema as sch, Request};
 use serde::Deserialize;
+use tracing::info;
 
 pub const SYSTEM: &str = "Herald writes Wire summaries.
 
@@ -42,6 +43,8 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<crate::gander::Outcome> {
     let items = bg_db::items::by_story(&ctx.db, story).await?;
     let s = bg_db::stories::by_id(&ctx.db, story).await?;
     let system = crate::system_prompt(ctx, AgentRole::Herald).await;
+    // Kept out here because `s` moves into the stage closure below.
+    let headline = s.title.clone();
 
     let summary = stage(
         ctx,
@@ -70,6 +73,21 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<crate::gander::Outcome> {
         },
     )
     .await?;
+
+    // A Wire card is headline + source + link-out; the summary is the only part
+    // that has to earn its place. One that restates the headline occupies the
+    // slot where the reader expects something new, so it is dropped rather than
+    // printed — the card renders cleanly without it.
+    //
+    // This matters most with the offline stub, whose summaries are restatements
+    // by construction, but the rule is deliberately not conditional on the
+    // provider: a live model producing a lazy dek gets the same treatment.
+    let summary = if bg_core::text::dek_adds_nothing(&headline, &summary) {
+        info!(story = %story, "wire summary restated the headline; publishing without one");
+        String::new()
+    } else {
+        summary
+    };
 
     crate::gander::publish_wire(ctx, story, &summary).await
 }
