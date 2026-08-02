@@ -122,7 +122,12 @@ BG_DESK_THRESHOLD=62
 BG_DESK_MAX_PER_RUN=3
 BG_RUN_BUDGET_USD=2.00
 # BG_USER_AGENT is deliberately unset — see .env.example.
-BG_INGEST_CONCURRENCY=4
+# Feed fetching. Raise the timeout and drop concurrency on a slow uplink: the
+# largest source feed is ~262KB, which needs ~26s at 10KB/s, and concurrency
+# divides that bandwidth rather than adding to it.
+BG_HTTP_TIMEOUT_S=120
+BG_HTTP_CONNECT_TIMEOUT_S=15
+BG_INGEST_CONCURRENCY=2
 RUST_LOG=info,sqlx=warn
 ENVEOF
   chmod 600 "$ENV_FILE"

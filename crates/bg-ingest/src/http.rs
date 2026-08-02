@@ -13,11 +13,34 @@ use std::time::Duration;
 /// generated from the same string we send.
 pub use bg_core::brand::DEFAULT_UA;
 
+/// Whole-request timeout, seconds. Override with `BG_HTTP_TIMEOUT_S`.
+///
+/// 20s is right for a well-connected host and wrong for a constrained one, and
+/// the failure is quiet: the largest feeds simply time out and the roster
+/// silently shrinks. Measured, the sources we poll run from 29KB to 262KB, so
+/// the biggest needs 26s on a 10KB/s uplink before any concurrency — and
+/// `BG_INGEST_CONCURRENCY` divides that bandwidth, making a higher setting
+/// actively harmful on a slow link. Both are configurable for that reason.
+const DEFAULT_TIMEOUT_S: u64 = 20;
+const DEFAULT_CONNECT_TIMEOUT_S: u64 = 8;
+
+fn secs_from_env(key: &str, default: u64) -> Duration {
+    let v = std::env::var(key)
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(default);
+    Duration::from_secs(v)
+}
+
 pub fn client(user_agent: &str) -> Result<reqwest::Client, IngestError> {
     Ok(reqwest::Client::builder()
         .user_agent(user_agent)
-        .timeout(Duration::from_secs(20))
-        .connect_timeout(Duration::from_secs(8))
+        .timeout(secs_from_env("BG_HTTP_TIMEOUT_S", DEFAULT_TIMEOUT_S))
+        .connect_timeout(secs_from_env(
+            "BG_HTTP_CONNECT_TIMEOUT_S",
+            DEFAULT_CONNECT_TIMEOUT_S,
+        ))
         // Feeds redirect constantly (blockworks.co -> blockworks.com,
         // coindesk's trailing slash), so following them is required, but a long
         // chain means someone is bouncing us and we should stop.
@@ -87,4 +110,23 @@ pub async fn conditional_get(
         last_modified: new_lm,
         final_url,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timeout_overrides_are_read_but_never_accept_zero() {
+        // A zero or unparseable override would mean "no timeout" in reqwest,
+        // which turns one wedged publisher into a stuck poll cycle.
+        unsafe { std::env::set_var("BG_TEST_TMO", "0") };
+        assert_eq!(secs_from_env("BG_TEST_TMO", 20), Duration::from_secs(20));
+        unsafe { std::env::set_var("BG_TEST_TMO", "not-a-number") };
+        assert_eq!(secs_from_env("BG_TEST_TMO", 20), Duration::from_secs(20));
+        unsafe { std::env::set_var("BG_TEST_TMO", " 120 ") };
+        assert_eq!(secs_from_env("BG_TEST_TMO", 20), Duration::from_secs(120));
+        unsafe { std::env::remove_var("BG_TEST_TMO") };
+        assert_eq!(secs_from_env("BG_TEST_TMO", 20), Duration::from_secs(20));
+    }
 }
