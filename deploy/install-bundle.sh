@@ -37,45 +37,68 @@ fi
 # -- fetch ------------------------------------------------------------------
 # Kept in /var/cache rather than /tmp: /tmp is a tmpfs here, so a partial
 # download would not survive a reboot and the resume would start over.
-log "fetching $ASSET ($TAG)"
-for attempt in $(seq 1 40); do
-  if curl -fSL -C - --retry 3 --retry-all-errors \
-       --speed-limit 1000 --speed-time 120 -m 3600 \
-       -o "$CACHE/$ASSET" "$BASE/$ASSET"; then
-    break
-  fi
-  have=$(stat -c%s "$CACHE/$ASSET" 2>/dev/null || echo 0)
-  echo "    attempt $attempt stopped at ${have} bytes; resuming"
-  # A resume that makes no progress twice running means the transfer is
-  # wedged rather than slow — start clean instead of looping forever.
-  if [ "${have:-0}" = "${last_have:-x}" ] && [ "$attempt" -gt 3 ]; then
-    echo "    no progress across attempts; restarting from zero"
-    rm -f "$CACHE/$ASSET"
-  fi
-  last_have="$have"
-  sleep 5
-done
-
+#
+# The checksum is fetched FIRST and names the cache file, because the cache is
+# content-addressed. The obvious layout — one fixed `$CACHE/$ASSET` — is unsafe
+# with `curl -C -`: deploying v0.1.6 onto a host that still had a complete
+# v0.1.5 bundle at that path made curl try to *resume* one release onto
+# another, and the result failed verification. Keying by the expected digest
+# makes a cross-version resume impossible to express, and turns a repeat deploy
+# of the same build into a no-op.
+log "resolving $ASSET ($TAG)"
 curl -fsSL --retry 3 -m 120 -o "$CACHE/$ASSET.sha256" "$BASE/$ASSET.sha256"
-
-log "verifying"
 expected="$(awk '{print $1}' "$CACHE/$ASSET.sha256")"
-actual="$(sha256sum "$CACHE/$ASSET" | awk '{print $1}')"
-if [ "$expected" != "$actual" ]; then
-  echo "checksum mismatch — refusing to install" >&2
-  echo "  expected $expected" >&2
-  echo "  actual   $actual" >&2
-  # Delete the bad file so the next run re-fetches rather than resuming onto
-  # corrupt bytes forever.
-  rm -f "$CACHE/$ASSET"
+if ! printf '%s' "$expected" | grep -qE '^[0-9a-f]{64}$'; then
+  echo "could not read a sha256 for $TAG — refusing to guess" >&2
   exit 1
 fi
-echo "    sha256 ok"
+BUNDLE="$CACHE/$expected.tar.gz"
+echo "    expecting $expected"
+
+if [ -f "$BUNDLE" ] && [ "$(sha256sum "$BUNDLE" | awk '{print $1}')" = "$expected" ]; then
+  log "already cached and verified — skipping download"
+else
+  log "fetching $ASSET ($TAG)"
+  for attempt in $(seq 1 40); do
+    if curl -fSL -C - --retry 3 --retry-all-errors \
+         --speed-limit 1000 --speed-time 120 -m 3600 \
+         -o "$BUNDLE" "$BASE/$ASSET"; then
+      break
+    fi
+    have=$(stat -c%s "$BUNDLE" 2>/dev/null || echo 0)
+    echo "    attempt $attempt stopped at ${have} bytes; resuming"
+    # A resume that makes no progress twice running means the transfer is
+    # wedged rather than slow — start clean instead of looping forever.
+    if [ "${have:-0}" = "${last_have:-x}" ] && [ "$attempt" -gt 3 ]; then
+      echo "    no progress across attempts; restarting from zero"
+      rm -f "$BUNDLE"
+    fi
+    last_have="$have"
+    sleep 5
+  done
+
+  log "verifying"
+  actual="$(sha256sum "$BUNDLE" | awk '{print $1}')"
+  if [ "$expected" != "$actual" ]; then
+    echo "checksum mismatch — refusing to install" >&2
+    echo "  expected $expected" >&2
+    echo "  actual   $actual" >&2
+    # Delete the bad file so the next run re-fetches rather than resuming onto
+    # corrupt bytes forever.
+    rm -f "$BUNDLE"
+    exit 1
+  fi
+  echo "    sha256 ok"
+fi
+
+# Keep the two most recent bundles; older digests are dead weight on a host
+# whose disk is the only cheap resource here.
+ls -1t "$CACHE"/*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f
 
 # -- stage ------------------------------------------------------------------
 log "staging $RELEASE"
 mkdir -p "$RELEASE"
-tar xzf "$CACHE/$ASSET" -C "$RELEASE"
+tar xzf "$BUNDLE" -C "$RELEASE"
 chown -R "$APP_USER:$APP_GROUP" "$RELEASE"
 echo "    revision $(cat "$RELEASE/REVISION" 2>/dev/null | cut -c1-12), built $(cat "$RELEASE/BUILT_AT" 2>/dev/null)"
 
