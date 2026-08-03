@@ -1110,3 +1110,34 @@ a:hover > .media-play::after,
 .kind-research { color: #7aa2f7; }
 .kind-forum    { color: #9d7cd8; }
 .kind-video    { color: var(--gold); }
+
+/* The Wire as a full-width list rather than a rail. Used on desk pages below
+   the lead, and on /wire itself. Rows carry their own grid; this only owns the
+   rhythm between them and the rule that closes the section. */
+.wire-full {
+  border-top: 1px solid var(--line-soft);
+  margin-top: 0.25rem;
+}
+.wire-full .wire-item:last-child { border-bottom: none; }
+
+/* A desk page leads with one story at full width — wider than the lead in the
+   split layout, because there is no rail competing for the eye.
+   
+   The height is capped rather than left to the aspect ratio. At full column
+   width a 21:9 hero is over half a laptop viewport, which pushes every other
+   story below the fold and makes a news front page feel like a landing page.
+   `max-height` plus `object-fit: cover` keeps the crop cinematic while leaving
+   room for the stories underneath it to be seen. */
+.page > .lead-story { margin-bottom: 2rem; }
+.page > .lead-story .media-lead img {
+  aspect-ratio: 21 / 9;
+  max-height: 42vh;
+  object-fit: cover;
+}
+
+@media (width <= 760px) {
+  .page > .lead-story .media-lead img {
+    aspect-ratio: 16 / 9;
+    max-height: 34vh;
+  }
+}

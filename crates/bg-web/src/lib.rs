@@ -11,7 +11,7 @@ pub mod pages;
 pub mod ui;
 
 use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
+use leptos_meta::{provide_meta_context, HashedStylesheet, Link, Meta, MetaTags, Title};
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
 use leptos_router::SsrMode;
@@ -33,7 +33,11 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta name="color-scheme" content="dark light" />
                 <AutoReload options=options.clone() />
                 <HydrationScripts options=options.clone() />
-                <Stylesheet id="leptos" href="/pkg/bitgoose.css" />
+                // Resolves to /pkg/bitgoose.<hash>.css. The hash comes from
+                // hash.txt, which Leptos reads from the directory holding the
+                // running binary — so the deploy bundle must ship it next to
+                // bin/bg-web or the stylesheet silently 404s.
+                <HashedStylesheet options=options.clone() id="leptos" />
                 // Restores a saved theme choice before first paint. Doing this
                 // from the hydrated app instead would show one theme and then
                 // swap it, which is worse than not remembering at all.

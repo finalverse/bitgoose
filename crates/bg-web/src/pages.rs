@@ -130,19 +130,49 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
                             }
                                 .into_any()
                         }
+                        // A desk running entirely on the Wire still deserves a
+                        // front page rather than a flat list. Without a Desk
+                        // story to lead on, the strongest Wire item is promoted
+                        // to the lead slot and the next four become a card row:
+                        // a reader arriving here should be able to tell in one
+                        // glance what the most important thing is, which an
+                        // undifferentiated column of twenty identical rows
+                        // cannot do.
                         None => {
-                            let wire = fp.wire.clone();
+                            let mut rest = fp.wire.clone();
+                            let promoted = rest.remove(0);
+                            let feature: Vec<_> = rest.drain(..rest.len().min(4)).collect();
                             view! {
-                                <div class="rail-title">
-                                    <span>"The Wire"</span>
-                                    <a href="/wire">"All"</a>
-                                </div>
-                                <div class="wire-full">
-                                    {wire
-                                        .into_iter()
-                                        .map(|s| view! { <WireRow story=s /> })
-                                        .collect_view()}
-                                </div>
+                                <LeadStory story=promoted />
+                                {(!feature.is_empty())
+                                    .then(|| {
+                                        view! {
+                                            <div class="rail-title">
+                                                <span>"Also today"</span>
+                                            </div>
+                                            <div class="card-grid">
+                                                {feature
+                                                    .into_iter()
+                                                    .map(|s| view! { <Card story=s /> })
+                                                    .collect_view()}
+                                            </div>
+                                        }
+                                    })}
+                                {(!rest.is_empty())
+                                    .then(|| {
+                                        view! {
+                                            <div class="rail-title">
+                                                <span>"The Wire"</span>
+                                                <a href="/wire">"All"</a>
+                                            </div>
+                                            <div class="wire-full">
+                                                {rest
+                                                    .into_iter()
+                                                    .map(|s| view! { <WireRow story=s /> })
+                                                    .collect_view()}
+                                            </div>
+                                        }
+                                    })}
                             }
                                 .into_any()
                         }
@@ -304,7 +334,7 @@ pub fn Wire() -> impl IntoView {
                             <div>
                                 {stories
                                     .into_iter()
-                                    .map(|s| view! { <WireRow story=s /> })
+                                    .map(|s| view! { <WireRow story=s show_beat=true /> })
                                     .collect_view()}
                             </div>
                         }
@@ -317,7 +347,7 @@ pub fn Wire() -> impl IntoView {
 }
 
 #[component]
-fn WireRow(story: StoryCard) -> impl IntoView {
+fn WireRow(story: StoryCard, #[prop(optional)] show_beat: bool) -> impl IntoView {
     view! {
         <article class="wire-item">
             <time class="wire-time">{story.ago.clone()}</time>
@@ -340,7 +370,10 @@ fn WireRow(story: StoryCard) -> impl IntoView {
                 <div class="wire-foot">
                     <span class="kicker">{story.category_label.clone()}</span>
                     <KindTag kind=story.source_kind.clone() />
-                    <BeatTag beat=story.beat.clone() />
+                    // Only on blended surfaces. On /ai every card is AI, and a
+                    // tag repeated down the whole page is noise that competes
+                    // with the one tag that does carry information.
+                    {show_beat.then(|| view! { <BeatTag beat=story.beat.clone() /> })}
                     {(!story.lead_source.is_empty())
                         .then(|| {
                             view! {

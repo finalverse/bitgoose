@@ -93,6 +93,14 @@ lib-package = "bg-web"
 output-name = "bitgoose"
 site-root = "target/site"
 site-pkg-dir = "pkg"
+# Content-address the bundles. Without this cargo-leptos emits fixed names
+# (bitgoose.css/.js/.wasm), so nginx had to choose between caching a mutable URL
+# — which left every returning reader on the previous release's stylesheet for a
+# day — and revalidating on each page view, which this host's uplink cannot
+# afford because the app answers conditional requests with a full 1.2MB body.
+# Hashed filenames make the choice unnecessary: the URL changes when the content
+# does, so it can be cached hard and forever.
+hash-files = true
 style-file = "style/main.scss"
 assets-dir = "public"
 site-addr = "127.0.0.1:3000"

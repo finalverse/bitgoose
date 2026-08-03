@@ -98,6 +98,9 @@ jobs:
           mkdir -p bundle/bin
           cp target/release/bg-web bundle/bin/
           cp target/release/bg     bundle/bin/
+          # Leptos resolves hashed asset names from hash.txt in the *binary's*
+          # directory, so this must sit beside bg-web rather than in site/.
+          cp target/release/hash.txt bundle/bin/
           cp -r target/site        bundle/site
           cp -r migrations         bundle/migrations
           git rev-parse HEAD > bundle/REVISION
