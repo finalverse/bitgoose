@@ -34,6 +34,14 @@ use tracing::{info, warn};
 /// headline. 1,500 means at least a substantial excerpt or a fetched page.
 pub const MIN_GROUNDING_CHARS: usize = 1_500;
 
+/// Total words of source text put in one prompt, divided across the story's
+/// sources.
+///
+/// Sized against the tightest budget we run under — Groq's free tier at 8,000
+/// tokens a minute. 2,600 words is roughly 3,500 tokens, which leaves room for
+/// the system prompt, the schema and a 2,000-token reply inside one window.
+const TOTAL_SOURCE_WORDS: usize = 2_600;
+
 pub const SYSTEM: &str = "Skein reads a story and says what it means and where it goes.
 
 You are not summarising. A summary of the sources already exists and the reader \
@@ -197,13 +205,21 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<bool> {
         Some(story),
         "analyse",
         |run| async move {
+            // Budget the prompt as a whole rather than per source. A cap of 900
+            // words each is no cap at all on a ten-source story: that is ~12k
+            // tokens against a free tier of 8k a minute, so the biggest
+            // stories — the ones most worth analysing — would 429 on every
+            // attempt and never produce anything. Dividing a fixed budget
+            // means cost scales with the story count, not the source count.
+            let share = (TOTAL_SOURCE_WORDS / items.len().max(1)).clamp(120, 900);
+
             let mut prompt = String::from("Source material:\n\n");
             for (i, it) in items.iter().enumerate() {
                 prompt.push_str(&format!("=== SOURCE [{i}] ===\nHeadline: {}\n", it.title));
                 if let Some(body) = it.body_raw.as_deref().or(it.summary_raw.as_deref()) {
                     prompt.push_str(&format!(
                         "Text: {}\n",
-                        bg_core::text::truncate_words(body, 900)
+                        bg_core::text::truncate_words(body, share)
                     ));
                 }
                 prompt.push('\n');
@@ -390,4 +406,33 @@ mod tests {
         MIN_GROUNDING_CHARS > 600,
         "grounding floor is low enough for a bare RSS summary to pass"
     );
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    /// The prompt must not grow with the number of sources. A ten-source story
+    /// is the most worth analysing and was the one guaranteed to 429.
+    #[test]
+    fn prompt_size_is_bounded_however_many_sources_there_are() {
+        for n in [1usize, 3, 10, 40] {
+            let share = (TOTAL_SOURCE_WORDS / n.max(1)).clamp(120, 900);
+            let total = share * n;
+            assert!(
+                total <= TOTAL_SOURCE_WORDS.max(900) * 2,
+                "{n} sources would send {total} words"
+            );
+        }
+    }
+
+    /// ...but each source still gets enough text to be worth reading. The floor
+    /// matters more than the ceiling here: a 40-source pile-up that gives every
+    /// outlet twenty words is just headlines again, which is what the grounding
+    /// gate exists to prevent.
+    #[test]
+    fn each_source_keeps_a_usable_share() {
+        let share = (TOTAL_SOURCE_WORDS / 40).clamp(120, 900);
+        assert_eq!(share, 120);
+    }
 }
