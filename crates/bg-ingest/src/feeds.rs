@@ -138,20 +138,35 @@ async fn poll_inner(
             continue;
         };
 
-        // Mainstream finance sources are filtered for crypto relevance before
-        // anything else looks at them, so a day of equities coverage costs one
-        // string scan per item rather than a triage model call.
-        if src.kind == bg_core::domain::SourceKind::Finance {
-            let blurb = entry
-                .summary
-                .as_ref()
-                .map(|s| strip_html(&s.content))
-                .unwrap_or_default();
-            if !crate::relevance::is_crypto(&format!("{title} {blurb}")) {
-                rep.skipped += 1;
-                continue;
+        // Which desk does this belong to, and does it belong here at all?
+        //
+        // A source that pins a beat (arXiv cs.AI, CoinDesk) is taken wholesale:
+        // everything it publishes is on topic by definition. A general-interest
+        // source (Bloomberg, Ars Technica, The Verge) is routed one item at a
+        // time and dropped if it matches neither desk — their feeds are mostly
+        // equities and consumer gadgets, and taking them whole would bury the
+        // coverage we actually want.
+        //
+        // Deliberately a string scan rather than a triage model call: these
+        // outlets publish hundreds of items a day, and this answers a question
+        // a word list answers well.
+        let beat = match src.beat {
+            Some(b) => b,
+            None => {
+                let blurb = entry
+                    .summary
+                    .as_ref()
+                    .map(|s| strip_html(&s.content))
+                    .unwrap_or_default();
+                match crate::relevance::classify(&format!("{title} {blurb}")) {
+                    Some(b) => b,
+                    None => {
+                        rep.skipped += 1;
+                        continue;
+                    }
+                }
             }
-        }
+        };
 
         let published: DateTime<Utc> = entry.published.or(entry.updated).unwrap_or(now);
         if published > too_new || published < too_old {
@@ -244,6 +259,7 @@ async fn poll_inner(
             lang: feed.language.clone().unwrap_or_else(|| "en".into()),
             image_url: image,
             video_id,
+            beat: Some(beat),
         };
 
         match bg_db::items::insert_new(db, &item).await {

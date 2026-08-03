@@ -141,9 +141,21 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
             None => {
                 let category = item_category(ctx, &item).await;
                 let slug = bg_core::slug::slugify(&item.title);
-                let story =
-                    bg_db::stories::create(&ctx.db, &slug, StoryKind::Wire, &item.title, category)
-                        .await?;
+                let story = bg_db::stories::create(
+                    &ctx.db,
+                    &slug,
+                    StoryKind::Wire,
+                    &item.title,
+                    category,
+                    // The seed item was routed to a desk at ingest; the
+                    // story it opens belongs to the same one. Falling back
+                    // on the category keeps a story off the wrong desk when
+                    // an older item predates beat routing.
+                    item.beat
+                        .or_else(|| bg_core::domain::Beat::of_category(category))
+                        .unwrap_or(bg_core::domain::Beat::Crypto),
+                )
+                .await?;
                 bg_db::items::attach_to_story(&ctx.db, item.id, story.id, ItemRole::Seed).await?;
                 story.id
             }
@@ -409,6 +421,7 @@ mod tests {
             lang: "en".into(),
             image_url: None,
             video_id: None,
+            beat: None,
             story_id: Some(StoryId::new()),
             triaged: true,
         }

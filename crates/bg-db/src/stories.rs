@@ -8,7 +8,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 const COLS: &str = "id, slug, kind, status, title, summary, category, newsworthiness, velocity, \
-                    source_count, primary_asset, assets, image_url, video_id, first_seen_at, published_at, \
+                    source_count, primary_asset, assets, beat, image_url, video_id, first_seen_at, published_at, \
                     updated_at, editor_note";
 
 fn from_row(r: &PgRow) -> Result<Story> {
@@ -25,6 +25,7 @@ fn from_row(r: &PgRow) -> Result<Story> {
         source_count: r.try_get("source_count")?,
         primary_asset: r.try_get("primary_asset")?,
         assets: r.try_get("assets")?,
+        beat: enum_col::<bg_core::domain::Beat>(r, "beat")?,
         image_url: r.try_get("image_url")?,
         video_id: r.try_get("video_id")?,
         first_seen_at: r.try_get("first_seen_at")?,
@@ -44,6 +45,7 @@ pub async fn create(
     kind: StoryKind,
     title: &str,
     category: Category,
+    beat: bg_core::domain::Beat,
 ) -> Result<Story> {
     for attempt in 0..25u32 {
         let slug = if attempt == 0 {
@@ -52,8 +54,8 @@ pub async fn create(
             bg_core::slug::slug_with_suffix(base_slug, attempt + 1)
         };
         let res = crate::sql(format!(
-            "INSERT INTO stories (id, slug, kind, status, title, category)
-             VALUES ($1,$2,$3,'triage',$4,$5)
+            "INSERT INTO stories (id, slug, kind, status, title, category, beat)
+             VALUES ($1,$2,$3,'triage',$4,$5,$6)
              ON CONFLICT (slug) DO NOTHING
              RETURNING {COLS}"
         ))
@@ -62,6 +64,7 @@ pub async fn create(
         .bind(kind.as_str())
         .bind(title)
         .bind(category.as_str())
+        .bind(beat.as_str())
         .fetch_optional(&db.pool)
         .await?;
         if let Some(row) = res {

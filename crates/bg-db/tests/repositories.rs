@@ -78,6 +78,7 @@ async fn the_whole_graph_round_trips() {
         "https://decrypt.co",
         78,
         300,
+        None,
     )
     .await
     .unwrap();
@@ -90,6 +91,7 @@ async fn the_whole_graph_round_trips() {
         "https://theblock.co",
         82,
         300,
+        None,
     )
     .await
     .unwrap();
@@ -104,6 +106,7 @@ async fn the_whole_graph_round_trips() {
         "https://decrypt.co",
         80,
         300,
+        None,
     )
     .await
     .unwrap();
@@ -156,6 +159,7 @@ async fn the_whole_graph_round_trips() {
         lang: "en".into(),
         image_url: None,
         video_id: None,
+        beat: Some(Beat::Crypto),
     };
 
     let i1 = items::insert_new(
@@ -202,6 +206,7 @@ async fn the_whole_graph_round_trips() {
         StoryKind::Desk,
         "Exchange freezes funds",
         Category::Security,
+        Beat::Crypto,
     )
     .await
     .unwrap();
@@ -213,6 +218,7 @@ async fn the_whole_graph_round_trips() {
         StoryKind::Wire,
         "Same slug, other event",
         Category::Markets,
+        Beat::Crypto,
     )
     .await
     .unwrap();
@@ -684,12 +690,20 @@ async fn an_unknown_enum_token_fails_loudly_instead_of_defaulting() {
         "https://x.test",
         50,
         300,
+        None,
     )
     .await
     .unwrap();
-    let story = stories::create(&db, "s", StoryKind::Wire, "T", Category::Markets)
-        .await
-        .unwrap();
+    let story = stories::create(
+        &db,
+        "s",
+        StoryKind::Wire,
+        "T",
+        Category::Markets,
+        Beat::Crypto,
+    )
+    .await
+    .unwrap();
 
     // Write a value the CHECK constraint does not cover, simulating drift
     // between a future migration and this binary.
@@ -729,6 +743,7 @@ async fn held_stories_are_not_reachable_from_public_surfaces() {
         StoryKind::Wire,
         "T",
         Category::Markets,
+        Beat::Crypto,
     )
     .await
     .unwrap();

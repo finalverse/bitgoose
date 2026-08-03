@@ -70,6 +70,12 @@ str_enum! {
         /// crypto-relevant — their feeds are mostly equities and rates, and
         /// taking them wholesale would bury the coverage we want.
         Finance => "finance",
+        /// A preprint server. A paper is not a news item — it has authors, an
+        /// abstract and no editor — so it gets its own kind and its own card.
+        Research => "research",
+        /// Hacker News, Reddit. Discussion rather than reporting: the signal is
+        /// that practitioners are arguing about something. Never corroboration.
+        Forum => "forum",
         /// A channel that syndicates video (YouTube channel feeds today).
         /// Entries carry a provider video id and are embedded, never rehosted.
         Video => "video",
@@ -82,6 +88,21 @@ str_enum! {
 str_enum! {
     /// Editorial sections. Deliberately narrower than Decrypt's twelve — a
     /// section nobody files to is dead weight in the nav.
+    /// Which desk a story belongs to.
+    ///
+    /// BitGoose started as a crypto property and is now a frontier-technology
+    /// newsroom whose primary beat is AI. Beat is kept separate from
+    /// [`Category`] because they are genuinely orthogonal: "policy" means the
+    /// EU AI Act on one desk and a stablecoin bill on the other, and a reader
+    /// who wants one rarely wants the other. Collapsing them into a single flat
+    /// list would force a choice between losing the section or duplicating it.
+    pub enum Beat {
+        Ai => "ai",
+        Crypto => "crypto",
+    }
+}
+
+str_enum! {
     pub enum Category {
         Markets => "markets",
         Policy => "policy",
@@ -93,6 +114,14 @@ str_enum! {
         Nft => "nft",
         Gaming => "gaming",
         Culture => "culture",
+        /// Published research — papers, benchmarks, evaluations.
+        Research => "research",
+        /// A model or system shipping: weights, APIs, capability jumps.
+        Models => "models",
+        /// The physical layer — chips, datacentres, energy, supply.
+        Compute => "compute",
+        /// Alignment, evaluations, misuse, incidents.
+        Safety => "safety",
     }
 }
 
@@ -110,6 +139,34 @@ impl Category {
             Self::Nft => "NFTs",
             Self::Gaming => "Gaming",
             Self::Culture => "Culture",
+            Self::Research => "Research",
+            Self::Models => "Models",
+            Self::Compute => "Compute",
+            Self::Safety => "Safety",
+        }
+    }
+}
+
+impl Beat {
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::Ai => "AI",
+            Self::Crypto => "Crypto",
+        }
+    }
+
+    /// Where a category sits when nothing better is known.
+    ///
+    /// Only used as a fallback: the ingest-time classifier decides a story's
+    /// beat from its text, and a source can pin one. This exists so a category
+    /// that is inherently one-sided never lands on the wrong desk by default.
+    pub const fn of_category(c: Category) -> Option<Beat> {
+        match c {
+            Category::Research | Category::Models | Category::Compute | Category::Safety => {
+                Some(Beat::Ai)
+            }
+            Category::Defi | Category::Nft => Some(Beat::Crypto),
+            _ => None,
         }
     }
 }
@@ -127,6 +184,9 @@ pub struct Source {
     /// 0–100. Weights corroboration: three low-trust aggregators echoing each
     /// other is not the same as one tier-1 outlet with a named reporter.
     pub trust: i16,
+    /// Pins the beat of everything this source publishes. `None` for
+    /// general-interest sources, whose items are routed one at a time.
+    pub beat: Option<Beat>,
     /// Result of the last robots.txt check. `false` means Scout skips it.
     pub robots_ok: bool,
     pub poll_interval_s: i32,
@@ -169,6 +229,8 @@ pub struct RawItem {
     pub image_url: Option<String>,
     /// Provider video id when this came from a video source; `None` otherwise.
     pub video_id: Option<String>,
+    /// Desk this item was routed to at ingest.
+    pub beat: Option<Beat>,
     pub story_id: Option<StoryId>,
     pub triaged: bool,
 }
@@ -257,6 +319,8 @@ pub struct Story {
     pub source_count: i32,
     pub primary_asset: Option<String>,
     pub assets: Vec<String>,
+    /// Which desk this belongs to.
+    pub beat: Beat,
     pub image_url: Option<String>,
     /// Provider video id when this story came from a video source. An id, not
     /// a URL — the embed host is chosen at render time.
@@ -757,6 +821,7 @@ mod tests {
             lang: "en".into(),
             image_url: None,
             video_id: None,
+            beat: None,
             story_id: None,
             triaged: false,
         })

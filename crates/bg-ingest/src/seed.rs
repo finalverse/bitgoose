@@ -8,7 +8,7 @@
 //!
 //! Every URL here was verified reachable before it was added.
 
-use bg_core::domain::SourceKind;
+use bg_core::domain::{Beat, SourceKind};
 use bg_db::{sources, Db, Result};
 
 pub struct SeedSource {
@@ -19,6 +19,9 @@ pub struct SeedSource {
     pub homepage: &'static str,
     pub trust: i16,
     pub poll_interval_s: i32,
+    /// Pins every item from this source to one desk. `None` means the source
+    /// publishes across beats and each item is routed by its own text.
+    pub beat: Option<Beat>,
 }
 
 pub const SOURCES: &[SeedSource] = &[
@@ -31,6 +34,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.coindesk.com",
         trust: 85,
         poll_interval_s: 180,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "theblock",
@@ -40,6 +44,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.theblock.co",
         trust: 84,
         poll_interval_s: 180,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "decrypt",
@@ -49,6 +54,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://decrypt.co",
         trust: 78,
         poll_interval_s: 180,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "dlnews",
@@ -58,6 +64,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.dlnews.com",
         trust: 76,
         poll_interval_s: 300,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "blockworks",
@@ -68,6 +75,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://blockworks.com",
         trust: 76,
         poll_interval_s: 300,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "thedefiant",
@@ -77,6 +85,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://thedefiant.io",
         trust: 72,
         poll_interval_s: 300,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "bitcoinmagazine",
@@ -86,6 +95,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://bitcoinmagazine.com",
         trust: 70,
         poll_interval_s: 600,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "cointelegraph",
@@ -95,6 +105,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://cointelegraph.com",
         trust: 64,
         poll_interval_s: 300,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "cryptoslate",
@@ -104,6 +115,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://cryptoslate.com",
         trust: 58,
         poll_interval_s: 600,
+        beat: Some(Beat::Crypto),
     },
     // -- mainstream finance ---------------------------------------------------
     // When Bloomberg or the FT covers crypto it is itself news: it signals the
@@ -125,6 +137,11 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://finance.yahoo.com",
         trust: 68,
         poll_interval_s: 600,
+        // Routed per item: these feeds are mostly equities and rates, and
+        // pinning a beat here would bypass `relevance::classify`
+        // altogether — which it briefly did, letting iron ore and yen
+        // intervention into the database.
+        beat: None,
     },
     SeedSource {
         slug: "bloomberg",
@@ -134,6 +151,11 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.bloomberg.com/markets",
         trust: 90,
         poll_interval_s: 600,
+        // Routed per item: these feeds are mostly equities and rates, and
+        // pinning a beat here would bypass `relevance::classify`
+        // altogether — which it briefly did, letting iron ore and yen
+        // intervention into the database.
+        beat: None,
     },
     SeedSource {
         slug: "cnbc",
@@ -143,6 +165,11 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.cnbc.com/finance",
         trust: 80,
         poll_interval_s: 600,
+        // Routed per item: these feeds are mostly equities and rates, and
+        // pinning a beat here would bypass `relevance::classify`
+        // altogether — which it briefly did, letting iron ore and yen
+        // intervention into the database.
+        beat: None,
     },
     SeedSource {
         slug: "marketwatch",
@@ -152,6 +179,11 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.marketwatch.com",
         trust: 79,
         poll_interval_s: 600,
+        // Routed per item: these feeds are mostly equities and rates, and
+        // pinning a beat here would bypass `relevance::classify`
+        // altogether — which it briefly did, letting iron ore and yen
+        // intervention into the database.
+        beat: None,
     },
     SeedSource {
         slug: "ft",
@@ -161,6 +193,11 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.ft.com",
         trust: 90,
         poll_interval_s: 900,
+        // Routed per item: these feeds are mostly equities and rates, and
+        // pinning a beat here would bypass `relevance::classify`
+        // altogether — which it briefly did, letting iron ore and yen
+        // intervention into the database.
+        beat: None,
     },
     // -- video ---------------------------------------------------------------
     // None of the text feeds above carry any video: no video MIME types, no
@@ -180,6 +217,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.youtube.com/@coinbureau",
         trust: 70,
         poll_interval_s: 1800,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "yt-bankless",
@@ -189,6 +227,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.youtube.com/@Bankless",
         trust: 72,
         poll_interval_s: 1800,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "yt-milkroad",
@@ -198,6 +237,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.youtube.com/@MilkRoadDaily",
         trust: 65,
         poll_interval_s: 1800,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "yt-unchained",
@@ -207,6 +247,7 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.youtube.com/@unchainedcrypto",
         trust: 75,
         poll_interval_s: 1800,
+        beat: Some(Beat::Crypto),
     },
     SeedSource {
         slug: "yt-cryptobanter",
@@ -216,6 +257,175 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.youtube.com/@CryptoBanterGroup",
         trust: 55,
         poll_interval_s: 1800,
+        beat: Some(Beat::Crypto),
+    },
+    // =====================================================================
+    // The AI desk
+    // =====================================================================
+    //
+    // Every URL below was fetched and checked for fresh items before being
+    // added. Four candidates were tested and rejected: Anthropic publishes no
+    // RSS at all (HTML only), Hugging Face's papers feed returns 401,
+    // VentureBeat's AI feed has not updated since May, and arXiv's RSS returned
+    // an empty channel on a Sunday — it is included because the emptiness looks
+    // like the weekday publishing cycle rather than a dead feed, and the health
+    // check will flag it if that reading is wrong.
+    //
+    // X/Twitter is deliberately absent. Its official API starts at $200/month,
+    // and the free route is third-party scrapers (nitter, xcancel) that work
+    // today, break often, and operate against X's terms. A newsroom whose whole
+    // posture is honouring robots.txt and crediting publishers should not fund
+    // itself on a scraping proxy.
+
+    // -- the labs, first-party ------------------------------------------------
+    // Highest trust on this desk: when OpenAI announces a model, OpenAI is the
+    // primary source and everyone else is reporting on this.
+    SeedSource {
+        slug: "openai",
+        name: "OpenAI",
+        kind: SourceKind::Rss,
+        url: "https://openai.com/news/rss.xml",
+        homepage: "https://openai.com/news",
+        trust: 88,
+        poll_interval_s: 600,
+        beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "deepmind",
+        name: "Google DeepMind",
+        kind: SourceKind::Rss,
+        url: "https://deepmind.google/blog/rss.xml",
+        homepage: "https://deepmind.google/discover/blog",
+        trust: 88,
+        poll_interval_s: 900,
+        beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "huggingface",
+        name: "Hugging Face",
+        kind: SourceKind::Rss,
+        url: "https://huggingface.co/blog/feed.xml",
+        homepage: "https://huggingface.co/blog",
+        trust: 80,
+        poll_interval_s: 900,
+        beat: Some(Beat::Ai),
+    },
+    // -- the trade press ------------------------------------------------------
+    // General technology outlets: they cover phones and antitrust as well as
+    // models, so their items are routed per item by `relevance::classify`
+    // rather than pinned to a beat.
+    SeedSource {
+        slug: "techcrunch-ai",
+        name: "TechCrunch",
+        kind: SourceKind::Finance,
+        url: "https://techcrunch.com/category/artificial-intelligence/feed/",
+        homepage: "https://techcrunch.com/category/artificial-intelligence/",
+        trust: 74,
+        poll_interval_s: 300,
+        beat: None,
+    },
+    SeedSource {
+        slug: "arstechnica",
+        name: "Ars Technica",
+        kind: SourceKind::Finance,
+        url: "https://feeds.arstechnica.com/arstechnica/technology-lab",
+        homepage: "https://arstechnica.com",
+        trust: 84,
+        poll_interval_s: 600,
+        beat: None,
+    },
+    SeedSource {
+        slug: "techreview",
+        name: "MIT Technology Review",
+        kind: SourceKind::Finance,
+        url: "https://www.technologyreview.com/feed/",
+        homepage: "https://www.technologyreview.com",
+        trust: 86,
+        poll_interval_s: 900,
+        beat: None,
+    },
+    SeedSource {
+        slug: "theverge-ai",
+        name: "The Verge",
+        kind: SourceKind::Finance,
+        url: "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+        homepage: "https://www.theverge.com/ai-artificial-intelligence",
+        trust: 76,
+        poll_interval_s: 600,
+        beat: None,
+    },
+    // -- practitioners --------------------------------------------------------
+    // Independent voices who are read by the people building this. Lower trust
+    // than an institutional newsroom — one person, no corrections desk — but
+    // frequently ahead of it.
+    SeedSource {
+        slug: "simonwillison",
+        name: "Simon Willison",
+        kind: SourceKind::Rss,
+        url: "https://simonwillison.net/atom/everything/",
+        homepage: "https://simonwillison.net",
+        trust: 72,
+        poll_interval_s: 900,
+        beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "importai",
+        name: "Import AI",
+        kind: SourceKind::Rss,
+        url: "https://importai.substack.com/feed",
+        homepage: "https://importai.substack.com",
+        trust: 78,
+        poll_interval_s: 3600,
+        beat: Some(Beat::Ai),
+    },
+    // -- research -------------------------------------------------------------
+    // A preprint is not a news item and is not treated as one: no peer review,
+    // no editor, and authors who are also the interested party. It earns a
+    // place because the frontier genuinely moves here first, and it is marked
+    // `Research` so the renderer can say what it is.
+    SeedSource {
+        slug: "arxiv-ai",
+        name: "arXiv cs.AI",
+        kind: SourceKind::Research,
+        url: "https://rss.arxiv.org/rss/cs.AI",
+        homepage: "https://arxiv.org/list/cs.AI/recent",
+        trust: 60,
+        poll_interval_s: 3600,
+        beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "arxiv-lg",
+        name: "arXiv cs.LG",
+        kind: SourceKind::Research,
+        url: "https://rss.arxiv.org/rss/cs.LG",
+        homepage: "https://arxiv.org/list/cs.LG/recent",
+        trust: 60,
+        poll_interval_s: 3600,
+        beat: Some(Beat::Ai),
+    },
+    // -- forums ---------------------------------------------------------------
+    // Discussion, not reporting. The signal is that practitioners are arguing
+    // about something — which is often the earliest signal there is — but a
+    // thread is never corroboration for a claim, hence the low trust.
+    SeedSource {
+        slug: "reddit-ml",
+        name: "r/MachineLearning",
+        kind: SourceKind::Forum,
+        url: "https://www.reddit.com/r/MachineLearning/.rss",
+        homepage: "https://www.reddit.com/r/MachineLearning/",
+        trust: 45,
+        poll_interval_s: 1800,
+        beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "reddit-localllama",
+        name: "r/LocalLLaMA",
+        kind: SourceKind::Forum,
+        url: "https://www.reddit.com/r/LocalLLaMA/.rss",
+        homepage: "https://www.reddit.com/r/LocalLLaMA/",
+        trust: 45,
+        poll_interval_s: 1800,
+        beat: Some(Beat::Ai),
     },
 ];
 
@@ -230,6 +440,7 @@ pub async fn seed_sources(db: &Db) -> Result<usize> {
             s.homepage,
             s.trust,
             s.poll_interval_s,
+            s.beat,
         )
         .await?;
     }

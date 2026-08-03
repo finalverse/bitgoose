@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// [`from_row`] is used by the analysis paths; the public paths use [`PUB_COLS`].
 const COLS: &str = "id, source_id, external_id, canonical_url, url_hash, title, dek, authors, \
                     published_at, fetched_at, summary_raw, body_raw, body_hash, simhash, lang, \
-                    image_url, video_id, story_id, triaged";
+                    image_url, video_id, beat, story_id, triaged";
 
 const PUB_COLS: &str =
     "id, source_id, canonical_url, title, authors, published_at, image_url, video_id";
@@ -41,6 +41,7 @@ fn from_row(r: &PgRow) -> Result<RawItem> {
         lang: r.try_get("lang")?,
         image_url: r.try_get("image_url")?,
         video_id: r.try_get("video_id")?,
+        beat: enum_col_opt::<bg_core::domain::Beat>(r, "beat")?,
         story_id: story_id_opt(r, "story_id")?,
         triaged: r.try_get("triaged")?,
     })
@@ -77,6 +78,7 @@ pub struct NewItem {
     pub lang: String,
     pub image_url: Option<String>,
     pub video_id: Option<String>,
+    pub beat: Option<bg_core::domain::Beat>,
 }
 
 /// Insert unless `url_hash` already exists.
@@ -89,8 +91,8 @@ pub async fn insert_new(db: &Db, it: &NewItem) -> Result<Option<RawItemId>> {
     let row = sqlx::query(
         "INSERT INTO raw_items
            (id, source_id, external_id, canonical_url, url_hash, title, dek, authors,
-            published_at, summary_raw, body_raw, body_hash, simhash, lang, image_url, video_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+            published_at, summary_raw, body_raw, body_hash, simhash, lang, image_url, video_id, beat)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          ON CONFLICT (url_hash) DO NOTHING
          RETURNING id",
     )
@@ -110,6 +112,7 @@ pub async fn insert_new(db: &Db, it: &NewItem) -> Result<Option<RawItemId>> {
     .bind(&it.lang)
     .bind(&it.image_url)
     .bind(&it.video_id)
+    .bind(it.beat.map(|b| b.as_str()))
     .fetch_optional(&db.pool)
     .await?;
     Ok(row.map(|r| RawItemId::from_uuid(r.get::<Uuid, _>("id"))))

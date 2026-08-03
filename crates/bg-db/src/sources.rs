@@ -16,6 +16,7 @@ fn from_row(r: &PgRow) -> Result<Source> {
         url: r.try_get("url")?,
         homepage: r.try_get("homepage")?,
         trust: r.try_get("trust")?,
+        beat: enum_col_opt::<bg_core::domain::Beat>(r, "beat")?,
         robots_ok: r.try_get("robots_ok")?,
         poll_interval_s: r.try_get("poll_interval_s")?,
         etag: r.try_get("etag")?,
@@ -27,7 +28,7 @@ fn from_row(r: &PgRow) -> Result<Source> {
     })
 }
 
-const COLS: &str = "id, slug, name, kind, url, homepage, trust, robots_ok, poll_interval_s, \
+const COLS: &str = "id, slug, name, kind, url, homepage, trust, beat, robots_ok, poll_interval_s, \
                     etag, last_modified, last_polled_at, last_error, enabled, created_at";
 
 /// Insert or update a source by slug. Deliberately preserves `etag`,
@@ -43,17 +44,19 @@ pub async fn upsert(
     homepage: &str,
     trust: i16,
     poll_interval_s: i32,
+    beat: Option<bg_core::domain::Beat>,
 ) -> Result<Source> {
     let row = crate::sql(format!(
-        "INSERT INTO sources (id, slug, name, kind, url, homepage, trust, poll_interval_s)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "INSERT INTO sources (id, slug, name, kind, url, homepage, trust, poll_interval_s, beat)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (slug) DO UPDATE SET
             name = EXCLUDED.name,
             kind = EXCLUDED.kind,
             url = EXCLUDED.url,
             homepage = EXCLUDED.homepage,
             trust = EXCLUDED.trust,
-            poll_interval_s = EXCLUDED.poll_interval_s
+            poll_interval_s = EXCLUDED.poll_interval_s,
+            beat = EXCLUDED.beat
          RETURNING {COLS}"
     ))
     .bind(Uuid::new_v4())
@@ -64,6 +67,7 @@ pub async fn upsert(
     .bind(homepage)
     .bind(trust)
     .bind(poll_interval_s)
+    .bind(beat.map(|b| b.as_str()))
     .fetch_one(&db.pool)
     .await?;
     from_row(&row)
