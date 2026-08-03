@@ -260,6 +260,14 @@ pub async fn recent_public(db: &Db, limit: i64) -> Result<Vec<RawItemPublic>> {
 
 // -- full-text extraction ---------------------------------------------------
 
+/// How many times we will try a URL that errors before giving up on it.
+///
+/// Three, so a blip gets another chance and a publisher who blocks us stops
+/// consuming the queue. Exhausted items keep `extracted_at` NULL: they are not
+/// "done", they are "not reachable from here", and that difference matters if
+/// the block is ever lifted.
+pub const MAX_EXTRACT_ATTEMPTS: i16 = 3;
+
 /// Items whose article page we have not tried to fetch yet.
 ///
 /// Restricted to items attached to a story: an unclustered item may still be
@@ -271,13 +279,19 @@ pub async fn needing_extraction(db: &Db, limit: i64) -> Result<Vec<(RawItemId, S
         // per-URL robots check means we never even open a connection to a
         // publisher who has told us no — the check downstream is the backstop,
         // not the gate.
+        //
+        // `extract_attempts` bounds the retries. Without it the newest-first
+        // ordering parks a wall of permanently-failing URLs at the head of the
+        // queue and nothing behind them is ever reached.
         "SELECT r.id, r.canonical_url FROM raw_items r
            JOIN sources s ON s.id = r.source_id
           WHERE r.extracted_at IS NULL AND r.story_id IS NOT NULL
+            AND r.extract_attempts < $2
             AND s.robots_ok AND s.enabled
-          ORDER BY r.published_at DESC LIMIT $1",
+          ORDER BY r.extract_attempts ASC, r.published_at DESC LIMIT $1",
     )
     .bind(limit)
+    .bind(MAX_EXTRACT_ATTEMPTS)
     .fetch_all(&db.pool)
     .await?;
     rows.iter()
@@ -288,6 +302,19 @@ pub async fn needing_extraction(db: &Db, limit: i64) -> Result<Vec<(RawItemId, S
             ))
         })
         .collect()
+}
+
+/// Record a failed fetch without marking the item done.
+///
+/// Distinct from [`record_extraction`] with `None`, which means "we looked and
+/// there was no article" — a permanent answer. This means "we could not look",
+/// which deserves another go, but not an unlimited number of them.
+pub async fn record_extract_failure(db: &Db, id: RawItemId) -> Result<()> {
+    sqlx::query("UPDATE raw_items SET extract_attempts = extract_attempts + 1 WHERE id = $1")
+        .bind(id.into_uuid())
+        .execute(&db.pool)
+        .await?;
+    Ok(())
 }
 
 /// Record an extraction attempt.

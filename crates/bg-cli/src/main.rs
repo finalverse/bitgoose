@@ -295,7 +295,10 @@ async fn main() -> Result<()> {
                     }
                     Err(e) => {
                         // Leave `extracted_at` NULL so a transient network
-                        // failure is retried, unlike a page that had nothing.
+                        // failure is retried, unlike a page that had nothing —
+                        // but count the attempt, so a host that refuses us
+                        // every time stops heading the queue forever.
+                        bg_db::items::record_extract_failure(&ctx.db, *id).await?;
                         failed += 1;
                         println!("       !  {e}");
                     }
