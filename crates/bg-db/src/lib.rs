@@ -21,6 +21,7 @@
 //! only by the claim extractor and the policy engine's overlap check.
 
 pub mod agents;
+pub mod analyses;
 pub mod articles;
 pub mod claims;
 pub mod convert;
@@ -141,6 +142,7 @@ impl Db {
             "agent_runs",
             "policy_violations",
             "price_ticks",
+            "analyses",
         ];
         let mut out = Vec::with_capacity(tables.len());
         for t in tables {

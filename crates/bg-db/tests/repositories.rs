@@ -19,12 +19,16 @@ use std::str::FromStr;
 const DEFAULT_URL: &str = "postgres://bitgoose:bitgoose@127.0.0.1:55434/bitgoose_test";
 
 /// Connect to a scratch database, recreating it so each run starts clean.
-async fn setup() -> Option<Db> {
+///
+/// `tag` names the database, and every test must pass its own. They previously
+/// shared one name and ran in parallel, so each was dropping a database another
+/// had just created — a failure that looks like a schema bug and is not one.
+async fn setup(tag: &str) -> Option<Db> {
     let url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| DEFAULT_URL.to_string());
     let admin_url = url
         .rsplit_once('/')
         .map(|(base, _)| format!("{base}/postgres"))?;
-    let dbname = url.rsplit_once('/')?.1.to_string();
+    let dbname = format!("{}_{tag}", url.rsplit_once('/')?.1);
 
     let admin = match Db::connect(&admin_url).await {
         Ok(d) => d,
@@ -50,14 +54,21 @@ async fn setup() -> Option<Db> {
         .expect("create test database");
     admin.pool.close().await;
 
-    let db = Db::connect(&url).await.expect("connect to test database");
+    let scratch = url
+        .rsplit_once('/')
+        .map(|(base, _)| format!("{base}/{dbname}"))?;
+    let db = Db::connect(&scratch)
+        .await
+        .expect("connect to test database");
     db.migrate().await.expect("migrations must apply cleanly");
     Some(db)
 }
 
 #[tokio::test]
 async fn the_whole_graph_round_trips() {
-    let Some(db) = setup().await else { return };
+    let Some(db) = setup("the_whole_graph_round_trips").await else {
+        return;
+    };
 
     // -- schema is live -----------------------------------------------------
     db.ping().await.unwrap();
@@ -66,7 +77,7 @@ async fn the_whole_graph_round_trips() {
         "pgvector must be installed"
     );
     assert!(!db.server_version().await.unwrap().is_empty());
-    assert_eq!(db.counts().await.unwrap().len(), 9);
+    assert_eq!(db.counts().await.unwrap().len(), 10);
 
     // -- sources ------------------------------------------------------------
     let src = sources::upsert(
@@ -516,7 +527,9 @@ async fn the_whole_graph_round_trips() {
             .await
             .unwrap();
     }
-    assert_eq!(agents::all(&db).await.unwrap().len(), 10);
+    // Against the enum, not a literal: this loop inserts every role, so a
+    // hardcoded count here just breaks whenever the Flock gains a member.
+    assert_eq!(agents::all(&db).await.unwrap().len(), AgentRole::ALL.len());
     let scribe = agents::by_role(&db, AgentRole::Scribe).await.unwrap();
 
     let run = agents::start_run(&db, scribe.id, AgentRole::Scribe, Some(story.id), "draft")
@@ -543,7 +556,7 @@ async fn the_whole_graph_round_trips() {
     let stats = agents::flock_stats(&db).await.unwrap();
     assert_eq!(
         stats.len(),
-        10,
+        AgentRole::ALL.len(),
         "every agent appears even with no runs today"
     );
     let s = stats.iter().find(|s| s.role == AgentRole::Scribe).unwrap();
@@ -679,7 +692,9 @@ async fn the_whole_graph_round_trips() {
 
 #[tokio::test]
 async fn an_unknown_enum_token_fails_loudly_instead_of_defaulting() {
-    let Some(db) = setup().await else { return };
+    let Some(db) = setup("an_unknown_enum_token_fails_loudly_instead_of_defaulting").await else {
+        return;
+    };
 
     let src = sources::upsert(
         &db,
@@ -735,7 +750,9 @@ async fn an_unknown_enum_token_fails_loudly_instead_of_defaulting() {
 /// `published_by_slug`; this pins that behaviour.
 #[tokio::test]
 async fn held_stories_are_not_reachable_from_public_surfaces() {
-    let Some(db) = setup().await else { return };
+    let Some(db) = setup("held_stories_are_not_reachable_from_public_surfaces").await else {
+        return;
+    };
 
     let story = stories::create(
         &db,

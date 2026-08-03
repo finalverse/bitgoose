@@ -563,6 +563,54 @@ pub struct Correction {
 }
 
 // ---------------------------------------------------------------------------
+// Analysis — inference, kept structurally separate from reporting
+// ---------------------------------------------------------------------------
+
+/// The Skein's read on a story: what it means, and where it is going.
+///
+/// This is the one place on the site where BitGoose asserts something no source
+/// said. That is the point — it is the analysis a reader comes for — but it is
+/// why the type is distinct from [`Article`] rather than another body field:
+/// every surface that renders an `Analysis` must opt in, and can therefore be
+/// made to label it. Nothing here is a claim, nothing here enters the claim
+/// ledger, and nothing here is ever presented as corroborated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Analysis {
+    pub id: AnalysisId,
+    pub story_id: StoryId,
+    /// What the event means, argued from the sources.
+    pub significance: String,
+    /// Where it leads. A forecast, and rendered as one.
+    pub direction: String,
+    /// The period `direction` is claimed over. An unbounded prediction cannot
+    /// be wrong, which makes it worthless to print.
+    pub horizon: String,
+    /// 0-100, the model's confidence in `direction`. Shown, not hidden.
+    pub confidence: i16,
+    /// Concrete signals that would confirm or refute the direction — the part
+    /// that makes the forecast checkable instead of decorative.
+    pub watch: Vec<String>,
+    pub model: Option<String>,
+    pub run_id: Option<RunId>,
+    /// Characters of real source text the inference was drawn from.
+    pub grounded_chars: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+impl Analysis {
+    /// How firmly the direction is stated. Drives both the wording the reader
+    /// sees and the badge next to it, so the two can never disagree.
+    pub const fn stance(&self) -> &'static str {
+        match self.confidence {
+            80..=100 => "Likely",
+            60..=79 => "Leaning",
+            40..=59 => "Uncertain",
+            _ => "Speculative",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entities
 // ---------------------------------------------------------------------------
 
@@ -619,6 +667,8 @@ str_enum! {
         Herald => "herald",
         /// Post-publish monitoring; issues corrections.
         Ombuds => "ombuds",
+        /// Reads the flight path: what the story means and where it is going.
+        Skein => "skein",
     }
 }
 
@@ -635,6 +685,7 @@ impl AgentRole {
             Self::Gander => "Gander",
             Self::Herald => "Herald",
             Self::Ombuds => "Ombuds",
+            Self::Skein => "Skein",
         }
     }
 
@@ -651,6 +702,7 @@ impl AgentRole {
             Self::Gander => "Editor-in-chief. Publishes, holds, or kills",
             Self::Herald => "Gets it to the Wire, the inbox and the feed",
             Self::Ombuds => "Re-reads what we published and corrects it",
+            Self::Skein => "Reads the flight path: meaning, and where it leads",
         }
     }
 
@@ -659,7 +711,7 @@ impl AgentRole {
             Self::Scout => ModelTier::None,
             Self::Gosling | Self::Curator | Self::Copydesk | Self::Herald => ModelTier::Fast,
             Self::Scribe | Self::Quant | Self::Ombuds => ModelTier::Mid,
-            Self::Sentinel | Self::Gander => ModelTier::Top,
+            Self::Sentinel | Self::Gander | Self::Skein => ModelTier::Top,
         }
     }
 }
@@ -935,8 +987,8 @@ mod tests {
     }
 
     #[test]
-    fn the_flock_has_ten_roles_and_scout_needs_no_model() {
-        assert_eq!(AgentRole::ALL.len(), 10);
+    fn the_flock_has_eleven_roles_and_scout_needs_no_model() {
+        assert_eq!(AgentRole::ALL.len(), 11);
         assert_eq!(AgentRole::Scout.tier(), ModelTier::None);
         assert_eq!(AgentRole::Gander.tier(), ModelTier::Top);
     }

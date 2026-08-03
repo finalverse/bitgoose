@@ -83,6 +83,31 @@ enum Cmd {
         #[arg(long, default_value_t = 25)]
         limit: i64,
     },
+    /// Fetch the article page for ingested items and extract its text.
+    ///
+    /// RSS gives a headline and two sentences. That is enough to route and to
+    /// summarise, but not enough to analyse: measured over the archive, most
+    /// published stories carry under 1,000 characters of source text, and
+    /// analysis drawn from that is analysis of a headline. This fetches the
+    /// real page, honouring robots.txt per URL rather than per feed.
+    Enrich {
+        #[arg(long, default_value_t = 40)]
+        limit: i64,
+        /// Seconds to wait between fetches, per host politeness.
+        #[arg(long, default_value_t = 2)]
+        delay: u64,
+    },
+    /// Run the Skein over published stories: what it means, where it goes.
+    ///
+    /// Skips any story without enough real source text behind it. Run `enrich`
+    /// first — the two together are what turns a link aggregator into analysis.
+    Analyze {
+        #[arg(long, default_value_t = 10)]
+        limit: i64,
+        /// Re-analyse stories that already have one.
+        #[arg(long)]
+        redo: bool,
+    },
 }
 
 #[tokio::main]
@@ -233,6 +258,89 @@ async fn main() -> Result<()> {
                 }
             }
             println!("{done} refreshed, {failed} failed");
+        }
+
+        Cmd::Enrich { limit, delay } => {
+            let ctx = context(&url, None).await?;
+            let targets = bg_db::items::needing_extraction(&ctx.db, limit).await?;
+            println!("{} item(s) to fetch", targets.len());
+            let (mut got, mut empty, mut failed) = (0usize, 0usize, 0usize);
+            for (id, url_str) in &targets {
+                match bg_ingest::readable::fetch(
+                    &ctx.http,
+                    &ctx.cfg.user_agent,
+                    url_str,
+                    // Same switch the feed poller reads, defaulting on: a
+                    // fetch that skips robots because a config field was
+                    // missing is the kind of violation nobody notices.
+                    std::env::var("BG_RESPECT_ROBOTS")
+                        .map(|v| v != "false")
+                        .unwrap_or(true),
+                )
+                .await
+                {
+                    Ok(Some(ex)) => {
+                        let n = ex.text.chars().count();
+                        bg_db::items::record_extraction(&ctx.db, *id, Some(&ex.text), ex.via)
+                            .await?;
+                        got += 1;
+                        println!("  {n:>6} chars  via {:<28} {url_str}", ex.via);
+                    }
+                    Ok(None) => {
+                        // A paywall or a video page is a permanent answer.
+                        // Recording it stops us asking again every run.
+                        bg_db::items::record_extraction(&ctx.db, *id, None, "none").await?;
+                        empty += 1;
+                        println!("       -  no article       {url_str}");
+                    }
+                    Err(e) => {
+                        // Leave `extracted_at` NULL so a transient network
+                        // failure is retried, unlike a page that had nothing.
+                        failed += 1;
+                        println!("       !  {e}");
+                    }
+                }
+                if delay > 0 {
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                }
+            }
+            println!("{got} extracted, {empty} with no article, {failed} failed");
+        }
+
+        Cmd::Analyze { limit, redo } => {
+            let ctx = context(&url, None).await?;
+            if redo {
+                let n = bg_db::analyses::clear(&ctx.db).await?;
+                println!("cleared {n} existing analyses");
+            }
+            let stories = bg_db::analyses::needing_analysis(
+                &ctx.db,
+                bg_agents::skein::MIN_GROUNDING_CHARS as i64,
+                limit,
+            )
+            .await?;
+            println!(
+                "{} story(ies) with enough source text to analyse",
+                stories.len()
+            );
+            let (mut done, mut held, mut failed) = (0usize, 0usize, 0usize);
+            for id in &stories {
+                match bg_agents::skein::run(&ctx, *id).await {
+                    Ok(true) => {
+                        done += 1;
+                        println!("  ok   {id}");
+                    }
+                    Ok(false) => {
+                        held += 1;
+                        println!("  thin {id}");
+                    }
+                    Err(e) => {
+                        failed += 1;
+                        println!("  FAIL {id} — {e}");
+                    }
+                }
+            }
+            println!("{done} analysed, {held} too thin, {failed} failed");
         }
     }
 

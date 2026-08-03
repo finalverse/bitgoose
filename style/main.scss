@@ -1266,8 +1266,237 @@ a:hover > .media-play::after,
 }
 
 @media (width <= 640px) {
-  /* Thumb-sized targets, and the QR anchored to the right so it cannot open
-     off the edge of a narrow screen. */
-  .share-btn { padding: 0.55rem 0.9rem; font-size: 0.82rem; }
-  .share-qr-pop { left: auto; right: 0; }
+  /* Real touch targets. These were 33px tall — measured, not guessed — against
+     a 44px minimum, which is small enough to mis-tap on the control whose whole
+     job is being tapped once. */
+  .share-btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 1rem;
+    font-size: 0.85rem;
+  }
+
+  /* Anchoring the popover to its `details` parent put it 114px off the left
+     edge, because that parent sits near the start of the row and the popover is
+     wider than the space to its left. Pinning it to the viewport instead means
+     its position cannot depend on where in the row the button happens to fall. */
+  .share-qr-pop {
+    position: fixed;
+    left: 50%;
+    right: auto;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    width: min(240px, calc(100vw - 2rem));
+  }
+  .share-qr-pop img { margin: 0 auto; }
+}
+
+/* ===========================================================================
+   Pull-quotes and the analysis block
+   ---------------------------------------------------------------------------
+   These two blocks sit next to each other under the article and must not look
+   alike. A pull-quote is someone else's words, verbatim and attributed; the
+   Skein is ours, and inferred. The visual language separates them on purpose:
+   quotes borrow the serif display face and a gold rule, while the analysis gets a
+   panel, a standing label and a stated confidence — it reads as an aside from
+   the newsroom rather than as more of the story.
+   ========================================================================= */
+
+.quotes { margin: 2rem 0 0; }
+
+.pullquote {
+  margin: 1.75rem 0;
+  padding: 0 0 0 1.25rem;
+  border-left: 3px solid var(--gold);
+
+  blockquote {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(1.15rem, 2.4vw, 1.4rem);
+    line-height: 1.45;
+    color: var(--paper);
+    /* Typographic quotes as generated content: the stored excerpt is verbatim
+       source text, so adding characters to it would make the excerpt and the
+       thing we display differ. */
+    &::before { content: "\201C"; }
+    &::after  { content: "\201D"; }
+  }
+
+  figcaption {
+    margin-top: 0.6rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+
+    .pq-who {
+      color: var(--paper-dim);
+      font-weight: 600;
+      &::after { content: ","; color: var(--faint); }
+    }
+    a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+    a:hover { color: var(--gold); }
+  }
+}
+
+.analysis {
+  margin: 2.5rem 0 0;
+  padding: 1.4rem 1.5rem 1.25rem;
+  background: var(--ink-700);
+  border: 1px solid var(--line);
+  /* The gold edge is the same signal the masthead uses for "this is BitGoose
+     speaking", which is exactly what this block is. */
+  border-left: 3px solid var(--gold);
+  border-radius: 6px;
+}
+
+.analysis-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+
+  h2 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 1.15rem;
+    letter-spacing: 0.01em;
+  }
+  .analysis-mark { display: inline-flex; color: var(--gold); }
+}
+
+.analysis-tag {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--gold);
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-line);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  white-space: nowrap;
+}
+
+.analysis-sig {
+  margin: 0 0 1.1rem;
+  font-size: 1rem;
+  line-height: 1.66;
+  color: var(--paper);
+}
+
+.analysis-dir {
+  padding: 0.9rem 1rem;
+  background: var(--ink-800);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+
+  p { margin: 0; font-size: 0.95rem; line-height: 1.6; color: var(--paper-dim); }
+}
+
+.analysis-dir-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.analysis-dir-label {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Confidence is a colour and a number together. The number alone gets skimmed
+   past; the colour alone is not precise enough to hold us to anything. */
+.analysis-stance {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.5rem;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+
+  .analysis-pct { opacity: 0.75; font-weight: 500; }
+
+  &.s-likely      { color: var(--v-corroborated); background: rgba(63, 191, 127, 0.13); }
+  &.s-leaning     { color: var(--v-single);       background: rgba(232, 163, 23, 0.13); }
+  &.s-uncertain   { color: var(--v-disputed);     background: rgba(240, 136, 62, 0.13); }
+  &.s-speculative { color: var(--muted);          background: rgba(131, 140, 151, 0.13); }
+}
+
+.analysis-horizon {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--faint);
+}
+
+.analysis-watch {
+  margin-top: 1rem;
+
+  .analysis-watch-label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+  }
+
+  ul { margin: 0; padding: 0; list-style: none; }
+
+  li {
+    position: relative;
+    padding-left: 1.1rem;
+    margin-bottom: 0.42rem;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--paper-dim);
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.62em;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--gold);
+      opacity: 0.65;
+    }
+  }
+}
+
+.analysis-foot {
+  margin: 1.1rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--faint);
+
+  .analysis-model { font-family: var(--mono); color: var(--muted); }
+}
+
+@media (width <= 640px) {
+  .analysis { padding: 1.15rem 1.1rem 1rem; }
+  /* The tag wraps under the heading on narrow screens rather than squeezing
+     the title to two characters. */
+  .analysis-head { flex-wrap: wrap; }
+  .analysis-tag { margin-left: 0; }
+  .analysis-horizon { margin-left: 0; width: 100%; }
+  .pullquote { padding-left: 1rem; }
 }

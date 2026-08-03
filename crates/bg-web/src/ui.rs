@@ -243,6 +243,104 @@ pub fn ShareMeta(
 ///   generated rather than linking somewhere that cannot work.
 /// * **Copy link** is the universal fallback, and the only one that works in
 ///   every client including the ones that block both of the above.
+/// A verbatim line from a source, rendered as a pull-quote.
+///
+/// The attribution links out to the outlet it came from. That is not decoration:
+/// a quote whose source the reader cannot reach is indistinguishable from one we
+/// made up, and this site's whole argument is that the difference is visible.
+#[component]
+pub fn PullQuote(quote: crate::model::QuoteCard) -> impl IntoView {
+    let has_speaker = !quote.speaker.is_empty();
+    view! {
+        <figure class="pullquote">
+            <blockquote>{quote.text.clone()}</blockquote>
+            <figcaption>
+                {has_speaker
+                    .then(|| view! { <span class="pq-who">{quote.speaker.clone()}</span> })}
+                <a href=quote.source_url.clone() target="_blank" rel="noopener nofollow">
+                    {quote.source_name.clone()}
+                </a>
+            </figcaption>
+        </figure>
+    }
+}
+
+/// The Skein's analysis: what the story means and where it goes.
+///
+/// Deliberately styled as an interruption rather than as more article. Every
+/// other block on the page is sourced reporting; this one is the model's own
+/// inference, and a reader who skims must not be able to mistake the two. Hence
+/// the rule above it, the standing label, and the confidence stated as a number
+/// next to the forecast rather than buried in hedged prose.
+///
+/// The `watch` list is the part that makes it accountable — concrete signals a
+/// reader can go and check, which is what separates a forecast from a horoscope.
+#[component]
+pub fn SkeinBlock(analysis: crate::model::AnalysisCard) -> impl IntoView {
+    let watch = analysis.watch.clone();
+    let has_watch = !watch.is_empty();
+    let has_model = !analysis.model.is_empty();
+    // Drives the badge colour. Kept as a class rather than an inline style so
+    // the palette stays in one file.
+    let stance_class = format!("analysis-stance s-{}", analysis.stance.to_lowercase());
+
+    view! {
+        <section class="analysis" aria-labelledby="analysis-h">
+            <div class="analysis-head">
+                <span class="analysis-mark">
+                    <GooseMark size=16 />
+                </span>
+                <h2 id="analysis-h">"The Skein"</h2>
+                <span class="analysis-tag">"AI analysis"</span>
+            </div>
+
+            <p class="analysis-sig">{analysis.significance.clone()}</p>
+
+            <div class="analysis-dir">
+                <div class="analysis-dir-head">
+                    <span class="analysis-dir-label">"Where this goes"</span>
+                    <span class=stance_class>
+                        {analysis.stance.clone()}
+                        <span class="analysis-pct">{analysis.confidence}"%"</span>
+                    </span>
+                    <span class="analysis-horizon">{analysis.horizon.clone()}</span>
+                </div>
+                <p>{analysis.direction.clone()}</p>
+            </div>
+
+            {has_watch
+                .then(|| {
+                    view! {
+                        <div class="analysis-watch">
+                            <span class="analysis-watch-label">"What would confirm it"</span>
+                            <ul>
+                                {watch
+                                    .clone()
+                                    .into_iter()
+                                    .map(|w| view! { <li>{w}</li> })
+                                    .collect_view()}
+                            </ul>
+                        </div>
+                    }
+                })}
+
+            <p class="analysis-foot">
+                "Inference by BitGoose\u{2019}s Skein agent, drawn from the sources listed below \
+                 \u{2014} not reporting, and not corroborated. "
+                {has_model
+                    .then(|| {
+                        view! {
+                            <span class="analysis-model">
+                                "Model: "
+                                {analysis.model.clone()}
+                            </span>
+                        }
+                    })}
+            </p>
+        </section>
+    }
+}
+
 #[component]
 pub fn ShareBar(title: String, url: String) -> impl IntoView {
     let x_intent = format!(

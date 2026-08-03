@@ -12,6 +12,7 @@ pub mod canonical;
 pub mod feeds;
 pub mod http;
 pub mod market;
+pub mod readable;
 pub mod relevance;
 pub mod robots;
 pub mod seed;

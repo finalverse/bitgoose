@@ -31,6 +31,7 @@ pub mod runner;
 pub mod scout;
 pub mod scribe;
 pub mod sentinel;
+pub mod skein;
 
 use bg_core::domain::{AgentRole, RunStatus};
 use bg_core::ids::{RunId, StoryId};
@@ -278,26 +279,42 @@ explained again.
 6. If the material does not support a story, say so. An empty result is a valid \
 answer and is better than a padded one.";
 
-/// Seed the roster with each agent's name, tier and system prompt.
-pub async fn seed_roster(db: &Db) -> Result<usize> {
-    let entries: &[(AgentRole, &str, f32)] = &[
-        (AgentRole::Scout, scout::SYSTEM, 0.0),
-        (AgentRole::Gosling, gosling::SYSTEM, 0.0),
-        (AgentRole::Curator, curator::SYSTEM, 0.0),
-        (AgentRole::Scribe, scribe::SYSTEM, 0.3),
-        (AgentRole::Sentinel, sentinel::SYSTEM, 0.0),
-        (AgentRole::Quant, quant::SYSTEM, 0.0),
-        (AgentRole::Copydesk, copydesk::SYSTEM, 0.4),
-        (AgentRole::Gander, gander::SYSTEM, 0.0),
-        (AgentRole::Herald, herald::SYSTEM, 0.2),
-        (AgentRole::Ombuds, ombuds::SYSTEM, 0.0),
-    ];
-    for (role, prompt, temp) in entries {
-        let full = format!("{HOUSE_STYLE}\n\n---\n\n{prompt}");
-        agents_repo::upsert(db, *role, role.display_name(), &full, *temp).await?;
+/// How much latitude each role gets. Extraction and judgement run at zero;
+/// only the roles that choose words are allowed any.
+///
+/// Exhaustive on purpose — see [`seed_roster`].
+const fn temperature(role: AgentRole) -> f32 {
+    match role {
+        AgentRole::Scribe => 0.3,
+        AgentRole::Copydesk => 0.4,
+        AgentRole::Herald => 0.2,
+        // Analysis is inference, but it is inference about evidence. Warmth
+        // here buys speculation, which is the one thing this role must not add.
+        AgentRole::Skein => 0.2,
+        AgentRole::Scout
+        | AgentRole::Gosling
+        | AgentRole::Curator
+        | AgentRole::Sentinel
+        | AgentRole::Quant
+        | AgentRole::Gander
+        | AgentRole::Ombuds => 0.0,
     }
-    info!(count = entries.len(), "flock roster seeded");
-    Ok(entries.len())
+}
+
+/// Seed the roster with each agent's name, tier and system prompt.
+///
+/// Driven off [`AgentRole::ALL`] rather than a list maintained here. The list
+/// version silently omitted a newly added role — seeding reported success, and
+/// the agent then failed at runtime with "agent not found", which points
+/// nowhere near the actual cause. Both functions this calls match exhaustively
+/// on the role, so a new variant is now a compile error instead.
+pub async fn seed_roster(db: &Db) -> Result<usize> {
+    for role in AgentRole::ALL {
+        let full = format!("{HOUSE_STYLE}\n\n---\n\n{}", compiled_prompt(*role));
+        agents_repo::upsert(db, *role, role.display_name(), &full, temperature(*role)).await?;
+    }
+    info!(count = AgentRole::ALL.len(), "flock roster seeded");
+    Ok(AgentRole::ALL.len())
 }
 
 /// System prompt for a role, as stored (falls back to the compiled-in text).
@@ -320,6 +337,7 @@ fn compiled_prompt(role: AgentRole) -> &'static str {
         AgentRole::Gander => gander::SYSTEM,
         AgentRole::Herald => herald::SYSTEM,
         AgentRole::Ombuds => ombuds::SYSTEM,
+        AgentRole::Skein => skein::SYSTEM,
     }
 }
 

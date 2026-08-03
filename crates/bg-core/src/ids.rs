@@ -67,4 +67,5 @@ typed_id!(
     RunId,
     AssetId,
     ViolationId,
+    AnalysisId,
 );

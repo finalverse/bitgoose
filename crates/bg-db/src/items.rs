@@ -258,6 +258,87 @@ pub async fn recent_public(db: &Db, limit: i64) -> Result<Vec<RawItemPublic>> {
     rows.iter().map(pub_from_row).collect()
 }
 
+// -- full-text extraction ---------------------------------------------------
+
+/// Items whose article page we have not tried to fetch yet.
+///
+/// Restricted to items attached to a story: an unclustered item may still be
+/// dropped, and fetching a publisher's page for something we will never print
+/// spends their bandwidth for nothing.
+pub async fn needing_extraction(db: &Db, limit: i64) -> Result<Vec<(RawItemId, String)>> {
+    let rows = sqlx::query(
+        // Excluding disallowed sources here rather than relying on the
+        // per-URL robots check means we never even open a connection to a
+        // publisher who has told us no — the check downstream is the backstop,
+        // not the gate.
+        "SELECT r.id, r.canonical_url FROM raw_items r
+           JOIN sources s ON s.id = r.source_id
+          WHERE r.extracted_at IS NULL AND r.story_id IS NOT NULL
+            AND s.robots_ok AND s.enabled
+          ORDER BY r.published_at DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok((
+                RawItemId::from_uuid(r.try_get::<Uuid, _>("id")?),
+                r.try_get("canonical_url")?,
+            ))
+        })
+        .collect()
+}
+
+/// Record an extraction attempt.
+///
+/// `body` of `None` marks the attempt without changing the text — a paywall or
+/// a video page is a permanent answer, and retrying it every run would be a
+/// slow-motion hammering of a site that already told us no.
+pub async fn record_extraction(
+    db: &Db,
+    id: RawItemId,
+    body: Option<&str>,
+    via: &str,
+) -> Result<()> {
+    match body {
+        Some(text) => {
+            sqlx::query(
+                "UPDATE raw_items
+                    SET body_raw = $2, body_hash = encode(sha256($2::bytea), 'hex'),
+                        extracted_at = now(), extract_via = $3
+                  WHERE id = $1",
+            )
+            .bind(id.into_uuid())
+            .bind(text)
+            .bind(via)
+            .execute(&db.pool)
+            .await?;
+        }
+        None => {
+            sqlx::query(
+                "UPDATE raw_items SET extracted_at = now(), extract_via = $2 WHERE id = $1",
+            )
+            .bind(id.into_uuid())
+            .bind(via)
+            .execute(&db.pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// How extraction is going, by winning selector. Powers `bg doctor`.
+pub async fn extraction_stats(db: &Db) -> Result<Vec<(String, i64)>> {
+    let rows = sqlx::query(
+        "SELECT coalesce(extract_via, 'not attempted') AS via, count(*) AS n
+           FROM raw_items GROUP BY 1 ORDER BY 2 DESC",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    Ok(rows.iter().map(|r| (r.get("via"), r.get("n"))).collect())
+}
+
 // -- private working text ---------------------------------------------------
 // The two functions below are the ONLY ones that hand out `body_raw`. They
 // return bare strings rather than a serializable struct so the text cannot

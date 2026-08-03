@@ -273,6 +273,7 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
     let runs = bg_db::agents::runs_for_story(db, story.id)
         .await
         .map_err(e)?;
+    let analysis = bg_db::analyses::for_story(db, story.id).await.map_err(e)?;
 
     let claim_cards = claims
         .iter()
@@ -313,6 +314,43 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
             }
         })
         .collect();
+
+    // Quotes are already in the claim graph. Pulling them into their own list
+    // is presentation, not a second store — the excerpt and its attribution
+    // still come from `claim_sources`, so a quote cannot appear on the page
+    // without the source link that justifies it.
+    let quote_cards: Vec<QuoteCard> = claims
+        .iter()
+        .filter(|c| c.claim.kind == bg_core::domain::ClaimKind::Quote)
+        .filter_map(|c| {
+            let src = c.sources.first()?;
+            let excerpt = src.excerpt.clone()?;
+            // `text` is stored as `Speaker: "quote"`; the speaker is the part
+            // before the excerpt, if the model attributed one.
+            let speaker = c
+                .claim
+                .text
+                .split_once(": \u{201c}")
+                .map(|(who, _)| who.trim().to_string())
+                .unwrap_or_default();
+            Some(QuoteCard {
+                text: excerpt,
+                speaker,
+                source_name: src.source_name.clone(),
+                source_url: src.url.clone(),
+            })
+        })
+        .collect();
+
+    let analysis_card = analysis.as_ref().map(|a| AnalysisCard {
+        significance: a.significance.clone(),
+        direction: a.direction.clone(),
+        horizon: a.horizon.clone(),
+        confidence: a.confidence,
+        stance: a.stance().into(),
+        watch: a.watch.clone(),
+        model: a.model.clone().unwrap_or_default(),
+    });
 
     let published = story.published_at.unwrap_or(story.first_seen_at);
     let headline = article
@@ -396,6 +434,8 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
             .unwrap_or(1),
         kind: story.kind.as_str().into(),
         claims: claim_cards,
+        quotes: quote_cards,
+        analysis: analysis_card,
         sources: refs
             .iter()
             .map(|r| SourceCard {

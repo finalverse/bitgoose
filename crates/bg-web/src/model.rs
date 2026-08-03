@@ -75,6 +75,12 @@ pub struct StoryPage {
     pub reading_time_min: i32,
     pub kind: String,
     pub claims: Vec<ClaimCard>,
+    /// Quotes pulled verbatim from the sources, rendered as pull-quotes.
+    /// Separate from `claims` so the article can show them without the reader
+    /// having to open the ledger.
+    pub quotes: Vec<QuoteCard>,
+    /// Present only when the Skein had enough source text to say something.
+    pub analysis: Option<AnalysisCard>,
     pub sources: Vec<SourceCard>,
     pub corrections: Vec<CorrectionCard>,
     pub runs: Vec<RunLine>,
@@ -102,6 +108,37 @@ pub struct ClaimCard {
     pub excerpt: Option<String>,
     pub sources: Vec<SourceCard>,
     pub disputed_by: Vec<SourceCard>,
+}
+
+/// The Skein's read on a story.
+///
+/// A separate card rather than more fields on [`StoryPage`] for the same reason
+/// the table is separate: analysis is inference, and a surface that renders it
+/// has to opt in. Anything reading `StoryPage` without touching this cannot
+/// accidentally present a forecast as reporting.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AnalysisCard {
+    pub significance: String,
+    pub direction: String,
+    pub horizon: String,
+    pub confidence: i16,
+    /// "Likely" / "Leaning" / "Uncertain" / "Speculative" — derived from
+    /// `confidence` on the server so the badge and the number can never drift.
+    pub stance: String,
+    pub watch: Vec<String>,
+    /// Which model produced it. On a site whose pitch is a glass newsroom,
+    /// withholding this from the one inferred section would be the wrong
+    /// omission.
+    pub model: String,
+}
+
+/// A quotable line lifted verbatim from a source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuoteCard {
+    pub text: String,
+    pub speaker: String,
+    pub source_name: String,
+    pub source_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

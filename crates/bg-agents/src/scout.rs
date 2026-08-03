@@ -27,6 +27,17 @@ pub struct ScoutReport {
 /// Poll every source that is due.
 pub async fn run(ctx: &Ctx) -> Result<ScoutReport> {
     stage(ctx, AgentRole::Scout, None, "poll", |_run| async move {
+        // Re-read robots.txt before polling, not just at seed time. This was
+        // written for that and then never called, which meant `robots_ok` held
+        // whatever the seed assumed — and we polled a site whose robots.txt had
+        // said `Disallow: /` the entire time. A permission checked once is a
+        // permission assumed.
+        let verdicts = bg_ingest::refresh_robots(&ctx.db, &ctx.http, &ctx.cfg.user_agent).await;
+        let blocked = verdicts.iter().filter(|(_, ok)| !ok).count();
+        if blocked > 0 {
+            info!(blocked, "sources currently disallowed by robots.txt");
+        }
+
         let reports =
             bg_ingest::feeds::poll_due(&ctx.db, &ctx.http, ctx.cfg.ingest_concurrency).await;
 

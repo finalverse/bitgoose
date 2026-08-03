@@ -518,6 +518,8 @@ fn StoryView(story: StoryPage) -> impl IntoView {
     let sources = story.sources.clone();
     let corrections = story.corrections.clone();
     let runs = story.runs.clone();
+    let quotes = story.quotes.clone();
+    let analysis = story.analysis.clone();
     let has_claims = !claims.is_empty();
 
     view! {
@@ -609,6 +611,25 @@ fn StoryView(story: StoryPage) -> impl IntoView {
                         })}
 
                     <div class="prose" inner_html=story.body_html.clone()></div>
+
+                    // Order is editorial: the reporting, then what the people
+                    // involved actually said, then what we think it means. The
+                    // inference comes last because it is the only part the
+                    // sources do not vouch for.
+                    {(!quotes.is_empty())
+                        .then(|| {
+                            view! {
+                                <div class="quotes">
+                                    {quotes
+                                        .clone()
+                                        .into_iter()
+                                        .map(|q| view! { <PullQuote quote=q /> })
+                                        .collect_view()}
+                                </div>
+                            }
+                        })}
+
+                    {analysis.clone().map(|a| view! { <SkeinBlock analysis=a /> })}
                 </div>
 
                 <aside>

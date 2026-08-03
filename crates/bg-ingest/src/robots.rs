@@ -188,3 +188,28 @@ mod tests {
         assert!(Robots::parse("").allowed("x", "/anything"));
     }
 }
+
+#[cfg(test)]
+mod reddit_regression {
+    use super::*;
+
+    /// Reddit disallows everything, for everyone, including their `.rss`
+    /// endpoints. Our stored `robots_ok` said otherwise, so this pins the
+    /// parser against the real file rather than against a paraphrase of it.
+    #[test]
+    fn a_blanket_disallow_covers_the_feed_too() {
+        let body = "# Welcome to Reddit's robots.txt\n\
+                    # Reddit believes in an open internet, but not the misuse.\n\
+                    # policy: https://support.reddithelp.com/hc/en-us\n\
+                    \n\
+                    User-agent: *\n\
+                    Disallow: /\n";
+        let r = Robots::parse(body);
+        assert!(!r.allowed("BitGooseBot", "/r/LocalLLaMA/.rss"));
+        // Also under the browser product token the fetcher actually sends.
+        assert!(!r.allowed(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "/r/LocalLLaMA/comments/abc/title"
+        ));
+    }
+}
