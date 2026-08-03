@@ -43,7 +43,7 @@ Three things fall out of the inversion:
 | | |
 |---|---|
 | **Provenance is the product** | Every figure carries its source count, corroboration state and confidence. Click any sentence, see what backs it. |
-| **The newsroom is glass** | [`/flock`](#the-flock) shows all ten agents live — what each is doing, which model, how many tokens, what it cost, how often it fails. Published, not marketed. |
+| **The newsroom is glass** | [`/flock`](#the-flock) shows all eleven agents live — what each is doing, which model, how many tokens, what it cost, how often it fails. Published, not marketed. |
 | **It's infrastructure, not just a site** | The claim graph ships as a REST API *and an MCP server*, so other AI agents consume BitGoose as a tool rather than parsing pages. |
 
 ---
@@ -64,6 +64,7 @@ Rust end to end. One binary serves the site, the API and the MCP endpoint.
                        │                      published ◀─────┘    │
                        │                          │                │
                        │                       Ombuds ─▶ corrections│
+                       │                       Skein  ─▶ analysis   │
                        └───────────────────────────────────────────┘
                                         │
                             PostgreSQL 17 + pgvector
@@ -78,7 +79,7 @@ Rust end to end. One binary serves the site, the API and the MCP endpoint.
 | `bg-db` | PostgreSQL 17 + pgvector. 17 tables, sqlx migrations, repository layer. |
 | `bg-ingest` | Polite feed polling: conditional GET, robots.txt, rate limits, URL canonicalization, SimHash dedupe. |
 | `bg-llm` | Multi-provider LLM: Anthropic, any OpenAI-compatible endpoint (incl. Ollama), and a deterministic offline stub. Per-role model routing, failover, cost ledger. |
-| `bg-agents` | The Flock — ten agents and the pipeline that runs them. |
+| `bg-agents` | The Flock — eleven agents and the pipeline that runs them. |
 | `bg-api` | Public REST + MCP server. |
 | `bg-web` | Leptos SSR + hydration. The site. |
 | `bg-cli` | `bg` — migrate, seed, ingest, run, worker, doctor. |
@@ -104,7 +105,7 @@ cp .env.example .env          # works as-is; no API key needed
 
 docker compose up -d          # Postgres 17 + pgvector
 cargo run -p bg-cli -- migrate
-cargo run -p bg-cli -- seed   # 9 sources, 12 assets, 15 entities, 10 agents
+cargo run -p bg-cli -- seed   # 32 sources, 12 assets, 15 entities, 11 agents
 cargo run -p bg-cli -- doctor # verify everything is wired up
 
 cargo run -p bg-cli -- run    # one full newsroom pass against live feeds
@@ -124,6 +125,8 @@ bg migrate            apply database migrations
 bg seed               sources, assets, entities, agent roster
 bg doctor             db + pgvector + source reachability + LLM status
 bg ingest             poll every due source once
+bg enrich             fetch article pages and extract their text
+bg analyze            run the Skein over published stories
 bg run                one full newsroom pass
 bg worker --interval  run the pipeline on a loop
 bg stats              24h newsroom statistics
@@ -149,6 +152,7 @@ success or failure — and that table is public at `/flock`.
 | **Gander** | Editor-in-chief. Publishes, holds, or kills | top |
 | **Herald** | Gets it to the Wire, the inbox and the feed | fast |
 | **Ombuds** | Re-reads what we published and corrects it | mid |
+| **Skein** | Reads the flight path: meaning, and where it leads | top |
 
 Agents never name a model — they request a capability tier, and `bg-llm`
 resolves it per provider. Switching the whole newsroom from Anthropic to a local
@@ -167,6 +171,39 @@ than splitting one — everything downstream would treat them as corroborating
 each other. So the cascade is: cheap lexical matching (SimHash + trigram)
 settles the clear cases for free, an LLM adjudicates only the ambiguous middle
 band, and anything unresolved becomes a new story.
+
+---
+
+## Analysis, and the line around it
+
+Most of this site is reporting: claims, each tied to the sources that back it.
+One part is not. **The Skein** says what a story means and where it goes — an
+inference no source made — and everything about how it is built exists to keep
+that distinction impossible to miss.
+
+It lives in its own table, behind its own view type, under its own key in the
+API (`is_inference: true`). On the page it is a bounded block with a standing
+label and a stated confidence, never woven into the prose. A reader skimming,
+or an agent parsing, can take the reporting and leave the inference.
+
+Three rules keep it from becoming decoration:
+
+**It has to have read something.** Below 1,500 characters of real source text
+the Skein does not run. Measured across our own archive, most stories arrive
+with only an RSS summary — a few hundred characters — and analysis drawn from
+that is analysis of a headline. `bg enrich` fetches the actual article first,
+honouring robots.txt per URL, and where a publisher disallows us there is simply
+no analysis.
+
+**Forecasts carry a deadline and a test.** Every direction states a horizon and
+two or three concrete signals that would confirm or refute it — a filing, a
+print, a shipped release, a number crossing a level. A prediction with no
+deadline cannot be wrong, which makes it worthless to print.
+
+**Quotes are found, not written.** Pulled quotes are matched verbatim against
+the source they cite, normalising only typography, and dropped on mismatch. A
+model asked to quote exactly will still occasionally tidy a sentence, and a
+tidied quote is a fabricated one.
 
 ---
 
@@ -233,14 +270,15 @@ is never redistributed through this API, because it is not ours to redistribute.
 
 ## Sources
 
-Thirty-two, weighted by a trust score that reflects *editorial process* — named
-reporters, a corrections policy, original reporting vs reprints — not whether we
-like the coverage. Scores are visible on `/standards` precisely because they are
+Thirty-two configured, twenty-five polled — see *Who we do not poll* below.
+Weighted by a trust score that reflects *editorial process* — named reporters, a
+corrections policy, original reporting vs reprints — not whether we like the
+coverage. Scores are visible on `/standards` precisely because they are
 contestable.
 
 **AI** — OpenAI · Google DeepMind · Hugging Face · TechCrunch · Ars Technica ·
 MIT Technology Review · The Verge · Simon Willison · Import AI ·
-arXiv cs.AI · arXiv cs.LG · r/MachineLearning · r/LocalLLaMA
+arXiv cs.AI · arXiv cs.LG
 
 **Crypto** — CoinDesk · The Block · Decrypt · DL News · Blockworks ·
 The Defiant · Bitcoin Magazine · Cointelegraph · CryptoSlate
@@ -249,10 +287,23 @@ The Defiant · Bitcoin Magazine · Cointelegraph · CryptoSlate
 Yahoo Finance. Their feeds are mostly equities and rates, so each item passes a
 crypto/AI relevance gate before it is stored rather than being taken wholesale.
 
-**Video** — Coin Bureau · Bankless · Milk Road · Unchained · Crypto Banter,
-embedded through YouTube's own player so the creator keeps control.
-
 Market data from CoinGecko, with Coinbase as fallback.
+
+### Who we do not poll
+
+Seven configured sources are disabled because their robots.txt disallows us,
+and the check runs before every sweep rather than once at setup:
+
+- **Reddit** (r/MachineLearning, r/LocalLLaMA) serves `Disallow: /` to every
+  agent, feeds included. There is no compliant scrape path; the official API
+  with OAuth is the only route in.
+- **YouTube channel feeds** (Coin Bureau, Bankless, Milk Road, Unchained,
+  Crypto Banter) — youtube.com/robots.txt names `Disallow: /feeds/videos.xml`
+  explicitly.
+
+They stay in the roster, disabled, rather than being deleted: the reason a
+source is absent is worth keeping. A robots.txt that opens back up puts them
+straight back in.
 
 Not every source kind is a news article, and the interface says so: a preprint
 has no editor and no peer review, and a forum thread is an argument rather than
