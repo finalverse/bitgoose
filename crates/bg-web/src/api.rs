@@ -111,10 +111,19 @@ fn render_body(md: &str) -> String {
 // front page
 // ---------------------------------------------------------------------------
 
+/// The front page, for one desk or blended.
+///
+/// `beat` is a plain string because it crosses the server-function boundary;
+/// an unrecognised value blends rather than erroring, so a stale or hand-typed
+/// URL degrades to the full front page instead of a 500.
 #[server(name = GetFrontPage, prefix = "/rpc")]
-pub async fn get_front_page() -> Result<FrontPage, ServerFnError> {
+pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnError> {
+    use std::str::FromStr;
+    let beat = beat
+        .as_deref()
+        .and_then(|b| bg_core::domain::Beat::from_str(b).ok());
     let db = db();
-    let ranked = bg_db::stories::front_page(db, 40).await.map_err(e)?;
+    let ranked = bg_db::stories::front_page(db, beat, 40).await.map_err(e)?;
 
     let mut lead = None;
     let mut desk = Vec::new();
@@ -130,7 +139,7 @@ pub async fn get_front_page() -> Result<FrontPage, ServerFnError> {
         }
     }
 
-    let wire_entries = bg_db::stories::wire(db, 14, 0).await.map_err(e)?;
+    let wire_entries = bg_db::stories::wire(db, beat, 14, 0).await.map_err(e)?;
     let wire: Vec<StoryCard> = wire_entries
         .iter()
         .filter(|w| Some(&w.slug) != lead.as_ref().map(|l| &l.slug))
@@ -194,7 +203,7 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
     let db = db();
     let k = bg_core::domain::StoryKind::from_str(&kind).ok();
     if k == Some(bg_core::domain::StoryKind::Wire) {
-        let entries = bg_db::stories::wire(db, limit, 0).await.map_err(e)?;
+        let entries = bg_db::stories::wire(db, None, limit, 0).await.map_err(e)?;
         return Ok(entries
             .iter()
             .map(|w| StoryCard {

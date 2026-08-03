@@ -470,10 +470,10 @@ async fn the_whole_graph_round_trips() {
         1,
         "asset lookup is case-insensitive"
     );
-    assert_eq!(stories::front_page(&db, 10).await.unwrap().len(), 1);
+    assert_eq!(stories::front_page(&db, None, 10).await.unwrap().len(), 1);
     assert!(!stories::flyway(&db, 7).await.unwrap().is_empty());
 
-    let wire = stories::wire(&db, 10, 0).await.unwrap();
+    let wire = stories::wire(&db, None, 10, 0).await.unwrap();
     assert_eq!(wire.len(), 1);
     assert_eq!(wire[0].source_count, 2);
     assert!(

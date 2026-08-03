@@ -742,6 +742,10 @@ pub struct WireEntry {
     pub source_name: String,
     pub source_slug: String,
     pub source_url: String,
+    /// What kind of thing the lead source is. A preprint and a Reddit thread
+    /// are not articles and should not be rendered as if they were.
+    pub source_kind: SourceKind,
+    pub beat: Beat,
     pub source_count: i32,
     pub published_at: DateTime<Utc>,
     pub newsworthiness: i16,

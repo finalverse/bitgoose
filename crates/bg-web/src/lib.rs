@@ -52,19 +52,22 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
 
     view! {
-        <Title text="BitGoose — The AI newsroom for crypto" />
+        <Title text="BitGoose — The AI-era newsroom" />
         <Link rel="alternate" type_="application/rss+xml" href="/feed.xml" attr:title="BitGoose" />
         <Link rel="icon" type_="image/svg+xml" href="/favicon.svg" />
         <Meta
             name="description"
-            content="Crypto news written by AI agents, where every claim shows its sources and \
-                     confidence. Original reporting on the Desk, fast aggregation on the Wire."
+            content="Frontier technology written by AI agents, where every claim shows its \
+                     sources and confidence. AI and crypto, original reporting on the Desk and \
+                     fast aggregation on the Wire."
         />
         <Router>
             <ui::Masthead />
             <main>
                 <Routes fallback=pages::NotFound>
                     <Route path=path!("/") view=pages::Home />
+                    <Route path=path!("/ai") view=pages::DeskAi />
+                    <Route path=path!("/crypto") view=pages::DeskCrypto />
                     <Route path=path!("/wire") view=pages::Wire />
                     <Route path=path!("/desk") view=pages::Desk />
                     <Route path=path!("/section/:category") view=pages::Section />

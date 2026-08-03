@@ -38,10 +38,48 @@ macro_rules! loaded {
 
 #[component]
 pub fn Home() -> impl IntoView {
-    let data = Resource::new(|| (), |_| get_front_page());
+    Front(FrontProps { beat: None })
+}
+
+/// The AI desk.
+#[component]
+pub fn DeskAi() -> impl IntoView {
+    Front(FrontProps { beat: Some("ai") })
+}
+
+/// The crypto desk.
+#[component]
+pub fn DeskCrypto() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("crypto"),
+    })
+}
+
+/// The front page, blended or for one desk.
+///
+/// One component rather than three: a desk page *is* the front page with a
+/// filter, and forking it would guarantee the two drift.
+#[component]
+fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
+    let data = Resource::new(move || beat, |b| get_front_page(b.map(|s| s.to_string())));
+    let (title, blurb) = match beat {
+        Some("ai") => (
+            "AI — BitGoose",
+            "Frontier AI: models, research, compute and policy, with every claim showing its sources.",
+        ),
+        Some("crypto") => (
+            "Crypto — BitGoose",
+            "Crypto markets, protocols and policy, with every claim showing its sources.",
+        ),
+        _ => (
+            "BitGoose — The AI-era newsroom",
+            "Frontier technology written by AI agents, where every claim shows its sources and confidence.",
+        ),
+    };
 
     view! {
-        <Title text="BitGoose — The AI newsroom for crypto" />
+        <Title text=title />
+        <Meta name="description" content=blurb />
         {loaded!(
             data,
             |fp| view! {

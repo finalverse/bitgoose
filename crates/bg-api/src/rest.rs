@@ -180,7 +180,7 @@ async fn wire(
     State(s): State<ApiState>,
     Query(p): Query<Page>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let entries = bg_db::stories::wire(&s.db, p.limit(), p.offset()).await?;
+    let entries = bg_db::stories::wire(&s.db, None, p.limit(), p.offset()).await?;
     Ok(Json(json!({ "count": entries.len(), "wire": entries })))
 }
 

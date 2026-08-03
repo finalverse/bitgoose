@@ -285,10 +285,19 @@ pub async fn by_asset(db: &Db, ticker: &str, limit: i64) -> Result<Vec<Story>> {
 /// Score = newsworthiness decayed by age, with a bonus for corroboration. The
 /// half-life is deliberately short: in this market a six-hour-old lead story is
 /// already stale, and a front page that does not move looks abandoned.
-pub async fn front_page(db: &Db, limit: i64) -> Result<Vec<Story>> {
+/// The ranked front page, optionally for one desk.
+///
+/// `None` blends both, which is what `/` shows: a reader who has not chosen a
+/// desk should see whatever is most significant right now regardless of which
+/// one it came from.
+pub async fn front_page(
+    db: &Db,
+    beat: Option<bg_core::domain::Beat>,
+    limit: i64,
+) -> Result<Vec<Story>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM stories
-         WHERE status = 'published'
+         WHERE status = 'published' AND ($2::text IS NULL OR beat = $2)
          ORDER BY (
             newsworthiness
             * exp(-extract(epoch from (now() - published_at)) / 21600.0)
@@ -297,17 +306,24 @@ pub async fn front_page(db: &Db, limit: i64) -> Result<Vec<Story>> {
          LIMIT $1"
     ))
     .bind(limit)
+    .bind(beat.map(|b| b.as_str()))
     .fetch_all(&db.pool)
     .await?;
     rows.iter().map(from_row).collect()
 }
 
 /// The Wire: every published story with its lead source, for the fast feed.
-pub async fn wire(db: &Db, limit: i64, offset: i64) -> Result<Vec<WireEntry>> {
+pub async fn wire(
+    db: &Db,
+    beat: Option<bg_core::domain::Beat>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<WireEntry>> {
     let rows = sqlx::query(
         "SELECT st.id, st.slug, st.title, st.summary, st.category, st.source_count,
-                st.published_at, st.newsworthiness, st.image_url, st.assets,
-                src.name AS source_name, src.slug AS source_slug, ri.canonical_url AS source_url
+                st.published_at, st.newsworthiness, st.image_url, st.assets, st.beat,
+                src.name AS source_name, src.slug AS source_slug, src.kind AS source_kind,
+                ri.canonical_url AS source_url
          FROM stories st
          JOIN LATERAL (
             SELECT r.* FROM story_items si
@@ -317,12 +333,13 @@ pub async fn wire(db: &Db, limit: i64, offset: i64) -> Result<Vec<WireEntry>> {
             LIMIT 1
          ) ri ON TRUE
          JOIN sources src ON src.id = ri.source_id
-         WHERE st.status = 'published'
+         WHERE st.status = 'published' AND ($3::text IS NULL OR st.beat = $3)
          ORDER BY st.published_at DESC
          LIMIT $1 OFFSET $2",
     )
     .bind(limit)
     .bind(offset)
+    .bind(beat.map(|b| b.as_str()))
     .fetch_all(&db.pool)
     .await?;
 
@@ -339,6 +356,8 @@ pub async fn wire(db: &Db, limit: i64, offset: i64) -> Result<Vec<WireEntry>> {
                 source_name: r.try_get("source_name")?,
                 source_slug: r.try_get("source_slug")?,
                 source_url: r.try_get("source_url")?,
+                source_kind: enum_col::<bg_core::domain::SourceKind>(r, "source_kind")?,
+                beat: enum_col::<bg_core::domain::Beat>(r, "beat")?,
                 source_count: r.try_get("source_count")?,
                 published_at: r.try_get("published_at")?,
                 newsworthiness: r.try_get("newsworthiness")?,

@@ -42,6 +42,14 @@ pub fn Masthead() -> impl IntoView {
                         <span class="brand-goose">"Goose"</span>
                     </span>
                 </A>
+                // The desk switcher sits ahead of the sections and is styled
+                // apart from them, because choosing a beat is a different kind
+                // of decision from choosing a section — it changes what the
+                // whole site is about, not which slice of it you are reading.
+                <nav class="desks" aria-label="Desks">
+                    <A href="/ai" attr:class="desk-link">"AI"</A>
+                    <A href="/crypto" attr:class="desk-link">"Crypto"</A>
+                </nav>
                 <nav class="nav" aria-label="Sections">
                     <A href="/desk">"Desk"</A>
                     <A href="/wire">"Wire"</A>
@@ -116,13 +124,15 @@ pub fn Footer() -> impl IntoView {
                             </span>
                         </div>
                         <p style="margin:0;max-width:26rem;line-height:1.6">
-                            "An AI-run newsroom for crypto. Every story decomposes into claims,
-                             and every claim shows the independent sources behind it."
+                            "An AI-run newsroom for frontier technology. Every story decomposes
+                             into claims, and every claim shows the independent sources behind it."
                         </p>
                     </div>
                     <div>
                         <h4>"Read"</h4>
                         <ul>
+                            <li><A href="/ai">"AI"</A></li>
+                            <li><A href="/crypto">"Crypto"</A></li>
                             <li><A href="/desk">"The Desk"</A></li>
                             <li><A href="/wire">"The Wire"</A></li>
                             <li><A href="/prices">"Markets"</A></li>

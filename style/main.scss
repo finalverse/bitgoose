@@ -1025,3 +1025,69 @@ a:hover > .media-play::after,
   .media-video { margin: 1rem 0 1.5rem; }
   .media-play::after { width: 2.4rem; height: 2.4rem; }
 }
+
+/* ---------------------------------------------------------------------------
+   Desks
+   ---------------------------------------------------------------------------
+   Choosing a desk is a different kind of decision from choosing a section: it
+   changes what the whole site is about rather than which slice of it you are
+   reading. So the switcher is set apart from the section nav — heavier, boxed,
+   and first in the reading order — instead of being one more link in a row of
+   seven where it would disappear. */
+
+.desks {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ink-700);
+  flex: none;
+}
+
+.desk-link {
+  display: inline-block;
+  padding: 0.28rem 0.78rem;
+  border-radius: 999px;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.desk-link:hover { color: var(--paper); background: var(--ink-600); }
+
+/* `.on` is set by leptos_router on the active route. Gold fill rather than
+   gold text: at this size a colour change alone is too quiet to read as
+   "you are here". */
+.desk-link.on {
+  color: var(--ink-900);
+  background: var(--gold);
+}
+
+/* The beat a story belongs to, shown on cards when the reader is on a blended
+   surface and could otherwise not tell which desk something came from. On a
+   desk page it is redundant and hidden. */
+.beat-tag {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.08rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.beat-tag.beat-ai     { color: var(--gold); border-color: var(--gold-line); }
+.beat-tag.beat-crypto { color: var(--paper-dim); }
+
+@media (width <= 760px) {
+  .desks { order: 1; margin-left: auto; }
+  .desk-link { padding: 0.24rem 0.6rem; font-size: 0.72rem; }
+}
