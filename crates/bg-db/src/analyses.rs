@@ -90,6 +90,14 @@ pub async fn for_story(db: &Db, story: StoryId) -> Result<Option<Analysis>> {
     row.as_ref().map(from_row).transpose()
 }
 
+/// The most items a story can hold and still plausibly be one event.
+///
+/// Not a tuning knob — a tripwire. An early run adjudicated clustering with the
+/// deterministic stub, which answers "same event?" with a constant yes, and
+/// welded a day of unrelated crypto news into single stories of 14 and 20
+/// items. Genuine multi-source stories in this archive top out around nine.
+const MAX_COHERENT_ITEMS: i64 = 10;
+
 /// Published stories with no analysis yet, richest source material first.
 ///
 /// Ordering by available text rather than recency is deliberate: the Skein's
@@ -97,6 +105,14 @@ pub async fn for_story(db: &Db, story: StoryId) -> Result<Option<Analysis>> {
 /// analyses they should go to the N stories we can actually support. Newest-
 /// first would spend the budget on whatever happened to land last, which on a
 /// feed-driven site is usually the thinnest item of the hour.
+///
+/// But that ordering has a trap, and it bit immediately: a story that merged
+/// twenty unrelated events has more text than any real one, so the incoherent
+/// blobs sorted straight to the front of the queue and got analysed first. The
+/// first live analysis was of an Argentine court ruling filed under a headline
+/// about BNB Chain. Hence the item-count ceiling — analysing a pile that is not
+/// one story produces a confident paragraph about whichever event happened to
+/// be first in the list.
 pub async fn needing_analysis(db: &Db, min_chars: i64, limit: i64) -> Result<Vec<StoryId>> {
     let rows = sqlx::query(
         "SELECT s.id, sum(length(coalesce(r.body_raw, r.summary_raw, ''))) AS chars
@@ -106,16 +122,38 @@ pub async fn needing_analysis(db: &Db, min_chars: i64, limit: i64) -> Result<Vec
           WHERE s.status = 'published' AND a.id IS NULL
           GROUP BY s.id
          HAVING sum(length(coalesce(r.body_raw, r.summary_raw, ''))) >= $1
+            AND count(r.id) <= $3
           ORDER BY chars DESC
           LIMIT $2",
     )
     .bind(min_chars)
     .bind(limit)
+    .bind(MAX_COHERENT_ITEMS)
     .fetch_all(&db.pool)
     .await?;
     rows.iter()
         .map(|r| Ok(StoryId::from_uuid(r.try_get::<Uuid, _>("id")?)))
         .collect()
+}
+
+/// Stories too large to be one event — the stub-clustering artifacts.
+///
+/// Exposed so `bg doctor` can report them: they are excluded from analysis but
+/// still readable, and a story page welding twenty events together is worth
+/// knowing about even though nothing crashes.
+pub async fn incoherent_stories(db: &Db) -> Result<Vec<(String, i64)>> {
+    let rows = sqlx::query(
+        "SELECT s.slug, count(r.id) AS n
+           FROM stories s JOIN raw_items r ON r.story_id = s.id
+          WHERE s.status = 'published'
+          GROUP BY s.slug
+         HAVING count(r.id) > $1
+          ORDER BY n DESC",
+    )
+    .bind(MAX_COHERENT_ITEMS)
+    .fetch_all(&db.pool)
+    .await?;
+    Ok(rows.iter().map(|r| (r.get("slug"), r.get("n"))).collect())
 }
 
 /// Of the given stories, which have an analysis.

@@ -497,6 +497,39 @@ async fn stats(url: &str) -> Result<()> {
         );
     }
 
+    // -- content health -------------------------------------------------------
+    let extraction = bg_db::items::extraction_stats(&db)
+        .await
+        .unwrap_or_default();
+    if !extraction.is_empty() {
+        println!("\n  article extraction:");
+        for (via, n) in extraction.iter().take(8) {
+            println!("    {n:>6}  {via}");
+        }
+    }
+
+    println!(
+        "\n  analyses: {}",
+        bg_db::analyses::count(&db).await.unwrap_or(0)
+    );
+
+    // Loud, because nothing else surfaces it: these stories render as one
+    // event on the site and are not one. They are excluded from analysis but
+    // still readable, so silence here would mean nobody ever finds them.
+    match bg_db::analyses::incoherent_stories(&db).await {
+        Ok(bad) if !bad.is_empty() => {
+            println!(
+                "\n  ! {} story(ies) merge too many items to be one event:",
+                bad.len()
+            );
+            for (slug, n) in bad.iter().take(10) {
+                println!("    {n:>3} items  /story/{slug}");
+            }
+            println!("    (stub-era clustering; re-cluster or kill them)");
+        }
+        _ => {}
+    }
+
     println!("\n  recent stories:");
     for st in bg_db::stories::published(&db, None, 10, 0).await? {
         println!(
