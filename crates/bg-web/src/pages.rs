@@ -101,9 +101,17 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
         ),
     };
 
+    let path = match beat {
+        Some(b) => format!("/{b}"),
+        None => String::new(),
+    };
     view! {
         <Title text=title />
-        <Meta name="description" content=blurb />
+        <ShareMeta
+            title=title.to_string()
+            description=blurb.to_string()
+            url=format!("https://bitgoose.com{path}")
+        />
         {loaded!(
             data,
             |fp| view! {
@@ -652,6 +660,9 @@ fn StoryView(story: StoryPage) -> impl IntoView {
                 </aside>
             </div>
 
+            // After the article, not before it: a share bar above the text asks
+            // for a recommendation the reader has not had a chance to form yet.
+            <ShareBar title=story.headline.clone() url=story.canonical.clone() />
             <ProvenanceStrip runs=runs />
         </div>
     }
@@ -672,31 +683,18 @@ fn StoryMeta(story: StoryPage) -> impl IntoView {
     };
     view! {
         <Link rel="canonical" href=story.canonical.clone() />
-        <Meta name="description" content=desc.clone() />
 
-        <Meta property="og:type" content="article" />
-        <Meta property="og:site_name" content="BitGoose" />
-        <Meta property="og:title" content=story.headline.clone() />
-        <Meta property="og:description" content=desc.clone() />
-        <Meta property="og:url" content=story.canonical.clone() />
+        <ShareMeta
+            kind="article"
+            title=story.headline.clone()
+            description=desc.clone()
+            url=story.canonical.clone()
+            image=story.image_url.clone()
+        />
         <Meta property="article:published_time" content=story.iso_published.clone() />
         <Meta property="article:modified_time" content=story.iso_modified.clone() />
         <Meta property="article:section" content=story.category_label.clone() />
 
-        // `summary_large_image` was already declared, but with no image to go
-        // with it every share fell back to a bare text card.
-        {(!story.image_url.is_empty())
-            .then(|| {
-                view! {
-                    <>
-                        <Meta property="og:image" content=story.image_url.clone() />
-                        <Meta name="twitter:image" content=story.image_url.clone() />
-                    </>
-                }
-            })}
-        <Meta name="twitter:card" content="summary_large_image" />
-        <Meta name="twitter:title" content=story.headline.clone() />
-        <Meta name="twitter:description" content=desc />
 
         // Rendered as a raw script body: JSON-LD must reach the crawler as
         // literal JSON, and escaping it as text content would break it.

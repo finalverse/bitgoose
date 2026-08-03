@@ -169,6 +169,153 @@ pub fn Footer() -> impl IntoView {
     }
 }
 
+/// Everything a link preview needs, in one place.
+///
+/// X, WeChat, Slack, Telegram and iMessage all read some subset of Open Graph
+/// and Twitter cards, and the subsets disagree — so the safe move is to emit
+/// the union rather than guess. Having one component own it also fixes a real
+/// bug: the app shell emitted a site-wide `description` and story pages emitted
+/// their own, leaving two in the document. A crawler takes the first, so every
+/// shared story was described with the generic site blurb.
+///
+/// `image` falls back to a branded 1200x630 card served from our own domain.
+/// That size is what X and WeChat crop a *large* card from — smaller images get
+/// a thumbnail instead — and serving it ourselves means a story with no
+/// photograph still shares as something rather than a bare link.
+#[component]
+pub fn ShareMeta(
+    title: String,
+    description: String,
+    /// Absolute URL of this page.
+    url: String,
+    /// Story image if there is one; the branded card is used when empty.
+    #[prop(optional, into)]
+    image: String,
+    /// `article` for a story, `website` for everything else.
+    #[prop(default = "website")]
+    kind: &'static str,
+) -> impl IntoView {
+    use leptos_meta::Meta;
+    let base = url
+        .split_once("://")
+        .and_then(|(scheme, rest)| {
+            rest.split_once('/')
+                .map(|(host, _)| format!("{scheme}://{host}"))
+        })
+        .unwrap_or_else(|| url.trim_end_matches('/').to_string());
+    let img = if image.trim().is_empty() {
+        format!("{base}/og-default.png")
+    } else {
+        image
+    };
+    view! {
+        <Meta name="description" content=description.clone() />
+        <Meta property="og:type" content=kind />
+        <Meta property="og:site_name" content="BitGoose" />
+        <Meta property="og:locale" content="en" />
+        <Meta property="og:title" content=title.clone() />
+        <Meta property="og:description" content=description.clone() />
+        <Meta property="og:url" content=url.clone() />
+        <Meta property="og:image" content=img.clone() />
+        // WeChat and several chat clients size the preview from these rather
+        // than fetching the image first; without them the card can collapse to
+        // a thumbnail even when the image is large enough.
+        <Meta property="og:image:width" content="1200" />
+        <Meta property="og:image:height" content="630" />
+        <Meta property="og:image:alt" content=title.clone() />
+        <Meta name="twitter:card" content="summary_large_image" />
+        <Meta name="twitter:title" content=title />
+        <Meta name="twitter:description" content=description />
+        <Meta name="twitter:image" content=img />
+    }
+}
+
+/// Share controls for a story.
+///
+/// Three, chosen for how the two platforms actually behave:
+///
+/// * **X** takes an intent URL, so one tap opens a composer pre-filled with the
+///   headline and link.
+/// * **WeChat** has no share URL at all — sharing happens inside the app. On a
+///   phone the reader uses the browser's own share sheet, so the native
+///   `navigator.share` is offered when the browser has it; on a desktop the
+///   normal path is to scan the page into the phone, which is why the QR is
+///   generated rather than linking somewhere that cannot work.
+/// * **Copy link** is the universal fallback, and the only one that works in
+///   every client including the ones that block both of the above.
+#[component]
+pub fn ShareBar(title: String, url: String) -> impl IntoView {
+    let x_intent = format!(
+        "https://twitter.com/intent/tweet?text={}&url={}",
+        urlencode(&title),
+        urlencode(&url)
+    );
+    // Rendered by an image service rather than a JS library: a QR is a static
+    // image, and shipping a generator to every reader to draw one on demand is
+    // weight for a feature most will not use.
+    let qr = format!(
+        "https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data={}",
+        urlencode(&url)
+    );
+
+    let copy_url = url.clone();
+    let copy = move |_| {
+        let nav = window().navigator();
+        let _ = nav.clipboard().write_text(&copy_url);
+    };
+
+    let share_title = title.clone();
+    let share_url = url.clone();
+    let native = move |_| {
+        // `navigator.share` is the only route into WeChat, WhatsApp and the
+        // rest from a mobile browser. Absent on desktop, where the QR covers it.
+        let data = web_sys::ShareData::new();
+        data.set_title(&share_title);
+        data.set_url(&share_url);
+        let _ = window().navigator().share_with_data(&data);
+    };
+
+    view! {
+        <div class="sharebar">
+            <span class="sharebar-label">"Share"</span>
+            <a class="share-btn" href=x_intent target="_blank" rel="noopener noreferrer">
+                "X"
+            </a>
+            <button class="share-btn" on:click=native title="Share via your device">
+                "Share…"
+            </button>
+            <button class="share-btn" on:click=copy title="Copy link">
+                "Copy link"
+            </button>
+            <details class="share-qr">
+                <summary class="share-btn">"WeChat"</summary>
+                <div class="share-qr-pop">
+                    <img src=qr alt="QR code linking to this story" width="180" height="180" />
+                    <p>"Scan with WeChat to open and share this story."</p>
+                </div>
+            </details>
+        </div>
+    }
+}
+
+/// Percent-encode for a query string.
+///
+/// Hand-rolled to keep a URL crate out of the WASM bundle for one call site.
+/// Encodes everything outside the unreserved set, so a headline containing
+/// `&`, `#` or `?` cannot truncate or rewrite the intent URL it is placed in.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// Says what a card actually is, when it is not an ordinary news article.
 ///
 /// Silent for `rss`, `finance` and `wire` sources, because "article" is the

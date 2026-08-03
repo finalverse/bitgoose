@@ -11,7 +11,7 @@ pub mod pages;
 pub mod ui;
 
 use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, HashedStylesheet, Link, Meta, MetaTags, Title};
+use leptos_meta::{provide_meta_context, HashedStylesheet, Link, MetaTags, Title};
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
 use leptos_router::SsrMode;
@@ -59,12 +59,10 @@ pub fn App() -> impl IntoView {
         <Title text="BitGoose — The AI-era newsroom" />
         <Link rel="alternate" type_="application/rss+xml" href="/feed.xml" attr:title="BitGoose" />
         <Link rel="icon" type_="image/svg+xml" href="/favicon.svg" />
-        <Meta
-            name="description"
-            content="Frontier technology written by AI agents, where every claim shows its \
-                     sources and confidence. AI and crypto, original reporting on the Desk and \
-                     fast aggregation on the Wire."
-        />
+        // No site-wide description here on purpose: pages set their own via
+        // `ShareMeta`, and emitting one at both levels left two in the document
+        // — a crawler takes the first, so every shared story was described with
+        // the generic site blurb instead of its own.
         <Router>
             <ui::Masthead />
             <main>

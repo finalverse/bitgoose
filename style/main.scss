@@ -1187,3 +1187,87 @@ a:hover > .media-play::after,
   .nav { gap: 0.95rem; font-size: 0.85rem; }
   .desks { flex: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Share
+   --------------------------------------------------------------------------- */
+
+.sharebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 2rem 0 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.sharebar-label {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+.share-btn {
+  display: inline-block;
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  font-weight: 550;
+  line-height: 1;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ink-700);
+  color: var(--paper-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.share-btn:hover {
+  color: var(--ink-900);
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+/* `details` is doing the work a popover would, without script: the QR only
+   matters to the minority who share from a desktop, and it should cost the
+   rest nothing. */
+.share-qr { position: relative; display: inline-block; }
+.share-qr > summary { list-style: none; }
+.share-qr > summary::-webkit-details-marker { display: none; }
+
+.share-qr-pop {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  width: 214px;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--ink-800);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.share-qr-pop img {
+  display: block;
+  width: 180px;
+  height: 180px;
+  border-radius: 4px;
+  background: #fff;
+}
+.share-qr-pop p {
+  margin: 0.6rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+@media (width <= 640px) {
+  /* Thumb-sized targets, and the QR anchored to the right so it cannot open
+     off the edge of a narrow screen. */
+  .share-btn { padding: 0.55rem 0.9rem; font-size: 0.82rem; }
+  .share-qr-pop { left: auto; right: 0; }
+}

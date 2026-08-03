@@ -70,7 +70,16 @@ wasm-bindgen = "0.2.106"
 # web-sys gates every browser API behind its own feature, and Leptos enables
 # only the set it needs. These two are ours: the theme toggle reads the OS
 # preference and remembers an explicit choice.
-web-sys = { version = "0.3", features = ["MediaQueryList", "Storage"] }
+web-sys = { version = "0.3", features = [
+    "MediaQueryList",
+    "Storage",
+    # Share controls: Navigator is the gateway to both, Clipboard backs "copy
+    # link", and ShareData/navigator.share is the only route from a mobile
+    # browser into WeChat — that platform has no share URL to link to.
+    "Navigator",
+    "Clipboard",
+    "ShareData",
+] }
 console_error_panic_hook = "0.1"
 
 [profile.release]
