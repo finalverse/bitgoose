@@ -342,6 +342,21 @@ async fn store_quotes(
         .await?;
         bg_db::claims::add_source(&ctx.db, claim_id, item.id, Stance::Supports, Some(&excerpt))
             .await?;
+
+        // A claim starts unverified because Sentinel has not weighed it yet.
+        // That is right for an assertion about the world and wrong for this:
+        // we have already checked, character by character, that the source
+        // contains these words. Leaving it at "unverified, 0% confidence"
+        // states something false about a quote we verified more directly than
+        // anything else on the page. It is single-source by definition — one
+        // outlet printed it — and no amount of corroboration changes that.
+        bg_db::claims::set_verification(
+            &ctx.db,
+            claim_id,
+            bg_core::domain::Verification::SingleSource,
+            1.0,
+        )
+        .await?;
         kept += 1;
     }
     Ok(kept)

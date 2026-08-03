@@ -327,8 +327,13 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         .map_err(e)?;
     let analysis = bg_db::analyses::for_story(db, story.id).await.map_err(e)?;
 
+    // Quotes are rendered as pull-quotes in the article with their attribution
+    // and a link out, so repeating them in the ledger says the same thing twice
+    // in the same eyeful. They stay in the claim graph and in the API — this is
+    // a decision about the sidebar, not about the record.
     let claim_cards = claims
         .iter()
+        .filter(|c| c.claim.kind != bg_core::domain::ClaimKind::Quote)
         .enumerate()
         .map(|(i, c)| {
             let (supporting, disputing): (Vec<_>, Vec<_>) = c
