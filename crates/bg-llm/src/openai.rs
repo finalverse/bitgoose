@@ -358,6 +358,14 @@ mod tests {
 mod local_pricing_tests {
     use super::*;
 
+    /// Serialises the tests that write `BG_LLM_PRICE_*`.
+    ///
+    /// Environment variables are process-global and cargo runs tests on
+    /// parallel threads, so two tests touching the same variable interleave:
+    /// one clears what the other just set, and the failure looks like a pricing
+    /// bug. Every test below that mutates the environment takes this first.
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// `/flock` publishes the cost ledger as fact, so a locally served model
     /// must cost nothing there. Pricing an Ollama call at OpenAI's rates would
     /// put an invented number on the one page whose whole premise is that its
@@ -391,7 +399,8 @@ mod local_pricing_tests {
 
     #[test]
     fn only_openai_itself_is_priced_with_openais_table() {
-        // SAFETY: single-threaded test, no tasks spawned.
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the guard above makes this the only thread touching these.
         unsafe {
             std::env::remove_var("BG_LLM_PRICE_IN");
             std::env::remove_var("BG_LLM_PRICE_OUT");
@@ -421,6 +430,8 @@ mod local_pricing_tests {
 
     #[test]
     fn an_operator_can_declare_the_real_price() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the guard above makes this the only thread touching these.
         unsafe {
             std::env::set_var("BG_LLM_PRICE_IN", "0.59");
             std::env::set_var("BG_LLM_PRICE_OUT", "0.79");
