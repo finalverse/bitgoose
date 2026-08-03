@@ -4,7 +4,7 @@
 //! the Wire and hand it to Gander. Failures are per-story — one bad draft must
 //! not stop the run — and the whole pass is bounded by the spend ceiling.
 
-use crate::{curator, gander, gosling, herald, ombuds, quant, scout, scribe, sentinel};
+use crate::{curator, gander, gosling, herald, ombuds, quant, scout, scribe, sentinel, skein};
 use crate::{Ctx, FlockError, Result};
 use bg_core::domain::StoryStatus;
 use rust_decimal::Decimal;
@@ -19,6 +19,7 @@ pub struct PipelineReport {
     pub desk_held: usize,
     pub desk_killed: usize,
     pub wire_published: usize,
+    pub analysed: usize,
     pub corrections: usize,
     pub errors: Vec<String>,
     pub cost_usd: Decimal,
@@ -27,7 +28,8 @@ pub struct PipelineReport {
 impl PipelineReport {
     pub fn summary(&self) -> String {
         format!(
-            "ingested {} · triaged {} · clustered {} · desk {}✓/{}⏸/{}✗ · wire {} · corrections {} · ${:.4}",
+            "ingested {} · triaged {} · clustered {} · desk {}✓/{}⏸/{}✗ · wire {} · \
+             analysed {} · corrections {} · ${:.4}",
             self.items_ingested,
             self.items_triaged,
             self.items_clustered,
@@ -35,6 +37,7 @@ impl PipelineReport {
             self.desk_held,
             self.desk_killed,
             self.wire_published,
+            self.analysed,
             self.corrections,
             self.cost_usd
         )
@@ -49,6 +52,10 @@ pub struct RunOpts {
     pub ombuds: bool,
     pub max_triage: i64,
     pub max_cluster: i64,
+    /// Analyses to attempt per pass. Small on purpose: the Skein runs on the
+    /// top tier, and a free-tier token budget spent analysing twenty stories is
+    /// a budget not spent publishing the next twenty.
+    pub max_analyses: i64,
 }
 
 impl Default for RunOpts {
@@ -59,6 +66,7 @@ impl Default for RunOpts {
             ombuds: true,
             max_triage: 100,
             max_cluster: 60,
+            max_analyses: 3,
         }
     }
 }
@@ -156,6 +164,38 @@ pub async fn run_once(ctx: &Ctx, opts: &RunOpts) -> Result<PipelineReport> {
                     rep.errors.push(format!("wire {}: {e}", story.slug));
                 }
             }
+        }
+    }
+
+    // -- Skein ---------------------------------------------------------------
+    // After publishing, not before: analysis is about stories that exist, and
+    // running it earlier would spend the top-tier budget on drafts that the
+    // editor may still kill. Failures here never fail the pass — a story
+    // without a take is the normal case, not an error.
+    if opts.max_analyses > 0 {
+        match bg_db::analyses::needing_analysis(
+            &ctx.db,
+            skein::MIN_GROUNDING_CHARS as i64,
+            opts.max_analyses,
+        )
+        .await
+        {
+            Ok(ids) => {
+                for id in ids {
+                    match skein::run(ctx, id).await {
+                        Ok(true) => rep.analysed += 1,
+                        Ok(false) => {}
+                        Err(FlockError::BudgetExhausted { .. }) => {
+                            rep.errors.push("budget exhausted before analysis".into());
+                            break;
+                        }
+                        Err(e) => {
+                            warn!(story = %id, error = %e, "analysis failed");
+                        }
+                    }
+                }
+            }
+            Err(e) => rep.errors.push(format!("skein: {e}")),
         }
     }
 
