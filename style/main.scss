@@ -1500,3 +1500,15 @@ a:hover > .media-play::after,
   .analysis-horizon { margin-left: 0; width: 100%; }
   .pullquote { padding-left: 1rem; }
 }
+
+/* The card marker for a story that carries an analysis. Sized and coloured to
+   sit inside the meta row as one more fact about the story, not as a call to
+   action — it competes with the headline if it shouts. */
+.has-analysis {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  opacity: 0.9;
+}

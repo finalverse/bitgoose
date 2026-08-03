@@ -42,6 +42,28 @@ fn e(err: impl std::fmt::Display) -> ServerFnError {
     ServerFnError::new(err.to_string())
 }
 
+/// Mark the cards whose stories carry an analysis.
+///
+/// Done as a pass over a finished page rather than inside [`card`] so it costs
+/// one query no matter how many cards there are, and so a caller that does not
+/// want the badge simply does not call it.
+#[cfg(feature = "ssr")]
+async fn flag_analysis(
+    db: &bg_db::Db,
+    stories: &[bg_core::domain::Story],
+    cards: &mut [StoryCard],
+) {
+    let ids: Vec<_> = stories.iter().map(|s| s.id).collect();
+    let Ok(have) = bg_db::analyses::which_have_analysis(db, &ids).await else {
+        return; // A badge is not worth failing a page over.
+    };
+    for c in cards.iter_mut() {
+        if let Some(st) = stories.iter().find(|s| s.slug == c.slug) {
+            c.has_analysis = have.contains(&st.id.into_uuid());
+        }
+    }
+}
+
 #[cfg(feature = "ssr")]
 fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
     StoryCard {
@@ -61,6 +83,7 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
         image_url: s.image_url.clone().unwrap_or_default(),
         beat: s.beat.as_str().into(),
         source_kind: String::new(),
+        has_analysis: false,
     }
 }
 
@@ -161,6 +184,7 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
             lead_url: w.source_url.clone(),
             beat: w.beat.as_str().into(),
             source_kind: w.source_kind.as_str().into(),
+            has_analysis: false,
             image_url: w.image_url.clone().unwrap_or_default(),
         })
         .collect();
@@ -187,6 +211,18 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
                     .is_some_and(|p| (chrono::Utc::now() - p).num_hours() < 6)
         })
         .map(|s| card(s, None));
+
+    // One lookup covers the lead and the desk row; the Wire cards come from a
+    // different query and are flagged with their own.
+    {
+        let mut all: Vec<StoryCard> = lead.iter().cloned().chain(desk.iter().cloned()).collect();
+        flag_analysis(db, &ranked, &mut all).await;
+        let mut it = all.into_iter();
+        if lead.is_some() {
+            lead = it.next();
+        }
+        desk = it.collect();
+    }
 
     Ok(FrontPage {
         lead,
@@ -227,13 +263,16 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
                 image_url: w.image_url.clone().unwrap_or_default(),
                 beat: w.beat.as_str().into(),
                 source_kind: w.source_kind.as_str().into(),
+                has_analysis: false,
             })
             .collect());
     }
     let stories = bg_db::stories::published(db, k, limit, 0)
         .await
         .map_err(e)?;
-    Ok(stories.iter().map(|s| card(s, None)).collect())
+    let mut cards: Vec<StoryCard> = stories.iter().map(|s| card(s, None)).collect();
+    flag_analysis(db, &stories, &mut cards).await;
+    Ok(cards)
 }
 
 #[server(name = GetSection, prefix = "/rpc")]
@@ -243,10 +282,9 @@ pub async fn get_section(category: String) -> Result<(String, Vec<StoryCard>), S
     let cat = bg_core::domain::Category::from_str(&category)
         .map_err(|_| ServerFnError::new(format!("no such section: {category}")))?;
     let stories = bg_db::stories::by_category(db, cat, 60).await.map_err(e)?;
-    Ok((
-        cat.label().to_string(),
-        stories.iter().map(|s| card(s, None)).collect(),
-    ))
+    let mut cards: Vec<StoryCard> = stories.iter().map(|s| card(s, None)).collect();
+    flag_analysis(db, &stories, &mut cards).await;
+    Ok((cat.label().to_string(), cards))
 }
 
 // ---------------------------------------------------------------------------
@@ -583,7 +621,9 @@ pub async fn get_asset(
         story_count: stories.len() as i64,
     });
 
-    Ok((row, stories.iter().map(|s| card(s, None)).collect()))
+    let mut cards: Vec<StoryCard> = stories.iter().map(|s| card(s, None)).collect();
+    flag_analysis(db, &stories, &mut cards).await;
+    Ok((row, cards))
 }
 
 // ---------------------------------------------------------------------------

@@ -118,6 +118,28 @@ pub async fn needing_analysis(db: &Db, min_chars: i64, limit: i64) -> Result<Vec
         .collect()
 }
 
+/// Of the given stories, which have an analysis.
+///
+/// One query for a whole page of cards rather than a lookup per card: the
+/// front page renders twenty-odd, and twenty round trips to draw a badge would
+/// cost more than everything else on the page put together.
+pub async fn which_have_analysis(
+    db: &Db,
+    stories: &[StoryId],
+) -> Result<std::collections::HashSet<Uuid>> {
+    if stories.is_empty() {
+        return Ok(Default::default());
+    }
+    let ids: Vec<Uuid> = stories.iter().map(|s| s.into_uuid()).collect();
+    let rows = sqlx::query("SELECT story_id FROM analyses WHERE story_id = ANY($1)")
+        .bind(&ids)
+        .fetch_all(&db.pool)
+        .await?;
+    rows.iter()
+        .map(|r| Ok(r.try_get::<Uuid, _>("story_id")?))
+        .collect()
+}
+
 pub async fn count(db: &Db) -> Result<i64> {
     Ok(sqlx::query_scalar("SELECT count(*) FROM analyses")
         .fetch_one(&db.pool)

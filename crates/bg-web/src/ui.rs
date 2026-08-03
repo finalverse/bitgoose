@@ -736,6 +736,22 @@ pub fn Card(story: StoryCard) -> impl IntoView {
                             </>
                         }
                     })}
+                // Marks the stories that carry a take. Most do not — the Skein
+                // stays quiet when the sources are thin — so this is a real
+                // signal about which link is worth opening rather than a badge
+                // on everything.
+                {story
+                    .has_analysis
+                    .then(|| {
+                        view! {
+                            <>
+                                <span class="dot">"·"</span>
+                                <span class="has-analysis" title="Includes BitGoose analysis">
+                                    "Analysis"
+                                </span>
+                            </>
+                        }
+                    })}
             </div>
             <h3>
                 <a href=href.clone()>{story.title.clone()}</a>

@@ -29,6 +29,12 @@ pub struct StoryCard {
     pub image_url: String,
     /// Which desk this came from, shown only on blended surfaces.
     pub beat: String,
+    /// Whether the Skein had enough to say something about this story.
+    ///
+    /// A flag rather than the analysis itself: the card shows only that a take
+    /// exists, so pulling the prose into every list query would be fetching
+    /// paragraphs to render a chip.
+    pub has_analysis: bool,
     /// What the lead source is: `research`, `forum`, `video`, or an outlet.
     ///
     /// A preprint has no editor and no peer review; a forum thread is an
