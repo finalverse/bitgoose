@@ -55,6 +55,20 @@ pub fn DeskCrypto() -> impl IntoView {
     })
 }
 
+/// The capital-markets desk.
+#[component]
+pub fn DeskMarkets() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("markets"),
+    })
+}
+
+/// The high-technology desk.
+#[component]
+pub fn DeskTech() -> impl IntoView {
+    Front(FrontProps { beat: Some("tech") })
+}
+
 /// The front page, blended or for one desk.
 ///
 /// One component rather than three: a desk page *is* the front page with a
@@ -70,6 +84,16 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
         Some("crypto") => (
             "Crypto — BitGoose",
             "Crypto markets, protocols and policy, with every claim showing its sources.",
+        ),
+        Some("markets") => (
+            "Markets — BitGoose",
+            "Capital markets: equities, rates, macro and earnings, with every claim showing \
+             its sources.",
+        ),
+        Some("tech") => (
+            "Tech — BitGoose",
+            "High technology: chips, platforms, space and energy, with every claim showing \
+             its sources.",
         ),
         _ => (
             "BitGoose — The AI-era newsroom",
@@ -89,7 +113,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
                 // reasonably read a price strip as being about what they are
                 // reading. Shown on the blended front page and the crypto desk
                 // only.
-                {(beat != Some("ai")).then(|| view! { <Ticker prices=fp.prices.clone() /> })}
+                {matches!(beat, None | Some("crypto"))
+                    .then(|| view! { <Ticker prices=fp.prices.clone() /> })}
                 <div class="shell page">
                     {match &fp.lead {
                         // No Desk lead. That does not mean nothing to read: a

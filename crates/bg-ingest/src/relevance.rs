@@ -313,18 +313,209 @@ pub fn is_ai(haystack: &str) -> bool {
     AI_TERMS.iter().any(|t| contains_word(&hay, t))
 }
 
+/// Terms that mark an item as high technology without being AI or crypto.
+///
+/// The chip and platform companies, space, biotech, energy transition — the
+/// frontier that is neither a model nor a token. Nvidia is deliberately absent:
+/// it sits in [`AI_TERMS`] because in practice its news *is* AI news, and
+/// listing it twice would make the ordering below decide arbitrarily.
+const TECH_TERMS: &[&str] = &[
+    "semiconductor",
+    "semiconductors",
+    "chipmaker",
+    "chipmakers",
+    "foundry",
+    "tsmc",
+    "asml",
+    "arm holdings",
+    "qualcomm",
+    "broadcom",
+    "intel",
+    "amd",
+    "micron",
+    "samsung electronics",
+    "sk hynix",
+    "quantum computing",
+    "quantum computer",
+    "spacex",
+    "starship",
+    "rocket lab",
+    "blue origin",
+    "satellite internet",
+    "starlink",
+    "robotaxi",
+    "autonomous vehicle",
+    "autonomous vehicles",
+    "waymo",
+    "cruise",
+    "biotech",
+    "crispr",
+    "gene therapy",
+    "mrna",
+    "fusion energy",
+    "small modular reactor",
+    "grid storage",
+    "solid-state battery",
+    "data centre",
+    "data center",
+    "hyperscaler",
+    "hyperscalers",
+    "cybersecurity",
+    "zero-day",
+    "ransomware",
+    // Mega-cap *company* names are deliberately absent. "Apple", "Amazon" and
+    // the rest saturate market copy — "Amazon stock", "Apple earnings" — and
+    // because tech is checked before markets, listing them sent every megacap
+    // earnings story to the wrong desk. Same trap as bare "ai": too common to
+    // carry a signal. Their products and platforms are specific, so those are
+    // listed instead.
+    "iphone",
+    "macbook",
+    "app store",
+    "android",
+    "windows 11",
+    "azure",
+    "google cloud",
+    "vision pro",
+    "antitrust",
+    "chip export",
+    "export controls",
+];
+
+/// Terms that mark an item as capital-markets news.
+///
+/// The vocabulary of the market itself rather than of any one company, so that
+/// "Nvidia earnings" lands on the markets desk only when nothing more specific
+/// claims it.
+const MARKETS_TERMS: &[&str] = &[
+    "s&p 500",
+    "nasdaq",
+    "dow jones",
+    "russell 2000",
+    "ftse",
+    "nikkei",
+    "stoxx",
+    "hang seng",
+    // Central banks. Bare "fed" is deliberately absent — it is an ordinary
+    // English verb ("fed up", "fed the dog") and normalize() has already thrown
+    // away the capitalisation that would disambiguate it. Compounds instead,
+    // added after a test asserting "Fed holds rates steady" should reach the
+    // markets desk found that the most common phrasing of central-bank news
+    // matched nothing at all.
+    "federal reserve",
+    "the fed",
+    "fomc",
+    "fed holds",
+    "fed cuts",
+    "fed raises",
+    "fed signals",
+    "fed chair",
+    "fed officials",
+    "fed minutes",
+    "fed decision",
+    "rate cut",
+    "rate cuts",
+    "rate hike",
+    "rate decision",
+    "rates steady",
+    "interest rates",
+    "monetary policy",
+    "quantitative tightening",
+    "european central bank",
+    "bank of england",
+    "bank of japan",
+    "treasury yield",
+    "treasury yields",
+    "bond market",
+    "yield curve",
+    "inflation",
+    "cpi",
+    "ppi",
+    "payrolls",
+    "unemployment rate",
+    "gdp growth",
+    "recession",
+    // The plain forms, missing until a test asserted "Amazon earnings beat as
+    // AWS growth holds" should reach the markets desk and it matched nothing.
+    // These are market vocabulary in ordinary use — unlike "fed", none of them
+    // is a common English word in another sense.
+    "earnings",
+    "stocks",
+    "share price",
+    "shares slide",
+    "shares rise",
+    "market cap",
+    "investors",
+    "wall street",
+    "earnings season",
+    "quarterly earnings",
+    "profit warning",
+    "guidance cut",
+    "ipo",
+    "listing",
+    "spac",
+    "buyback",
+    "dividend",
+    "hedge fund",
+    "private equity",
+    "venture capital",
+    "mutual fund",
+    "exchange-traded fund",
+    "index fund",
+    "oil prices",
+    "crude oil",
+    "opec",
+    "gold prices",
+    "commodity prices",
+    "currency intervention",
+    "dollar index",
+    "emerging markets",
+];
+
+fn matches(haystack_normalized: &str, terms: &[&str]) -> bool {
+    terms.iter().any(|t| contains_word(haystack_normalized, t))
+}
+
+/// Whether an item is high-tech news.
+pub fn is_tech(haystack: &str) -> bool {
+    matches(&normalize(haystack), TECH_TERMS)
+}
+
+/// Whether an item is capital-markets news.
+pub fn is_markets(haystack: &str) -> bool {
+    matches(&normalize(haystack), MARKETS_TERMS)
+}
+
 /// Which desk an item belongs to, if any.
 ///
-/// `None` means "not for us" — the caller drops it. An item that trips both
-/// lists (an Nvidia earnings piece that mentions crypto mining, say) goes to
-/// the AI desk, because that is now the primary beat and a reader looking for
-/// it there is the likelier case.
+/// `None` means "not for us" and the caller drops it.
+///
+/// The order is a priority, not an accident. Many items trip more than one
+/// list — an Nvidia earnings story is AI *and* tech *and* markets — and a story
+/// can only live on one desk. Most specific wins:
+///
+/// 1. **AI** and **crypto**, the two subject-matter desks this newsroom was
+///    built for. A reader who wants the Nvidia story wants it under AI.
+/// 2. **Markets**, when the item speaks the vocabulary of the market —
+///    earnings, rates, indices, IPOs. Ordered ahead of tech because that
+///    vocabulary signals what a story *is about* more reliably than a product
+///    mentioned in passing: an FT piece headlined "Earnings season reaches a
+///    peak" was landing on the tech desk purely because its standfirst named a
+///    gadget.
+/// 3. **Tech**, last of the four: a named technology or platform with no
+///    market framing around it. "Apple unveils a cheaper MacBook" is tech;
+///    "Apple shares slide after guidance cut" is markets.
 pub fn classify(haystack: &str) -> Option<bg_core::domain::Beat> {
     use bg_core::domain::Beat;
-    if is_ai(haystack) {
+    let hay = normalize(haystack);
+    if matches(&hay, AI_TERMS) {
         Some(Beat::Ai)
-    } else if is_crypto(haystack) {
+    } else if matches(&hay, TERMS) {
         Some(Beat::Crypto)
+    } else if matches(&hay, MARKETS_TERMS) {
+        Some(Beat::Markets)
+    } else if matches(&hay, TECH_TERMS) {
+        Some(Beat::Tech)
     } else {
         None
     }
@@ -360,24 +551,97 @@ mod beat_tests {
     }
 
     #[test]
-    fn drops_what_belongs_on_neither_desk() {
+    fn routes_high_tech_and_capital_markets() {
+        for (s, want) in [
+            ("TSMC raises capex on foundry demand", Beat::Tech),
+            ("SpaceX Starship completes orbital test", Beat::Tech),
+            ("Apple unveils new iPhone lineup", Beat::Tech),
+            ("Waymo expands robotaxi service", Beat::Tech),
+            ("Fed holds rates steady, signals one cut", Beat::Markets),
+            ("Oil slips as OPEC weighs output increase", Beat::Markets),
+            (
+                "S&P 500 closes at a record on earnings season",
+                Beat::Markets,
+            ),
+            ("Treasury yields spike after hot CPI print", Beat::Markets),
+        ] {
+            assert_eq!(classify(s), Some(want), "misrouted: {s}");
+        }
+    }
+
+    /// The bug this caught: listing mega-cap company names under tech sent
+    /// every "Amazon stock" and "Apple earnings" story to the tech desk,
+    /// because tech is checked before markets. Company names are market copy;
+    /// their products are the technology.
+    #[test]
+    fn megacap_earnings_are_markets_not_tech() {
         for s in [
-            "Oil slips as OPEC weighs output increase",
+            "Earnings season reaches a peak",
+            "Morgan Stanley's IPO after-party: a wealth management bonanza",
+            "Amazon earnings beat as AWS growth holds",
+            "Apple shares slide after guidance cut",
+        ] {
+            assert_eq!(classify(s), Some(Beat::Markets), "should be markets: {s}");
+        }
+        // Naming a megacap no longer drags a market story onto the tech desk.
+        assert_eq!(
+            classify("Amazon Just Left Investors Speechless"),
+            Some(Beat::Markets)
+        );
+        // But the products still route to tech.
+        for s in [
+            "Apple unveils a cheaper MacBook",
+            "Regulators open an App Store antitrust case",
+            "TSMC raises capex on foundry demand",
+        ] {
+            assert_eq!(classify(s), Some(Beat::Tech), "should be tech: {s}");
+        }
+    }
+
+    #[test]
+    fn still_drops_what_belongs_on_no_desk() {
+        for s in [
             "Boeing wins order for 40 jets",
-            "Retail sales rose 0.4% in July",
-            "Apple unveils new iPhone lineup",
+            "Local council approves new bypass",
+            "Wimbledon final draws record audience",
         ] {
             assert_eq!(classify(s), None, "should be dropped: {s}");
         }
     }
 
     #[test]
-    fn overlap_goes_to_ai() {
-        // Genuinely both. AI is the primary desk, so it wins rather than the
-        // story being filed twice or arbitrarily.
+    fn most_specific_desk_wins_when_lists_overlap() {
+        // Each of these trips two or three lists. The subject-matter desks beat
+        // the broad ones, or the widest list would swallow everything.
         assert_eq!(
             classify("Nvidia GPUs power both AI training and crypto mining"),
             Some(Beat::Ai)
+        );
+        // "AI stocks" does not make this an AI story: bare "ai" deliberately
+        // does not fire (see AI_TERMS), and the subject here really is the Fed.
+        assert_eq!(
+            classify("Fed holds rates steady as AI stocks rally"),
+            Some(Beat::Markets)
+        );
+        // But name a lab and it is an AI story, whatever else it mentions.
+        assert_eq!(
+            classify("OpenAI raises at a $300B valuation as the Nasdaq rallies"),
+            Some(Beat::Ai),
+            "a named lab outranks the market vocabulary around it"
+        );
+        assert_eq!(
+            classify("TSMC earnings beat as data centre demand holds"),
+            Some(Beat::Markets),
+            "market framing wins even when the subject is a chipmaker"
+        );
+        assert_eq!(
+            classify("TSMC raises capex on foundry demand"),
+            Some(Beat::Tech),
+            "the same company with no market framing is a tech story"
+        );
+        assert_eq!(
+            classify("Bitcoin ETF inflows lift the S&P"),
+            Some(Beat::Crypto)
         );
     }
 

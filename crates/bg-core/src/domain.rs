@@ -99,6 +99,11 @@ str_enum! {
     pub enum Beat {
         Ai => "ai",
         Crypto => "crypto",
+        /// Capital markets: equities, rates, macro, earnings, funds.
+        Markets => "markets",
+        /// The rest of high technology: chips, platforms, space, biotech,
+        /// energy — the frontier that is neither a model nor a token.
+        Tech => "tech",
     }
 }
 
@@ -177,6 +182,22 @@ impl Category {
                 Category::Gaming,
                 Category::Culture,
             ],
+            Beat::Markets => &[
+                Category::Markets,
+                Category::Business,
+                Category::Policy,
+                Category::Tech,
+                Category::Culture,
+            ],
+            Beat::Tech => &[
+                Category::Tech,
+                Category::Compute,
+                Category::Business,
+                Category::Policy,
+                Category::Security,
+                Category::Gaming,
+                Category::Culture,
+            ],
         }
     }
 
@@ -207,6 +228,8 @@ impl Beat {
         match self {
             Self::Ai => "AI",
             Self::Crypto => "Crypto",
+            Self::Markets => "Markets",
+            Self::Tech => "Tech",
         }
     }
 

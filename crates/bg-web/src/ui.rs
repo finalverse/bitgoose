@@ -49,11 +49,13 @@ pub fn Masthead() -> impl IntoView {
                 <nav class="desks" aria-label="Desks">
                     <A href="/ai" attr:class="desk-link">"AI"</A>
                     <A href="/crypto" attr:class="desk-link">"Crypto"</A>
+                    <A href="/markets" attr:class="desk-link">"Markets"</A>
+                    <A href="/tech" attr:class="desk-link">"Tech"</A>
                 </nav>
                 <nav class="nav" aria-label="Sections">
                     <A href="/desk">"Desk"</A>
                     <A href="/wire">"Wire"</A>
-                    <A href="/prices">"Markets"</A>
+                    <A href="/prices">"Prices"</A>
                     <A href="/flyway">"Flyway"</A>
                     <A href="/flock">"The Flock"</A>
                     <A href="/standards">"Standards"</A>
@@ -133,9 +135,11 @@ pub fn Footer() -> impl IntoView {
                         <ul>
                             <li><A href="/ai">"AI"</A></li>
                             <li><A href="/crypto">"Crypto"</A></li>
+                            <li><A href="/markets">"Markets"</A></li>
+                            <li><A href="/tech">"Tech"</A></li>
                             <li><A href="/desk">"The Desk"</A></li>
                             <li><A href="/wire">"The Wire"</A></li>
-                            <li><A href="/prices">"Markets"</A></li>
+                            <li><A href="/prices">"Prices"</A></li>
                             <li><A href="/flyway">"Flyway"</A></li>
                         </ul>
                     </div>
@@ -193,6 +197,8 @@ pub fn BeatTag(beat: String) -> impl IntoView {
     let label = match beat.as_str() {
         "ai" => "AI",
         "crypto" => "Crypto",
+        "markets" => "Markets",
+        "tech" => "Tech",
         _ => return None::<AnyView>.into_any(),
     };
     view! { <span class=format!("beat-tag beat-{beat}")>{label}</span> }.into_any()
