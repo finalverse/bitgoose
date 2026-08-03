@@ -21,6 +21,20 @@ pub struct OpenAiProvider {
     overrides: [Option<String>; 3],
 }
 
+/// A non-negative price per million tokens from the environment.
+///
+/// A negative or unparseable value is ignored rather than clamped: it means the
+/// operator meant something we did not understand, and guessing at that is how
+/// a wrong number reaches a published ledger.
+fn env_price(key: &str) -> Option<f64> {
+    std::env::var(key)
+        .ok()?
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v >= 0.0)
+}
+
 impl OpenAiProvider {
     pub fn from_env() -> Result<Self> {
         let base_url = std::env::var("OPENAI_BASE_URL")
@@ -58,12 +72,35 @@ impl OpenAiProvider {
 
     /// Pricing for a tier. A locally served model is free, and saying
     /// otherwise would put a fabricated figure in the published cost ledger.
+    /// Pricing for a tier.
+    ///
+    /// This provider fronts four quite different things — OpenAI itself, a
+    /// model on localhost, a free tier like Groq or Cerebras, and any other
+    /// OpenAI-compatible host — and only the first has prices we actually know.
+    /// Applying OpenAI's table to all of them puts invented figures in the cost
+    /// ledger that `/flock` publishes as fact.
+    ///
+    /// So: localhost is free, `api.openai.com` uses the real table, and
+    /// anything else is priced from `BG_LLM_PRICE_IN` / `BG_LLM_PRICE_OUT` (USD
+    /// per million tokens) if the operator sets them, or recorded at zero if
+    /// not. Zero is the honest default for an unknown endpoint — under-reporting
+    /// a figure nobody supplied is better than fabricating one, and the model
+    /// name in the ledger still says exactly what ran.
     fn spec_for(&self, tier: ModelTier) -> ModelSpec {
         if self.is_local {
-            pricing::LOCAL
-        } else {
-            pricing::openai_spec(tier)
+            return pricing::LOCAL;
         }
+        if self.base_url.contains("api.openai.com") {
+            return pricing::openai_spec(tier);
+        }
+        let mut spec = pricing::LOCAL;
+        if let Some(v) = env_price("BG_LLM_PRICE_IN") {
+            spec.input_per_mtok = v;
+        }
+        if let Some(v) = env_price("BG_LLM_PRICE_OUT") {
+            spec.output_per_mtok = v;
+        }
+        spec
     }
 
     fn resolved_model(&self, tier: ModelTier) -> String {
@@ -292,6 +329,75 @@ mod local_pricing_tests {
     /// must cost nothing there. Pricing an Ollama call at OpenAI's rates would
     /// put an invented number on the one page whose whole premise is that its
     /// numbers are real.
+    fn provider_at(url: &str) -> OpenAiProvider {
+        OpenAiProvider {
+            is_local: url.contains("127.0.0.1") || url.contains("localhost"),
+            api_key: "k".into(),
+            base_url: url.into(),
+            http: http_client(),
+            overrides: [None, None, None],
+        }
+    }
+
+    /// The ledger on `/flock` is published as fact, so a price must be known,
+    /// declared, or zero — never inferred from a different vendor's table.
+    #[test]
+    fn only_openai_itself_is_priced_with_openais_table() {
+        // SAFETY: single-threaded test, no tasks spawned.
+        unsafe {
+            std::env::remove_var("BG_LLM_PRICE_IN");
+            std::env::remove_var("BG_LLM_PRICE_OUT");
+        }
+
+        let openai = provider_at("https://api.openai.com/v1");
+        assert!(
+            openai.spec_for(ModelTier::Top).output_per_mtok > 0.0,
+            "OpenAI's own endpoint must use the real price table"
+        );
+
+        // A free tier (Groq, Cerebras) or any other compatible host: unknown,
+        // so zero rather than OpenAI's prices.
+        for url in [
+            "https://api.groq.com/openai/v1",
+            "https://api.cerebras.ai/v1",
+            "https://openrouter.ai/api/v1",
+        ] {
+            let p = provider_at(url);
+            assert_eq!(
+                p.spec_for(ModelTier::Top).output_per_mtok,
+                0.0,
+                "{url} must not inherit OpenAI's prices"
+            );
+        }
+    }
+
+    #[test]
+    fn an_operator_can_declare_the_real_price() {
+        unsafe {
+            std::env::set_var("BG_LLM_PRICE_IN", "0.59");
+            std::env::set_var("BG_LLM_PRICE_OUT", "0.79");
+        }
+        let p = provider_at("https://api.groq.com/openai/v1");
+        let s = p.spec_for(ModelTier::Mid);
+        assert_eq!(s.input_per_mtok, 0.59);
+        assert_eq!(s.output_per_mtok, 0.79);
+
+        // Nonsense is ignored rather than clamped — it means the operator meant
+        // something we did not understand.
+        unsafe {
+            std::env::set_var("BG_LLM_PRICE_IN", "-3");
+            std::env::set_var("BG_LLM_PRICE_OUT", "banana");
+        }
+        let s = provider_at("https://api.groq.com/openai/v1").spec_for(ModelTier::Mid);
+        assert_eq!(s.input_per_mtok, 0.0);
+        assert_eq!(s.output_per_mtok, 0.0);
+
+        unsafe {
+            std::env::remove_var("BG_LLM_PRICE_IN");
+            std::env::remove_var("BG_LLM_PRICE_OUT");
+        }
+    }
+
     #[test]
     fn local_models_are_never_billed() {
         let local = OpenAiProvider {
