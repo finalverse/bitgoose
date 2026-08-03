@@ -1048,7 +1048,7 @@ a:hover > .media-play::after,
 
 .desk-link {
   display: inline-block;
-  padding: 0.28rem 0.78rem;
+  padding: 0.28rem 0.7rem;
   border-radius: 999px;
   font-family: var(--sans);
   font-size: 0.78rem;
@@ -1129,15 +1129,61 @@ a:hover > .media-play::after,
    `max-height` plus `object-fit: cover` keeps the crop cinematic while leaving
    room for the stories underneath it to be seen. */
 .page > .lead-story { margin-bottom: 2rem; }
+
+/* The cap goes on the figure, not the image. Capping only the image leaves the
+   figure at its 16:9 aspect-ratio, so its background shows as a bare band under
+   the photo with the credit stranded on it — which is exactly how it rendered
+   on mobile. Sizing the figure and letting the image fill it keeps the two in
+   step. */
+/* Size the image, let the figure follow it.
+   
+   Two earlier attempts failed for opposite reasons. `aspect-ratio` plus
+   `max-height` shrinks the box in both directions, so the hero came out at
+   ~60% width with dead space beside it. Fixing the *figure's* height instead
+   made the image and its credit overflow that height, leaving a bare band
+   under the photo. Constraining the image alone gives full width, a clean
+   crop, and a figure that is exactly as tall as its contents. */
+.page > .lead-story .media-lead {
+  aspect-ratio: auto;
+  height: auto;
+}
 .page > .lead-story .media-lead img {
-  aspect-ratio: 21 / 9;
-  max-height: 42vh;
+  width: 100%;
+  height: clamp(220px, 38vh, 460px);
+  aspect-ratio: auto;
   object-fit: cover;
 }
 
 @media (width <= 760px) {
   .page > .lead-story .media-lead img {
-    aspect-ratio: 16 / 9;
-    max-height: 34vh;
+    height: clamp(180px, 28vh, 280px);
   }
+}
+
+/* The credit is one line. "Image: Yahoo Finance" wrapping to two on a phone
+   reads as a broken block rather than a caption. */
+.media figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: baseline;
+}
+
+
+/* The masthead carries a brand, four desks, six sections and a theme toggle.
+   Left to itself the section nav was the thing that gave way, scrolling "The
+   Flock" and "Standards" out of view on a 1600px desktop — the widest screen
+   most readers have. Tightening the section row and letting it shrink last
+   keeps everything visible down to about 1100px, below which it scrolls by
+   design. */
+.masthead .shell {
+  gap: 1rem;
+}
+.nav {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+@media (width >= 761px) {
+  .nav { gap: 0.95rem; font-size: 0.85rem; }
+  .desks { flex: none; }
 }
