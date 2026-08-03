@@ -165,6 +165,39 @@ pub fn Footer() -> impl IntoView {
     }
 }
 
+/// Says what a card actually is, when it is not an ordinary news article.
+///
+/// Silent for `rss`, `finance` and `wire` sources, because "article" is the
+/// default the layout already communicates and a tag on every card would be
+/// noise. It speaks up for the three that would otherwise mislead:
+///
+/// * **Preprint** — no peer review, no editor, and authors who are the
+///   interested party. A reader should know that before weighing the claim.
+/// * **Discussion** — an argument among practitioners, not a report. Often the
+///   earliest signal there is, and never corroboration.
+/// * **Video** — the thing is watchable; saying so is the whole draw.
+#[component]
+pub fn KindTag(kind: String) -> impl IntoView {
+    let (label, class) = match kind.as_str() {
+        "research" => ("Preprint", "kind-research"),
+        "forum" => ("Discussion", "kind-forum"),
+        "video" => ("Video", "kind-video"),
+        _ => return None::<AnyView>.into_any(),
+    };
+    view! { <span class=format!("kind-tag {class}")>{label}</span> }.into_any()
+}
+
+/// Which desk a story came from. Shown only where both are mixed together.
+#[component]
+pub fn BeatTag(beat: String) -> impl IntoView {
+    let label = match beat.as_str() {
+        "ai" => "AI",
+        "crypto" => "Crypto",
+        _ => return None::<AnyView>.into_any(),
+    };
+    view! { <span class=format!("beat-tag beat-{beat}")>{label}</span> }.into_any()
+}
+
 /// Verification badge.
 #[component]
 pub fn VerificationBadge(verification: String, label: String) -> impl IntoView {

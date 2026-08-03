@@ -147,6 +147,61 @@ impl Category {
     }
 }
 
+impl Category {
+    /// The categories that make sense on one desk.
+    ///
+    /// Triage picks from this rather than from all fourteen. Halving the choice
+    /// space measurably helps a small model, and it makes whole classes of
+    /// error unrepresentable: an AI story cannot come back tagged "defi", and a
+    /// crypto story cannot come back tagged "compute".
+    pub const fn for_beat(beat: Beat) -> &'static [Category] {
+        match beat {
+            Beat::Ai => &[
+                Category::Models,
+                Category::Research,
+                Category::Compute,
+                Category::Safety,
+                Category::Policy,
+                Category::Business,
+                Category::Security,
+                Category::Culture,
+            ],
+            Beat::Crypto => &[
+                Category::Markets,
+                Category::Defi,
+                Category::Policy,
+                Category::Business,
+                Category::Security,
+                Category::Tech,
+                Category::Nft,
+                Category::Gaming,
+                Category::Culture,
+            ],
+        }
+    }
+
+    /// One line telling a model what the category is for. Without this it is
+    /// choosing between bare tokens and will reach for whichever it likes.
+    pub const fn hint(&self) -> &'static str {
+        match self {
+            Self::Markets => "prices, flows, trading, ETFs, treasury holdings",
+            Self::Policy => "regulation, legislation, courts, enforcement, government",
+            Self::Tech => "protocol and infrastructure engineering",
+            Self::Defi => "lending, DEXes, stablecoins, yield, on-chain finance",
+            Self::Business => "funding, earnings, hiring, deals, corporate strategy",
+            Self::Security => "hacks, exploits, vulnerabilities, scams, incidents",
+            Self::Ai => "general AI coverage that fits no narrower section",
+            Self::Nft => "NFTs, collectibles, digital art",
+            Self::Gaming => "games and game studios specifically",
+            Self::Culture => "community, discourse, people, opinion-shaped news",
+            Self::Research => "papers, benchmarks, evaluations, published results",
+            Self::Models => "a model or system shipping: weights, APIs, capabilities",
+            Self::Compute => "chips, datacentres, energy, hardware supply",
+            Self::Safety => "alignment, evaluations, misuse, model incidents",
+        }
+    }
+}
+
 impl Beat {
     pub const fn label(&self) -> &'static str {
         match self {

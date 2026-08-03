@@ -27,6 +27,15 @@ pub struct StoryCard {
     /// publisher's asset on the publisher's CDN, credited through `lead_source`
     /// and linked back through `lead_url`.
     pub image_url: String,
+    /// Which desk this came from, shown only on blended surfaces.
+    pub beat: String,
+    /// What the lead source is: `research`, `forum`, `video`, or an outlet.
+    ///
+    /// A preprint has no editor and no peer review; a forum thread is an
+    /// argument, not a report. Rendering either with the same furniture as a
+    /// news article tells the reader something untrue about what they are
+    /// looking at, so the card says which it is.
+    pub source_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

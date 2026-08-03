@@ -84,15 +84,40 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
             data,
             |fp| view! {
                 {fp.honk.clone().map(|h| view! { <HonkBar story=h /> })}
-                <Ticker prices=fp.prices.clone() />
+                // The ticker is crypto spot prices. On the AI desk it is not
+                // just irrelevant, it is misleading furniture — a reader could
+                // reasonably read a price strip as being about what they are
+                // reading. Shown on the blended front page and the crypto desk
+                // only.
+                {(beat != Some("ai")).then(|| view! { <Ticker prices=fp.prices.clone() /> })}
                 <div class="shell page">
                     {match &fp.lead {
-                        None => {
+                        // No Desk lead. That does not mean nothing to read: a
+                        // desk can be running entirely on the Wire, which is
+                        // exactly the state a new one starts in. Only show the
+                        // empty state when there is genuinely nothing.
+                        None if fp.wire.is_empty() => {
                             view! {
                                 <Empty
-                                    message="No stories published yet. Run the newsroom to fill the front page."
+                                    message="Nothing published on this desk yet. Run the newsroom to fill it."
                                     hint="bg run"
                                 />
+                            }
+                                .into_any()
+                        }
+                        None => {
+                            let wire = fp.wire.clone();
+                            view! {
+                                <div class="rail-title">
+                                    <span>"The Wire"</span>
+                                    <a href="/wire">"All"</a>
+                                </div>
+                                <div class="wire-full">
+                                    {wire
+                                        .into_iter()
+                                        .map(|s| view! { <WireRow story=s /> })
+                                        .collect_view()}
+                                </div>
                             }
                                 .into_any()
                         }
@@ -289,6 +314,8 @@ fn WireRow(story: StoryCard) -> impl IntoView {
                     .then(|| view! { <p class="wire-summary">{story.dek.clone()}</p> })}
                 <div class="wire-foot">
                     <span class="kicker">{story.category_label.clone()}</span>
+                    <KindTag kind=story.source_kind.clone() />
+                    <BeatTag beat=story.beat.clone() />
                     {(!story.lead_source.is_empty())
                         .then(|| {
                             view! {

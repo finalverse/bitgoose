@@ -59,6 +59,8 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
         lead_source: lead.map(|(n, _)| n.to_string()).unwrap_or_default(),
         lead_url: lead.map(|(_, u)| u.to_string()).unwrap_or_default(),
         image_url: s.image_url.clone().unwrap_or_default(),
+        beat: s.beat.as_str().into(),
+        source_kind: String::new(),
     }
 }
 
@@ -157,6 +159,8 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
             assets: w.assets.clone(),
             lead_source: w.source_name.clone(),
             lead_url: w.source_url.clone(),
+            beat: w.beat.as_str().into(),
+            source_kind: w.source_kind.as_str().into(),
             image_url: w.image_url.clone().unwrap_or_default(),
         })
         .collect();
@@ -221,6 +225,8 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
                 lead_source: w.source_name.clone(),
                 lead_url: w.source_url.clone(),
                 image_url: w.image_url.clone().unwrap_or_default(),
+                beat: w.beat.as_str().into(),
+                source_kind: w.source_kind.as_str().into(),
             })
             .collect());
     }

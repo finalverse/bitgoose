@@ -16,16 +16,20 @@ pub const SYSTEM: &str = "Gosling is the first read on everything that lands.
 
 For each item you are given, decide:
 - is_news: true if this reports something that happened. False for opinion \
-columns, price-prediction filler, sponsored posts, listicles, 'top 5 coins to \
-watch' content, and anything that is purely promotional.
-- category: which desk it belongs to.
+columns, prediction filler, sponsored posts, listicles, 'top 5 things to watch' \
+content, and anything purely promotional.
+- category: pick from the list given. Each one has a description — use it. Do \
+not reach for a category because the word appears in the headline.
 - assets: ticker symbols the item is genuinely about (uppercase, no $ prefix). \
-An article about an exchange hack that mentions BTC's price in passing is not \
-about BTC. Empty list is correct and common.
-- score: 0-100, how much a well-informed reader would care. Anchors: 90+ is a \
-major hack, an enforcement action against a top-10 entity, or a chain halt. \
-70-89 is a significant funding round, a large protocol upgrade, or a notable \
-regulatory filing. 40-69 is routine industry news. Below 40 is noise.
+A hack story that mentions BTC's price in passing is not about BTC, and a story \
+about a model release is usually about no ticker at all. Empty is common and \
+correct.
+- score: 0-100, how much a well-informed reader would care. 90+ is a frontier \
+model release, a major breach, an enforcement action against a top-10 entity, \
+or a chain halt. 70-89 is a significant funding round, a major paper, a large \
+protocol upgrade, or a notable regulatory filing. 40-69 is routine industry \
+news. Below 40 is noise — which most forum threads and incremental preprints \
+are.
 
 Be strict. Most of what crosses the wire is not news.";
 
@@ -50,8 +54,11 @@ struct TriageItem {
     score: f64,
 }
 
-fn schema(n: usize) -> serde_json::Value {
-    let cats: Vec<&str> = Category::ALL.iter().map(|c| c.as_str()).collect();
+fn schema(n: usize, beat: bg_core::domain::Beat) -> serde_json::Value {
+    let cats: Vec<&str> = Category::for_beat(beat)
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
     sch::object(
         vec![(
             "items",
@@ -90,11 +97,28 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
     let system = crate::system_prompt(ctx, AgentRole::Gosling).await;
     let mut triaged = 0usize;
 
-    for chunk in items.chunks(BATCH) {
-        let chunk = chunk.to_vec();
+    // Grouped by desk before batching. One call therefore covers one beat, so
+    // the category enum can be restricted to that desk's sections — which is
+    // what stops an AI story coming back tagged "gaming", as every one of them
+    // did when the enum was all fourteen with no descriptions.
+    let mut by_beat: std::collections::BTreeMap<bg_core::domain::Beat, Vec<_>> = Default::default();
+    for it in items {
+        let beat = it.beat.unwrap_or(bg_core::domain::Beat::Crypto);
+        by_beat.entry(beat).or_default().push(it);
+    }
+    let batches: Vec<(bg_core::domain::Beat, Vec<_>)> = by_beat
+        .into_iter()
+        .flat_map(|(b, v)| v.chunks(BATCH).map(|c| (b, c.to_vec())).collect::<Vec<_>>())
+        .collect();
+
+    for (beat, chunk) in batches {
         let system = system.clone();
         let n = stage(ctx, AgentRole::Gosling, None, "triage", |_run| async move {
-            let mut prompt = String::from("Triage these items.\n\n");
+            let mut prompt = format!("Desk: {}\n\nCategories:\n", beat.label());
+            for c in Category::for_beat(beat) {
+                prompt.push_str(&format!("- {}: {}\n", c.as_str(), c.hint()));
+            }
+            prompt.push_str("\nTriage these items.\n\n");
             for (i, it) in chunk.iter().enumerate() {
                 prompt.push_str(&format!(
                     "[{i}] {}\n    {}\n",
@@ -107,7 +131,7 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
             }
 
             let req = Request::new("gosling.triage", ModelTier::Fast, system, prompt)
-                .with_schema(schema(chunk.len()))
+                .with_schema(schema(chunk.len(), beat))
                 .with_max_tokens(4_000);
             let (parsed, completion) = ctx.llm.complete_json::<TriageBatch>(&req).await?;
 
