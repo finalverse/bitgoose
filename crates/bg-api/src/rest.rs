@@ -84,7 +84,7 @@ async fn index() -> Json<serde_json::Value> {
                         confidence score.",
         "endpoints": {
             "GET /v1/stories": "published stories (?kind=desk|wire&category=&limit=&offset=)",
-            "GET /v1/stories/{slug}": "one story with its full claim ledger",
+            "GET /v1/stories/{slug}": "one story with its claim ledger and analysis",
             "GET /v1/wire": "the fast aggregated feed",
             "GET /v1/claims/{id}": "one claim with every source backing it",
             "GET /v1/prices": "latest market data",
@@ -162,6 +162,7 @@ async fn get_story(
     let sources = bg_db::stories::source_refs(&s.db, story.id).await?;
     let corrections = bg_db::articles::corrections_for_story(&s.db, story.id).await?;
     let runs = bg_db::agents::runs_for_story(&s.db, story.id).await?;
+    let analysis = bg_db::analyses::for_story(&s.db, story.id).await?;
 
     Ok(Json(json!({
         "story": summarize(&story),
@@ -169,6 +170,10 @@ async fn get_story(
         "claims": claims,
         "sources": sources,
         "corrections": corrections,
+        // Under its own key, never merged into `article`. A consuming agent
+        // must be able to take the reporting without the inference, and to see
+        // which is which — the same separation the page makes visually.
+        "analysis": analysis,
         // Provenance is part of the payload, not a separate endpoint: an agent
         // consuming a story should be able to see how it was produced without
         // a second request.
@@ -286,7 +291,7 @@ async fn openapi() -> Json<serde_json::Value> {
         },
         "paths": {
             "/v1/stories": { "get": { "summary": "List published stories" } },
-            "/v1/stories/{slug}": { "get": { "summary": "One story with its claim ledger" } },
+            "/v1/stories/{slug}": { "get": { "summary": "One story with its claim ledger and Skein analysis" } },
             "/v1/wire": { "get": { "summary": "The aggregated Wire feed" } },
             "/v1/claims/{id}": { "get": { "summary": "One claim with all backing sources" } },
             "/v1/prices": { "get": { "summary": "Latest market data" } },

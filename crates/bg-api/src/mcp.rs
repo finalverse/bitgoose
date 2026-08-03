@@ -71,7 +71,10 @@ fn tools() -> Value {
         {
             "name": "get_story",
             "description": "One story by slug, with every claim, each claim's verification \
-                            state and confidence, and the sources backing it.",
+                            state and confidence, the sources backing it, and BitGoose's own \
+                            analysis of what it means and where it leads. The `analysis` field \
+                            is model inference, not reporting, and is absent when there was too \
+                            little source text to ground one.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "slug": { "type": "string" } },
@@ -210,6 +213,9 @@ async fn call_tool(s: &ApiState, name: &str, args: &Value) -> Result<Value, Stri
             let article = bg_db::articles::latest_for_story(&s.db, story.id)
                 .await
                 .map_err(|e| e.to_string())?;
+            let analysis = bg_db::analyses::for_story(&s.db, story.id)
+                .await
+                .map_err(|e| e.to_string())?;
 
             Ok(json!({
                 "slug": story.slug,
@@ -230,7 +236,20 @@ async fn call_tool(s: &ApiState, name: &str, args: &Value) -> Result<Value, Stri
                         "stance": src.stance.as_str(),
                         "trust": src.source_trust,
                     })).collect::<Vec<_>>()
-                })).collect::<Vec<_>>()
+                })).collect::<Vec<_>>(),
+                // Kept beside the claims rather than inside them: a claim is
+                // sourced, this is not. An agent that wants only what other
+                // outlets stand behind can ignore this key entirely.
+                "analysis": analysis.as_ref().map(|a| json!({
+                    "significance": a.significance,
+                    "direction": a.direction,
+                    "horizon": a.horizon,
+                    "confidence": a.confidence,
+                    "stance": a.stance(),
+                    "watch": a.watch,
+                    "model": a.model,
+                    "is_inference": true,
+                })),
             }))
         }
 

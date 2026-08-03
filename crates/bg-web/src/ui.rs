@@ -182,6 +182,20 @@ pub fn Footer() -> impl IntoView {
 /// That size is what X and WeChat crop a *large* card from — smaller images get
 /// a thumbnail instead — and serving it ourselves means a story with no
 /// photograph still shares as something rather than a bare link.
+/// The width a URL claims for itself, from a `width=` or `w=` query parameter.
+///
+/// Image CDNs (Reddit, WordPress, Cloudinary, most Next.js sites) encode the
+/// rendered size in the URL, which is the only way to know how big a remote
+/// image is without fetching it. `None` means the URL says nothing — we assume
+/// it is fine rather than discarding every image that lacks the hint.
+fn declared_width(url: &str) -> Option<u32> {
+    let (_, query) = url.split_once('?')?;
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        matches!(k, "width" | "w").then(|| v.parse().ok())?
+    })
+}
+
 #[component]
 pub fn ShareMeta(
     title: String,
@@ -203,10 +217,17 @@ pub fn ShareMeta(
                 .map(|(host, _)| format!("{scheme}://{host}"))
         })
         .unwrap_or_else(|| url.trim_end_matches('/').to_string());
-    let img = if image.trim().is_empty() {
-        format!("{base}/og-default.png")
+    // A hotlinked publisher image is only usable as a share card if it is
+    // actually big enough to be one. Several syndicate a thumbnail — one story
+    // shipped `?width=140&height=105` — and a 140px file on a
+    // `summary_large_image` card renders as a blurred smear or is dropped
+    // outright. Where the URL states a width we can read, hold it to the size
+    // the card needs; otherwise fall back to our own.
+    let usable = !image.trim().is_empty() && declared_width(&image).is_none_or(|w| w >= 600);
+    let (img, own_card) = if usable {
+        (image, false)
     } else {
-        image
+        (format!("{base}/og-default.png"), true)
     };
     view! {
         <Meta name="description" content=description.clone() />
@@ -219,9 +240,19 @@ pub fn ShareMeta(
         <Meta property="og:image" content=img.clone() />
         // WeChat and several chat clients size the preview from these rather
         // than fetching the image first; without them the card can collapse to
-        // a thumbnail even when the image is large enough.
-        <Meta property="og:image:width" content="1200" />
-        <Meta property="og:image:height" content="630" />
+        // a thumbnail even when the image is large enough. Declared only for
+        // our own card, whose dimensions we know — asserting 1200x630 over a
+        // publisher image we have never measured is how the thumbnail above
+        // came to be advertised as a full-bleed card.
+        {own_card
+            .then(|| {
+                view! {
+                    <>
+                        <Meta property="og:image:width" content="1200" />
+                        <Meta property="og:image:height" content="630" />
+                    </>
+                }
+            })}
         <Meta property="og:image:alt" content=title.clone() />
         <Meta name="twitter:card" content="summary_large_image" />
         <Meta name="twitter:title" content=title />
@@ -745,4 +776,33 @@ pub fn Empty(#[prop(into)] message: String, #[prop(into, optional)] hint: String
 #[component]
 pub fn Loading() -> impl IntoView {
     view! { <p class="loading">"Loading…"</p> }
+}
+
+#[cfg(test)]
+mod share_meta_tests {
+    use super::declared_width;
+
+    #[test]
+    fn a_thumbnail_url_reports_its_real_size() {
+        // The exact URL that shipped as a 1200x630 card.
+        assert_eq!(
+            declared_width("https://preview.redd.it/x4l5.jpg?width=140&height=105&auto=webp"),
+            Some(140)
+        );
+        assert_eq!(
+            declared_width("https://img.example.com/a.jpg?w=1600&q=80"),
+            Some(1600)
+        );
+    }
+
+    #[test]
+    fn a_url_that_claims_nothing_is_left_alone() {
+        // Most publisher images have no size hint; discarding those would throw
+        // away every usable card to catch the few bad ones.
+        assert_eq!(declared_width("https://example.com/photo.jpg"), None);
+        assert_eq!(
+            declared_width("https://example.com/photo.jpg?auto=webp"),
+            None
+        );
+    }
 }
