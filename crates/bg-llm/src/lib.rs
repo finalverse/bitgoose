@@ -40,6 +40,18 @@ pub enum LlmError {
         body: String,
     },
 
+    /// Rate limited, with the wait the provider asked for.
+    ///
+    /// Distinct from a generic 429 because the response tells us *how long* to
+    /// wait, and honouring that is the difference between riding out a free
+    /// tier's per-minute budget and failing the whole run. Falling through to
+    /// another provider does not help when there is only one.
+    #[error("{provider} rate limited; retry in {}s", retry_after.as_secs())]
+    RateLimited {
+        provider: &'static str,
+        retry_after: std::time::Duration,
+    },
+
     #[error("{provider} is not configured: {reason}")]
     NotConfigured {
         provider: &'static str,
@@ -73,6 +85,7 @@ impl LlmError {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Api { status, .. } => *status == 429 || *status >= 500,
+            Self::RateLimited { .. } => true,
             Self::Transport(_) => true,
             Self::Refused { .. }
             | Self::SchemaViolation(_)
@@ -178,6 +191,16 @@ pub trait LlmProvider: Send + Sync {
 
 /// A provider chain with failover.
 ///
+/// How many times to wait out a rate limit on one provider before giving up.
+///
+/// Three is enough to ride out a per-minute budget without letting a wedged
+/// provider stall a pipeline pass indefinitely.
+const MAX_RATE_LIMIT_RETRIES: u32 = 3;
+
+/// Ceiling on a single wait, however long the provider asks for. A quota that
+/// resets in an hour is an outage to be reported, not slept through.
+const MAX_RATE_LIMIT_WAIT: std::time::Duration = std::time::Duration::from_secs(75);
+
 /// Ordered, tried left to right, skipping errors that retrying cannot fix. In
 /// practice the chain ends in the stub, so the pipeline degrades to free,
 /// offline operation instead of stopping when an upstream is down.
@@ -252,7 +275,30 @@ impl Llm {
     pub async fn complete(&self, req: &Request) -> Result<Completion> {
         let mut last: Option<LlmError> = None;
         for p in &self.chain {
-            match p.complete(req).await {
+            // Rate limits are waited out on the same provider rather than
+            // failed over. A free tier's per-minute token budget is a normal
+            // operating condition, not an outage, and the response says exactly
+            // how long to wait — moving to a different provider would neither
+            // help nor be possible when the chain has one entry.
+            let mut attempt = 0u32;
+            let outcome = loop {
+                match p.complete(req).await {
+                    Err(LlmError::RateLimited {
+                        provider,
+                        retry_after,
+                    }) if attempt < MAX_RATE_LIMIT_RETRIES => {
+                        attempt += 1;
+                        let wait = retry_after.min(MAX_RATE_LIMIT_WAIT);
+                        warn!(
+                            provider, task = %req.task, attempt,
+                            wait_s = wait.as_secs(), "rate limited; waiting"
+                        );
+                        tokio::time::sleep(wait).await;
+                    }
+                    other => break other,
+                }
+            };
+            match outcome {
                 Ok(c) => return Ok(c),
                 Err(e) if e.is_retryable() => {
                     warn!(provider = p.name(), task = %req.task, error = %e, "falling through");

@@ -234,6 +234,23 @@ pub async fn needing_summary(db: &Db, limit: i64) -> Result<Vec<Story>> {
     rows.iter().map(from_row).collect()
 }
 
+/// The published stories a reader is most likely to see, highest ranked first.
+///
+/// Used by `bg rescore` to re-judge the archive with a better model: the front
+/// page is where a bad score does visible damage, so that is where re-scoring
+/// should start rather than at the oldest or the newest.
+pub async fn top_published(db: &Db, limit: i64) -> Result<Vec<Story>> {
+    let rows = crate::sql(format!(
+        "SELECT {COLS} FROM stories
+         WHERE status = 'published'
+         ORDER BY newsworthiness DESC, published_at DESC LIMIT $1"
+    ))
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+    rows.iter().map(from_row).collect()
+}
+
 /// Published stories of a given kind, newest first.
 pub async fn published(
     db: &Db,

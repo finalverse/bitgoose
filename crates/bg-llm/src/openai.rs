@@ -21,6 +21,21 @@ pub struct OpenAiProvider {
     overrides: [Option<String>; 3],
 }
 
+/// Pull "try again in 38.6025s" out of a rate-limit message.
+///
+/// Providers that omit Retry-After often still say the wait in prose. Reading
+/// it beats guessing: waiting too little burns another attempt against the same
+/// budget, and waiting too long stalls the pass.
+fn parse_retry_hint(body: &str) -> Option<f64> {
+    let i = body.find("try again in")? + "try again in".len();
+    let rest = body[i..].trim_start();
+    let num: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    num.parse().ok()
+}
+
 /// A non-negative price per million tokens from the environment.
 ///
 /// A negative or unparseable value is ignored rather than clamped: it means the
@@ -189,6 +204,24 @@ impl LlmProvider for OpenAiProvider {
             .await?;
 
         let status = resp.status();
+        if status.as_u16() == 429 {
+            // Prefer the Retry-After header; fall back to the wait embedded in
+            // the message body, which is where Groq puts it.
+            let header = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<f64>().ok());
+            let body = resp.text().await.unwrap_or_default();
+            let secs = header
+                .or_else(|| parse_retry_hint(&body))
+                .unwrap_or(20.0)
+                .clamp(1.0, 300.0);
+            return Err(LlmError::RateLimited {
+                provider: "openai",
+                retry_after: std::time::Duration::from_secs_f64(secs),
+            });
+        }
         if !status.is_success() {
             return Err(LlmError::Api {
                 provider: "openai",
@@ -341,6 +374,21 @@ mod local_pricing_tests {
 
     /// The ledger on `/flock` is published as fact, so a price must be known,
     /// declared, or zero — never inferred from a different vendor's table.
+    /// Groq omits Retry-After and puts the wait in the message. Reading it
+    /// beats guessing: too short burns another attempt against the same budget,
+    /// too long stalls the pass.
+    #[test]
+    fn the_wait_is_read_out_of_the_rate_limit_message() {
+        let body = r#"{"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b` on tokens per minute (TPM): Limit 8000, Used 7666, Requested 5481. Please try again in 38.6025s.","type":"tokens"}}"#;
+        assert_eq!(parse_retry_hint(body), Some(38.6025));
+
+        assert_eq!(parse_retry_hint("try again in 7s"), Some(7.0));
+        // Nothing to read: the caller falls back to its own default.
+        assert_eq!(parse_retry_hint("slow down"), None);
+        assert_eq!(parse_retry_hint(""), None);
+        assert_eq!(parse_retry_hint("try again in soon"), None);
+    }
+
     #[test]
     fn only_openai_itself_is_priced_with_openais_table() {
         // SAFETY: single-threaded test, no tasks spawned.

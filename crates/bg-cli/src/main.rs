@@ -61,6 +61,18 @@ enum Cmd {
         #[arg(long, default_value_t = 10)]
         limit: i64,
     },
+    /// Re-judge published stories with the currently configured model.
+    ///
+    /// Story ranking is driven by triage scores, which were produced by
+    /// whichever model was configured when the item first landed. Swapping in a
+    /// stronger one does nothing to the archive by itself, so the front page
+    /// keeps whatever the old one thought — which is how a stock-promo item
+    /// ended up leading a desk. This re-triages the highest-ranked stories and
+    /// recomputes their scores.
+    Rescore {
+        #[arg(long, default_value_t = 25)]
+        limit: i64,
+    },
     /// Write summaries for Wire stories published without one.
     ///
     /// Everything published while the offline stub was the only provider has a
@@ -180,6 +192,26 @@ async fn main() -> Result<()> {
             let ctx = context(&url, None).await?;
             let n = bg_agents::ombuds::run(&ctx, limit).await?;
             println!("{n} correction(s) issued");
+        }
+        Cmd::Rescore { limit } => {
+            let ctx = context(&url, None).await?;
+            let stories = bg_db::stories::top_published(&ctx.db, limit).await?;
+            println!("re-judging {} stor(ies)", stories.len());
+            let mut items = 0u64;
+            for s in &stories {
+                items += bg_db::items::reset_triage_for_story(&ctx.db, s.id).await?;
+            }
+            println!("  {items} item(s) queued for re-triage");
+            let n = bg_agents::gosling::run(&ctx, (items as i64).max(1)).await?;
+            println!("  {n} re-triaged");
+            for s in &stories {
+                let before = s.newsworthiness;
+                let after = bg_agents::curator::rescore(&ctx, s.id).await?;
+                if (after - before).abs() >= 8 {
+                    println!("  {before:>3} -> {after:>3}  {}", s.slug);
+                }
+            }
+            println!("done");
         }
         Cmd::RefreshWire { limit } => {
             let ctx = context(&url, None).await?;

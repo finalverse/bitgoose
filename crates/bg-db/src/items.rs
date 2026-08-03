@@ -118,6 +118,19 @@ pub async fn insert_new(db: &Db, it: &NewItem) -> Result<Option<RawItemId>> {
     Ok(row.map(|r| RawItemId::from_uuid(r.get::<Uuid, _>("id"))))
 }
 
+/// Mark a story's items untriaged so they are judged again.
+///
+/// The scores behind story ranking were produced by whatever model was
+/// configured at the time. When that model changes, re-judging is the only way
+/// to make the archive reflect it — nothing else recomputes those numbers.
+pub async fn reset_triage_for_story(db: &Db, story: StoryId) -> Result<u64> {
+    let r = sqlx::query("UPDATE raw_items SET triaged = FALSE WHERE story_id = $1")
+        .bind(story.into_uuid())
+        .execute(&db.pool)
+        .await?;
+    Ok(r.rows_affected())
+}
+
 pub async fn count(db: &Db) -> Result<i64> {
     Ok(sqlx::query_scalar("SELECT count(*) FROM raw_items")
         .fetch_one(&db.pool)

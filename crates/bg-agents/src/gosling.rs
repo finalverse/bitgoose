@@ -38,7 +38,12 @@ Be strict. Most of what crosses the wire is not news.";
 /// Batching is what makes triaging every item affordable — 25 items in one
 /// call instead of 25 calls. Larger batches save more but degrade judgement as
 /// the model's attention spreads across the list.
-const BATCH: usize = 25;
+/// Sized against a hosted free tier's per-minute token budget, not just model
+/// attention. Groq's free tier allows 8k tokens/minute and counts `max_tokens`
+/// toward it, so a 25-item batch reserving 4k tokens consumed most of a minute
+/// in one call and the next one 429'd. Ten items with a smaller reservation
+/// leaves room for several calls per minute.
+const BATCH: usize = 10;
 
 #[derive(Debug, Deserialize)]
 struct TriageBatch {
@@ -132,7 +137,7 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
 
             let req = Request::new("gosling.triage", ModelTier::Fast, system, prompt)
                 .with_schema(schema(chunk.len(), beat))
-                .with_max_tokens(4_000);
+                .with_max_tokens(1_500);
             let (parsed, completion) = ctx.llm.complete_json::<TriageBatch>(&req).await?;
 
             let mut n = 0usize;
