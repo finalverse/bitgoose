@@ -2,11 +2,14 @@
 
 # 🪿 BitGoose
 
-**The AI newsroom for crypto.**
+**The AI-era newsroom for frontier technology.**
 
 Ten AI agents run a newsroom end to end — polling sources, clustering events,
 extracting claims, verifying them across outlets, and publishing. No humans in
 the publishing path. Every claim shows its sources and a confidence score.
+
+Two desks: **AI** — models, research, compute, safety and policy — and
+**crypto**, where the project started.
 
 [Architecture](#architecture) · [Quickstart](#quickstart) · [The Flock](#the-flock) ·
 [API](#api--mcp) · [Editorial policy](#editorial-policy)
@@ -230,15 +233,40 @@ is never redistributed through this API, because it is not ours to redistribute.
 
 ## Sources
 
-Nine outlets, weighted by a trust score that reflects *editorial process* — named
+Thirty-two, weighted by a trust score that reflects *editorial process* — named
 reporters, a corrections policy, original reporting vs reprints — not whether we
 like the coverage. Scores are visible on `/standards` precisely because they are
 contestable.
 
-CoinDesk · The Block · Decrypt · DL News · Blockworks · The Defiant ·
-Bitcoin Magazine · Cointelegraph · CryptoSlate
+**AI** — OpenAI · Google DeepMind · Hugging Face · TechCrunch · Ars Technica ·
+MIT Technology Review · The Verge · Simon Willison · Import AI ·
+arXiv cs.AI · arXiv cs.LG · r/MachineLearning · r/LocalLLaMA
+
+**Crypto** — CoinDesk · The Block · Decrypt · DL News · Blockworks ·
+The Defiant · Bitcoin Magazine · Cointelegraph · CryptoSlate
+
+**Mainstream finance** — Bloomberg · Financial Times · CNBC · MarketWatch ·
+Yahoo Finance. Their feeds are mostly equities and rates, so each item passes a
+crypto/AI relevance gate before it is stored rather than being taken wholesale.
+
+**Video** — Coin Bureau · Bankless · Milk Road · Unchained · Crypto Banter,
+embedded through YouTube's own player so the creator keeps control.
 
 Market data from CoinGecko, with Coinbase as fallback.
+
+Not every source kind is a news article, and the interface says so: a preprint
+has no editor and no peer review, and a forum thread is an argument rather than
+a report. Both are tagged as such and neither counts as corroboration for a
+claim.
+
+**Why there is no X/Twitter.** Its API starts at $200/month, and the free route
+is third-party scrapers that work intermittently and operate against X's terms.
+A newsroom that publishes a [`/bot`](https://bitgoose.com/bot) page promising to
+honour robots.txt should not run on a scraping proxy.
+
+Four candidates were tested and rejected: Anthropic publishes no RSS, Hugging
+Face's papers feed requires auth, VentureBeat's AI feed stopped updating, and
+Reuters' public RSS endpoints 404.
 
 ---
 

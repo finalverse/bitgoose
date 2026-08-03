@@ -853,6 +853,64 @@ mod tests {
         assert!(Verification::Disputed.publishable());
     }
 
+    /// Every AI story came back tagged "Gaming" when triage was offered all
+    /// fourteen categories as bare tokens. Restricting the choice per desk is
+    /// what fixed it, so these are the properties that must hold.
+    #[test]
+    fn each_desk_offers_only_categories_that_belong_to_it() {
+        let ai = Category::for_beat(Beat::Ai);
+        let crypto = Category::for_beat(Beat::Crypto);
+
+        // The error that actually happened, and its mirror.
+        assert!(
+            !ai.contains(&Category::Gaming),
+            "gaming is not an AI section"
+        );
+        assert!(!ai.contains(&Category::Defi));
+        assert!(!ai.contains(&Category::Nft));
+        assert!(!crypto.contains(&Category::Compute));
+        assert!(!crypto.contains(&Category::Models));
+        assert!(!crypto.contains(&Category::Research));
+        assert!(!crypto.contains(&Category::Safety));
+
+        // Each desk needs somewhere for its defining stories to go.
+        for c in [
+            Category::Models,
+            Category::Research,
+            Category::Compute,
+            Category::Safety,
+        ] {
+            assert!(ai.contains(&c), "AI desk needs {c}");
+        }
+        for c in [Category::Markets, Category::Defi] {
+            assert!(crypto.contains(&c), "crypto desk needs {c}");
+        }
+
+        // Neither list may be empty or contain duplicates — a duplicate would
+        // reach the model as a repeated enum variant.
+        for (name, list) in [("ai", ai), ("crypto", crypto)] {
+            assert!(!list.is_empty(), "{name} has no categories");
+            let mut seen = std::collections::HashSet::new();
+            for c in list {
+                assert!(seen.insert(c), "{name} lists {c} twice");
+            }
+        }
+    }
+
+    /// A bare enum told the model nothing about what a category meant. Every
+    /// one must carry a hint, or triage is guessing again.
+    #[test]
+    fn every_category_explains_itself() {
+        for c in Category::ALL {
+            let h = c.hint();
+            assert!(h.len() > 12, "{c} has no usable hint: {h:?}");
+            assert!(
+                !h.contains(c.as_str()),
+                "{c}'s hint just restates its name: {h:?}"
+            );
+        }
+    }
+
     #[test]
     fn the_flock_has_ten_roles_and_scout_needs_no_model() {
         assert_eq!(AgentRole::ALL.len(), 10);
