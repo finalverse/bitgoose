@@ -80,7 +80,13 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
         assets: s.assets.clone(),
         lead_source: lead.map(|(n, _)| n.to_string()).unwrap_or_default(),
         lead_url: lead.map(|(_, u)| u.to_string()).unwrap_or_default(),
-        image_url: s.image_url.clone().unwrap_or_default(),
+        // A feed can hand us a video-player URL where an image belongs; that
+        // renders as a permanently broken image. Normalise at the boundary.
+        image_url: s
+            .image_url
+            .as_deref()
+            .and_then(bg_core::media::as_image)
+            .unwrap_or_default(),
         beat: s.beat.as_str().into(),
         source_kind: String::new(),
         has_analysis: false,
@@ -185,7 +191,11 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
             beat: w.beat.as_str().into(),
             source_kind: w.source_kind.as_str().into(),
             has_analysis: false,
-            image_url: w.image_url.clone().unwrap_or_default(),
+            image_url: w
+                .image_url
+                .as_deref()
+                .and_then(bg_core::media::as_image)
+                .unwrap_or_default(),
         })
         .collect();
 
@@ -260,7 +270,11 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
                 assets: w.assets.clone(),
                 lead_source: w.source_name.clone(),
                 lead_url: w.source_url.clone(),
-                image_url: w.image_url.clone().unwrap_or_default(),
+                image_url: w
+                    .image_url
+                    .as_deref()
+                    .and_then(bg_core::media::as_image)
+                    .unwrap_or_default(),
                 beat: w.beat.as_str().into(),
                 source_kind: w.source_kind.as_str().into(),
                 has_analysis: false,
@@ -401,7 +415,11 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
 
     // The lead image and who to credit for it. `refs` is ordered seed-first, so
     // its head is the outlet the image most likely came from.
-    let image_url = story.image_url.clone().unwrap_or_default();
+    let image_url = story
+        .image_url
+        .as_deref()
+        .and_then(bg_core::media::as_image)
+        .unwrap_or_default();
     let (image_credit, image_credit_url) = refs
         .first()
         .map(|r| (r.name.clone(), r.url.clone()))

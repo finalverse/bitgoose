@@ -257,7 +257,10 @@ async fn poll_inner(
             body_raw: body,
             simhash: simhash64(&fingerprint_input),
             lang: feed.language.clone().unwrap_or_else(|| "en".into()),
-            image_url: image,
+            // YouTube's media:content is the player URL, not a picture.
+            // Converting here means the column holds something an <img> can
+            // actually load, rather than every reader having to know.
+            image_url: image.as_deref().and_then(bg_core::media::as_image),
             video_id,
             beat: Some(beat),
         };

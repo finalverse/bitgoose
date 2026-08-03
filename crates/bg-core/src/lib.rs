@@ -22,6 +22,7 @@
 pub mod domain;
 pub mod error;
 pub mod ids;
+pub mod media;
 pub mod policy;
 pub mod slug;
 pub mod text;
