@@ -61,10 +61,18 @@ forecast and not as fact. Name the specific thing you expect to happen. \
 HORIZON. The period the direction is claimed over: 'days', 'weeks', 'this \
 quarter', 'this year'.
 
-CONFIDENCE. 0-100 in the direction. Be calibrated, not agreeable — most \
-directional calls about markets and technology deserve 40-70. Reserve 80+ for \
-things that are close to mechanical, and if you cannot argue the case above 35, \
-say so with a low number rather than hedging the prose.
+CONFIDENCE. 0-100 in the direction, chosen by which of these the evidence \
+actually supports. Do not average them, and do not pick a number in the middle \
+because it feels safe — a figure you would give to every story tells the reader \
+nothing:
+- 85-95: near-mechanical. The thing has already happened and only needs to \
+finish, or a party with the power to do it has publicly committed to a date.
+- 65-84: strong precedent for this exact sequence, or a named actor has said \
+they intend it and can act alone.
+- 45-64: plausible, but it turns on a decision nobody has announced yet.
+- 25-44: one reading of an ambiguous situation; a competent analyst could \
+argue the opposite from the same sources.
+- Under 25: you are guessing. Say so, and keep the direction short.
 
 WATCH. Two or three concrete, checkable signals that would confirm or refute \
 the direction. Each must be something a reader could actually go and look at — \
