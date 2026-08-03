@@ -107,6 +107,11 @@ LEPTOS_SITE_PKG_DIR=pkg
 # Resolves /pkg/<name>.{js,css,wasm}. Without it the page renders but the
 # hydration bundle and stylesheet 404, which looks like a broken deploy.
 LEPTOS_OUTPUT_NAME=bitgoose
+# cargo-leptos emits bitgoose.<hash>.css/.js/.wasm. Without this flag the server
+# renders the *unhashed* names into the HTML and every asset 404s — the site
+# comes up unstyled and unhydrated, which is exactly what happened the first
+# time hashing shipped. The hash is read from hash.txt beside the binary.
+LEPTOS_HASH_FILES=true
 LEPTOS_ENV=PROD
 BG_PUBLIC_BASE_URL=https://bitgoose.com
 
