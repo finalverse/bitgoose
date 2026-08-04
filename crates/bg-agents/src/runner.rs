@@ -19,6 +19,7 @@ pub struct PipelineReport {
     pub desk_held: usize,
     pub desk_killed: usize,
     pub wire_published: usize,
+    pub enriched: usize,
     pub analysed: usize,
     pub corrections: usize,
     pub errors: Vec<String>,
@@ -29,7 +30,7 @@ impl PipelineReport {
     pub fn summary(&self) -> String {
         format!(
             "ingested {} · triaged {} · clustered {} · desk {}✓/{}⏸/{}✗ · wire {} · \
-             analysed {} · corrections {} · ${:.4}",
+             enriched {} · analysed {} · corrections {} · ${:.4}",
             self.items_ingested,
             self.items_triaged,
             self.items_clustered,
@@ -37,6 +38,7 @@ impl PipelineReport {
             self.desk_held,
             self.desk_killed,
             self.wire_published,
+            self.enriched,
             self.analysed,
             self.corrections,
             self.cost_usd
@@ -52,6 +54,9 @@ pub struct RunOpts {
     pub ombuds: bool,
     pub max_triage: i64,
     pub max_cluster: i64,
+    /// Article pages to fetch per pass. Bounded because the fetch loop shares
+    /// a narrow downlink with the live site.
+    pub max_enrich: i64,
     /// Analyses to attempt per pass. Small on purpose: the Skein runs on the
     /// top tier, and a free-tier token budget spent analysing twenty stories is
     /// a budget not spent publishing the next twenty.
@@ -66,6 +71,7 @@ impl Default for RunOpts {
             ombuds: true,
             max_triage: 100,
             max_cluster: 60,
+            max_enrich: 12,
             max_analyses: 3,
         }
     }
@@ -164,6 +170,19 @@ pub async fn run_once(ctx: &Ctx, opts: &RunOpts) -> Result<PipelineReport> {
                     rep.errors.push(format!("wire {}: {e}", story.slug));
                 }
             }
+        }
+    }
+
+    // -- Scout, again ----------------------------------------------------------
+    // Fetch the article text behind newly-clustered items. Placed after
+    // clustering because `needing_extraction` only considers items attached to
+    // a story — fetching a publisher's page for something we may never print
+    // spends their bandwidth for nothing — and before the Skein, which cannot
+    // say anything without it.
+    if opts.max_enrich > 0 {
+        match scout::enrich(ctx, opts.max_enrich).await {
+            Ok((got, _)) => rep.enriched = got,
+            Err(e) => rep.errors.push(format!("enrich: {e}")),
         }
     }
 

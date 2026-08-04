@@ -184,13 +184,59 @@ async fn main() -> Result<()> {
 
         Cmd::Worker { interval } => {
             let ctx = context(&url, None).await?;
-            println!("worker started, {interval}s interval — ctrl-c to stop");
+            println!("worker started, {interval}s base interval — ctrl-c to stop");
+
+            // The gap is measured from the *end* of a pass, not its start.
+            // Token pacing means a pass now takes as long as the budget
+            // requires rather than a predictable few seconds, so a fixed
+            // wall-clock schedule would either overlap passes or drift.
+            let base = Duration::from_secs(interval);
+            // Backing off on repeated failure keeps a broken provider or a
+            // dead database from being hammered every interval, and keeps the
+            // journal readable enough to see what actually went wrong.
+            let mut consecutive_failures = 0u32;
+
             loop {
-                match runner::run_once(&ctx, &runner::RunOpts::default()).await {
-                    Ok(r) => println!("[{}] {}", chrono::Utc::now().to_rfc3339(), r.summary()),
-                    Err(e) => eprintln!("[{}] pass failed: {e}", chrono::Utc::now().to_rfc3339()),
-                }
-                tokio::time::sleep(Duration::from_secs(interval)).await;
+                let started = std::time::Instant::now();
+                let backlog = match runner::run_once(&ctx, &runner::RunOpts::default()).await {
+                    Ok(r) => {
+                        println!(
+                            "[{}] {} ({}s)",
+                            chrono::Utc::now().to_rfc3339(),
+                            r.summary(),
+                            started.elapsed().as_secs()
+                        );
+                        consecutive_failures = 0;
+                        // Did this pass leave work on the table?
+                        r.items_triaged > 0 || r.enriched > 0 || r.analysed > 0
+                    }
+                    Err(e) => {
+                        eprintln!("[{}] pass failed: {e}", chrono::Utc::now().to_rfc3339());
+                        consecutive_failures = consecutive_failures.saturating_add(1);
+                        false
+                    }
+                };
+
+                let wait = if consecutive_failures > 0 {
+                    // 2x, 4x, 8x … capped at an hour.
+                    let factor = 1u64 << consecutive_failures.min(5);
+                    (base * factor as u32).min(Duration::from_secs(3600))
+                } else if backlog {
+                    // There was work and there is likely more — a feed burst,
+                    // or a queue we are chewing through. Come back promptly
+                    // rather than idling for the full interval with items
+                    // waiting. Floor of 30s so a busy period cannot become a
+                    // hot loop against the publishers or the token budget.
+                    (base / 4).max(Duration::from_secs(30))
+                } else {
+                    // Nothing moved. Feeds are polled on their own per-source
+                    // intervals anyway, so there is nothing to gain from
+                    // checking more often than this.
+                    base
+                };
+
+                println!("  next pass in {}s", wait.as_secs());
+                tokio::time::sleep(wait).await;
             }
         }
 

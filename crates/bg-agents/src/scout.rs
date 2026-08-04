@@ -25,6 +25,49 @@ pub struct ScoutReport {
 }
 
 /// Poll every source that is due.
+/// Fetch article text for items that do not have it yet.
+///
+/// Runs in the pipeline rather than only from the CLI, because otherwise the
+/// Skein has nothing to read for anything published after the last manual
+/// `bg enrich` — the analysis would quietly only ever cover the back catalogue.
+///
+/// Bounded per pass and serialised with a delay: this host has a ~15 KB/s
+/// downlink shared with the live site, and an unbounded fetch loop measurably
+/// slowed the site for readers while it ran.
+pub async fn enrich(ctx: &Ctx, limit: i64) -> Result<(usize, usize)> {
+    let targets = bg_db::items::needing_extraction(&ctx.db, limit).await?;
+    if targets.is_empty() {
+        return Ok((0, 0));
+    }
+    let respect_robots = std::env::var("BG_RESPECT_ROBOTS")
+        .map(|v| v != "false")
+        .unwrap_or(true);
+
+    let (mut got, mut missed) = (0usize, 0usize);
+    for (id, url) in &targets {
+        match bg_ingest::readable::fetch(&ctx.http, &ctx.cfg.user_agent, url, respect_robots).await
+        {
+            Ok(Some(ex)) => {
+                bg_db::items::record_extraction(&ctx.db, *id, Some(&ex.text), ex.via).await?;
+                got += 1;
+            }
+            Ok(None) => {
+                bg_db::items::record_extraction(&ctx.db, *id, None, "none").await?;
+                missed += 1;
+            }
+            Err(_) => {
+                // Counted, not marked done: a blip retries, a refusal gives up
+                // after MAX_EXTRACT_ATTEMPTS.
+                bg_db::items::record_extract_failure(&ctx.db, *id).await?;
+                missed += 1;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+    }
+    info!(got, missed, "scout enriched");
+    Ok((got, missed))
+}
+
 pub async fn run(ctx: &Ctx) -> Result<ScoutReport> {
     stage(ctx, AgentRole::Scout, None, "poll", |_run| async move {
         // Re-read robots.txt before polling, not just at seed time. This was

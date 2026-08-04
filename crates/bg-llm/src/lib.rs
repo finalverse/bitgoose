@@ -16,6 +16,7 @@
 
 pub mod anthropic;
 pub mod openai;
+pub mod pacer;
 pub mod pricing;
 pub mod schema;
 pub mod stub;
@@ -207,15 +208,30 @@ const MAX_RATE_LIMIT_WAIT: std::time::Duration = std::time::Duration::from_secs(
 #[derive(Clone)]
 pub struct Llm {
     chain: Vec<Arc<dyn LlmProvider>>,
+    /// Keeps us inside a per-minute token allowance by waiting *before* a call
+    /// rather than absorbing the rejection after it. See [`pacer`].
+    pacer: Arc<pacer::Pacer>,
 }
 
 impl Llm {
     pub fn new(chain: Vec<Arc<dyn LlmProvider>>) -> Self {
+        Self::with_pace(chain, pacer::limit_from_env())
+    }
+
+    /// `tokens_per_min` of 0 disables pacing — the right setting for a paid
+    /// tier or a local model, where the only limit is the hardware.
+    pub fn with_pace(chain: Vec<Arc<dyn LlmProvider>>, tokens_per_min: u32) -> Self {
         assert!(
             !chain.is_empty(),
             "LLM chain must have at least one provider"
         );
-        Self { chain }
+        if tokens_per_min > 0 {
+            info!(tokens_per_min, "pacing LLM calls to a per-minute budget");
+        }
+        Self {
+            chain,
+            pacer: Arc::new(pacer::Pacer::new(tokens_per_min)),
+        }
     }
 
     /// Build from environment: `BG_LLM_PROVIDER` then `BG_LLM_FALLBACK`.
@@ -260,7 +276,7 @@ impl Llm {
             chain = %chain.iter().map(|p| p.name()).collect::<Vec<_>>().join(" -> "),
             "LLM chain ready"
         );
-        Self { chain }
+        Self::with_pace(chain, pacer::limit_from_env())
     }
 
     pub fn primary(&self) -> &dyn LlmProvider {
@@ -273,6 +289,15 @@ impl Llm {
 
     /// Run a request through the chain.
     pub async fn complete(&self, req: &Request) -> Result<Completion> {
+        // Spend the minute deliberately. The retry loop below stays as a
+        // backstop for when this estimate is wrong or something else is using
+        // the same key, but it should now be the exception rather than the
+        // mechanism by which we discover the limit.
+        if self.pacer.enabled() {
+            let cost = pacer::estimate_tokens(&req.system, &req.user, req.max_tokens);
+            self.pacer.acquire(cost, &req.task).await;
+        }
+
         let mut last: Option<LlmError> = None;
         for p in &self.chain {
             // Rate limits are waited out on the same provider rather than
@@ -299,7 +324,15 @@ impl Llm {
                 }
             };
             match outcome {
-                Ok(c) => return Ok(c),
+                Ok(c) => {
+                    // Replace the estimate with what it actually cost, so a
+                    // consistently wrong estimate does not compound.
+                    self.pacer
+                        .record((c.prompt_tokens + c.completion_tokens).saturating_sub(
+                            pacer::estimate_tokens(&req.system, &req.user, req.max_tokens),
+                        ));
+                    return Ok(c);
+                }
                 Err(e) if e.is_retryable() => {
                     warn!(provider = p.name(), task = %req.task, error = %e, "falling through");
                     last = Some(e);
