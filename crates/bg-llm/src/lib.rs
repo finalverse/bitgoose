@@ -293,10 +293,12 @@ impl Llm {
         // backstop for when this estimate is wrong or something else is using
         // the same key, but it should now be the exception rather than the
         // mechanism by which we discover the limit.
-        if self.pacer.enabled() {
+        let reservation = if self.pacer.enabled() {
             let cost = pacer::estimate_tokens(&req.system, &req.user, req.max_tokens);
-            self.pacer.acquire(cost, &req.task).await;
-        }
+            Some(self.pacer.acquire(cost, &req.task).await)
+        } else {
+            None
+        };
 
         let mut last: Option<LlmError> = None;
         for p in &self.chain {
@@ -325,12 +327,13 @@ impl Llm {
             };
             match outcome {
                 Ok(c) => {
-                    // Replace the estimate with what it actually cost, so a
-                    // consistently wrong estimate does not compound.
-                    self.pacer
-                        .record((c.prompt_tokens + c.completion_tokens).saturating_sub(
-                            pacer::estimate_tokens(&req.system, &req.user, req.max_tokens),
-                        ));
+                    // Give back whatever the estimate over-reserved. The output
+                    // ceiling is usually far above the real reply, so without
+                    // this the budget drains several times faster than the tier
+                    // requires and the newsroom paces itself to a crawl.
+                    if let Some(r) = reservation {
+                        self.pacer.settle(r, c.prompt_tokens + c.completion_tokens);
+                    }
                     return Ok(c);
                 }
                 Err(e) if e.is_retryable() => {

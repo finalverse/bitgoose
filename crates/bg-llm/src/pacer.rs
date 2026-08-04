@@ -109,7 +109,12 @@ impl Pacer {
     }
 
     /// Block until `cost` tokens fit inside the rolling minute.
-    pub async fn acquire(&self, cost: u32, task: &str) {
+    ///
+    /// Returns the reservation, which the caller must hand to [`settle`] with
+    /// the real figure once the call returns.
+    ///
+    /// [`settle`]: Self::settle
+    pub async fn acquire(&self, cost: u32, task: &str) -> Reservation {
         let wait = self.delay_for(cost);
         if wait > Duration::ZERO {
             debug!(
@@ -120,12 +125,43 @@ impl Pacer {
             );
             tokio::time::sleep(wait).await;
         }
-        // Reserve the estimate now. The real figure replaces it via `record`
-        // once the call returns; reserving first stops concurrent callers from
-        // all seeing an empty budget and piling in together.
+        // Reserve up front, before the call: otherwise concurrent callers all
+        // see an empty budget and pile in together.
         self.record(cost);
+        Reservation(cost)
+    }
+
+    /// Replace a reservation with what the call actually cost.
+    ///
+    /// This matters more than it looks. The estimate has to include the full
+    /// `max_tokens` because we cannot know how long a reply will be, but most
+    /// replies are a fraction of it — a 2,000-token ceiling against a 400-token
+    /// answer. Without giving the difference back, every call over-reserves by
+    /// four fifths of its output allowance and the newsroom paces itself far
+    /// slower than the tier actually requires.
+    pub fn settle(&self, reservation: Reservation, actual: u32) {
+        if !self.enabled() {
+            return;
+        }
+        let estimate = reservation.0;
+        if actual == estimate {
+            return;
+        }
+        let mut spent = self.spent.lock().unwrap_or_else(|e| e.into_inner());
+        // Newest first: our own reservation is the most recent entry of that
+        // size, and matching the newest keeps concurrent callers from
+        // correcting each other's.
+        if let Some(slot) = spent.iter_mut().rev().find(|(_, n)| *n == estimate) {
+            slot.1 = actual;
+        }
     }
 }
+
+/// A reserved slice of the token budget, to be reconciled by
+/// [`Pacer::settle`].
+#[must_use = "a reservation that is never settled over-counts the budget"]
+#[derive(Debug, Clone, Copy)]
+pub struct Reservation(u32);
 
 /// Rough token count for a prompt.
 ///
@@ -177,6 +213,44 @@ mod tests {
         let p = Pacer::new(8_000);
         p.record(7_200);
         assert!(p.delay_for(7_200) <= WINDOW);
+    }
+
+    #[tokio::test]
+    async fn an_overestimate_is_given_back() {
+        // The estimate must include the full max_tokens ceiling; the reply is
+        // usually a fraction of it. Without a refund the budget drains four
+        // times faster than the tier requires.
+        let p = Pacer::new(8_000);
+        let r = p.acquire(2_500, "t").await;
+        assert!(p.delay_for(5_000) > Duration::ZERO, "reserved, so tight");
+        p.settle(r, 500);
+        assert_eq!(
+            p.delay_for(5_000),
+            Duration::ZERO,
+            "refund should leave room again"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_underestimate_is_charged_in_full() {
+        // The correction has to work in both directions, or a run of
+        // longer-than-expected replies silently blows the budget.
+        let p = Pacer::new(8_000);
+        let r = p.acquire(500, "t").await;
+        p.settle(r, 7_000);
+        assert!(p.delay_for(1_000) > Duration::ZERO, "should now be tight");
+    }
+
+    #[tokio::test]
+    async fn settling_touches_only_its_own_reservation() {
+        let p = Pacer::new(20_000);
+        let a = p.acquire(1_000, "a").await;
+        let _b = p.acquire(1_000, "b").await;
+        p.settle(a, 10);
+        // One of the two 1,000s became 10; the other must be untouched.
+        let spent = p.spent.lock().unwrap();
+        let total: u32 = spent.iter().map(|(_, n)| n).sum();
+        assert_eq!(total, 1_010, "settle adjusted more than one entry");
     }
 
     #[test]
