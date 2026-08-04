@@ -82,6 +82,22 @@ web-sys = { version = "0.3", features = [
 ] }
 console_error_panic_hook = "0.1"
 
+# Debug builds of bg-web were producing 2.2 GB *individual* codegen-unit object
+# files — 223 GB of target/debug across a few stale build hashes. Nearly all of
+# it is DWARF for the Leptos macro expansion plus every monomorphised
+# dependency, and none of it is useful without a debugger attached.
+#
+# `line-tables-only` keeps what backtraces actually need (file and line) and
+# drops the type and variable descriptions that account for the bulk. Set it
+# back to `true` if you need to step through in a debugger.
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies are not what anyone steps through, and they are most of the
+# volume.
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = 3
 lto = "thin"
