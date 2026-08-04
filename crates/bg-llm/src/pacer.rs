@@ -53,6 +53,13 @@ struct Ledger {
     /// character counts; this is the meter that actually decides whether the
     /// next call is refused, and it accounts for anything else sharing the key.
     observed: Option<(Instant, u32, Duration)>,
+    /// Requests left and the refill interval for one, as the provider reports.
+    ///
+    /// On a free tier this is usually the *binding* limit. Groq allows 1,000 a
+    /// day, refilling one every 86.4 seconds, and a pipeline pass can want
+    /// eighty — so pacing tokens alone leaves the newsroom stalling on a quota
+    /// it never looked at.
+    observed_requests: Option<(Instant, u32, Duration)>,
 }
 
 /// Rolling token ledgers, one per model, corrected by what the provider reports.
@@ -118,6 +125,17 @@ impl Pacer {
             }
         }
 
+        // A request quota binds independently of the token one. When the
+        // provider says only a handful of calls are left, spacing them by the
+        // stated refill is the difference between degrading gracefully and
+        // spending the rest of the day taking 429s.
+        if let Some((seen, remaining, reset)) = l.observed_requests {
+            let age = now.duration_since(seen);
+            if remaining == 0 {
+                return reset.saturating_sub(age).min(WINDOW);
+            }
+        }
+
         let budget = (f64::from(self.limit) * SAFETY) as u32;
         while let Some((t, _)) = l.spent.front() {
             if now.duration_since(*t) >= WINDOW {
@@ -157,6 +175,33 @@ impl Pacer {
         };
         let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
         ledgers[slot(tier)].observed = Some((Instant::now(), remaining, reset));
+    }
+
+    /// Record the request allowance the provider reports.
+    pub fn observe_requests(
+        &self,
+        tier: ModelTier,
+        remaining: Option<u32>,
+        reset: Option<Duration>,
+    ) {
+        let (Some(remaining), Some(reset)) = (remaining, reset) else {
+            return;
+        };
+        let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
+        ledgers[slot(tier)].observed_requests = Some((Instant::now(), remaining, reset));
+    }
+
+    /// How close to exhausted the request allowance is, 0.0-1.0, if known.
+    ///
+    /// Exposed so the pipeline can shrink its own appetite — the honest answer
+    /// to a daily request quota is to make fewer, larger calls, not to wait
+    /// longer between the same number of them.
+    pub fn request_headroom(&self, tier: ModelTier) -> Option<f32> {
+        let ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
+        ledgers[slot(tier)]
+            .observed_requests
+            .map(|(_, remaining, _)| remaining as f32)
+            .map(|r| (r / 1000.0).clamp(0.0, 1.0))
     }
 
     /// Record tokens spent against a model.
@@ -368,5 +413,38 @@ mod tests {
         let small = estimate_tokens("sys", "hi", 100);
         let big = estimate_tokens("sys", &"word ".repeat(4_000), 100);
         assert!(big > small * 10, "estimate should track prompt size");
+    }
+}
+
+#[cfg(test)]
+mod request_quota_tests {
+    use super::*;
+
+    /// On Groq's free tier the request quota binds long before the token one:
+    /// 1,000 calls a day against ~11.5 million tokens. Pacing tokens alone let
+    /// the worker stall on a limit it had never looked at.
+    #[tokio::test]
+    async fn an_exhausted_request_quota_forces_a_wait() {
+        let p = Pacer::new(8_000);
+        p.observe_requests(ModelTier::Fast, Some(0), Some(Duration::from_secs(45)));
+        assert!(
+            p.delay_for(ModelTier::Fast, 10) > Duration::ZERO,
+            "no requests left, so a tiny call must still wait"
+        );
+    }
+
+    #[tokio::test]
+    async fn requests_still_available_do_not_delay_a_small_call() {
+        let p = Pacer::new(8_000);
+        p.observe_requests(ModelTier::Fast, Some(500), Some(Duration::from_secs(45)));
+        assert_eq!(p.delay_for(ModelTier::Fast, 10), Duration::ZERO);
+    }
+
+    /// Per model here too — draining the Top tier's calls must not block Fast.
+    #[tokio::test]
+    async fn the_request_quota_is_tracked_per_model() {
+        let p = Pacer::new(8_000);
+        p.observe_requests(ModelTier::Top, Some(0), Some(Duration::from_secs(45)));
+        assert_eq!(p.delay_for(ModelTier::Fast, 10), Duration::ZERO);
     }
 }

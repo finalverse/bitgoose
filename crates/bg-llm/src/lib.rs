@@ -165,6 +165,14 @@ pub struct Completion {
     pub rate_remaining_tokens: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_reset: Option<std::time::Duration>,
+    /// Requests left, and the refill interval for one of them.
+    ///
+    /// On Groq's free tier this is the binding limit, not tokens: 1,000 a day,
+    /// refilling one every 86.4 seconds. A pipeline pass can easily want eighty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_remaining_requests: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_reset_requests: Option<std::time::Duration>,
 }
 
 impl Completion {
@@ -355,6 +363,11 @@ impl Llm {
                     // The provider's own meter overrides our estimate.
                     self.pacer
                         .observe(req.tier, c.rate_remaining_tokens, c.rate_reset);
+                    self.pacer.observe_requests(
+                        req.tier,
+                        c.rate_remaining_requests,
+                        c.rate_reset_requests,
+                    );
                     return Ok(c);
                 }
                 Err(e) if e.is_retryable() => {

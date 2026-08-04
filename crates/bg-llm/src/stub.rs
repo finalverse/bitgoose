@@ -318,6 +318,8 @@ impl LlmProvider for StubProvider {
             // headers, and the stub has no limit to report.
             rate_remaining_tokens: None,
             rate_reset: None,
+            rate_remaining_requests: None,
+            rate_reset_requests: None,
         })
     }
 

@@ -38,12 +38,21 @@ Be strict. Most of what crosses the wire is not news.";
 /// Batching is what makes triaging every item affordable — 25 items in one
 /// call instead of 25 calls. Larger batches save more but degrade judgement as
 /// the model's attention spreads across the list.
-/// Sized against a hosted free tier's per-minute token budget, not just model
-/// attention. Groq's free tier allows 8k tokens/minute and counts `max_tokens`
-/// toward it, so a 25-item batch reserving 4k tokens consumed most of a minute
-/// in one call and the next one 429'd. Ten items with a smaller reservation
-/// leaves room for several calls per minute.
-const BATCH: usize = 10;
+/// Sized against the limit that actually binds, which is requests, not tokens.
+///
+/// This was cut from 25 to 10 when a big batch reserving 4k tokens ate most of
+/// a minute's token budget and the next call 429'd. That reasoning was sound
+/// and aimed at the wrong meter. Groq's free tier allows 8,000 tokens a minute
+/// — about 11.5 million a day — but only **1,000 requests a day**, refilling
+/// one every 86 seconds. Tokens are abundant; calls are not.
+///
+/// Batching does not reduce tokens at all: cost scales linearly with items,
+/// roughly 200 apiece either way. It reduces *requests*, three-fold at thirty
+/// items instead of ten, and that is the budget the newsroom actually runs out
+/// of. Thirty items at ~200 tokens each plus the reservation sits near 6k —
+/// inside the per-minute ceiling, so it costs one slow call rather than three
+/// fast ones.
+const BATCH: usize = 30;
 
 #[derive(Debug, Deserialize)]
 struct TriageBatch {
@@ -137,7 +146,7 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
 
             let req = Request::new("gosling.triage", ModelTier::Fast, system, prompt)
                 .with_schema(schema(chunk.len(), beat))
-                .with_max_tokens(1_500);
+                .with_max_tokens(4_500);
             let (parsed, completion) = ctx.llm.complete_json::<TriageBatch>(&req).await?;
 
             let mut n = 0usize;

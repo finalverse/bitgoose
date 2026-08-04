@@ -284,6 +284,8 @@ impl LlmProvider for OpenAiProvider {
         // Read the budget headers before consuming the body.
         let rate_remaining_tokens = header_u32(resp.headers(), "x-ratelimit-remaining-tokens");
         let rate_reset = header_duration(resp.headers(), "x-ratelimit-reset-tokens");
+        let rate_remaining_requests = header_u32(resp.headers(), "x-ratelimit-remaining-requests");
+        let rate_reset_requests = header_duration(resp.headers(), "x-ratelimit-reset-requests");
 
         let parsed: ChatResponse = resp.json().await?;
         let latency_ms = started.elapsed().as_millis() as u32;
@@ -345,6 +347,8 @@ impl LlmProvider for OpenAiProvider {
             latency_ms,
             rate_remaining_tokens,
             rate_reset,
+            rate_remaining_requests,
+            rate_reset_requests,
         })
     }
 
