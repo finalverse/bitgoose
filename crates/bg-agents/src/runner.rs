@@ -54,8 +54,17 @@ pub struct RunOpts {
     pub ombuds: bool,
     pub max_triage: i64,
     pub max_cluster: i64,
-    /// Article pages to fetch per pass. Bounded because the fetch loop shares
-    /// a narrow downlink with the live site.
+    /// Article pages to fetch per pass.
+    ///
+    /// Small because of arithmetic, not caution. This host downloads at roughly
+    /// 15 KB/s and shares that link with every reader: a single 300 KB article
+    /// page occupies it for twenty seconds. Twelve a pass would saturate the
+    /// downlink for four minutes at a time, which is exactly what made the site
+    /// crawl during a manual bulk run earlier.
+    ///
+    /// Four keeps pace with what the feeds actually bring in — a handful of new
+    /// items per pass — and lets the backlog drain slowly in the gaps rather
+    /// than at the readers' expense.
     pub max_enrich: i64,
     /// Analyses to attempt per pass. Small on purpose: the Skein runs on the
     /// top tier, and a free-tier token budget spent analysing twenty stories is
@@ -71,7 +80,7 @@ impl Default for RunOpts {
             ombuds: true,
             max_triage: 100,
             max_cluster: 60,
-            max_enrich: 12,
+            max_enrich: 4,
             max_analyses: 3,
         }
     }
