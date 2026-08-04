@@ -24,7 +24,7 @@ use bg_core::domain::ModelTier;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Tokens per minute to plan against. `0` disables pacing entirely, which is
 /// what a paid tier or a local model wants.
@@ -146,9 +146,23 @@ impl Pacer {
         }
 
         let used: u32 = l.spent.iter().map(|(_, n)| n).sum();
-        // A single request larger than the whole budget can never fit. Let it
-        // through rather than deadlocking; the provider will decide.
-        if used + cost <= budget || cost > budget {
+
+        // A single request larger than the whole budget can never fit, so
+        // waiting for room would deadlock. It goes out unpaced and the provider
+        // decides — but say so, loudly. This is a caller bug, not a condition
+        // to absorb: raising the triage batch to thirty pushed one request past
+        // the whole minute's allowance, every triage call then skipped pacing,
+        // and the symptom was `retry in 286s` with the pacer apparently
+        // enabled and working. Two deploys went by before anyone could see it,
+        // because it looked exactly like the limit being too low.
+        if cost > budget {
+            warn!(
+                cost,
+                budget, "request exceeds the entire per-minute budget; sending unpaced"
+            );
+            return Duration::ZERO;
+        }
+        if used + cost <= budget {
             return Duration::ZERO;
         }
 
@@ -413,6 +427,32 @@ mod tests {
         let small = estimate_tokens("sys", "hi", 100);
         let big = estimate_tokens("sys", &"word ".repeat(4_000), 100);
         assert!(big > small * 10, "estimate should track prompt size");
+    }
+}
+
+#[cfg(test)]
+mod oversize_tests {
+    use super::*;
+
+    /// A request bigger than the whole minute is sent unpaced — it has to be,
+    /// or it waits for room that cannot exist. The danger is that this looks
+    /// identical to working correctly: pacing reports enabled, and every call
+    /// silently bypasses it. Callers must size requests under the budget.
+    #[test]
+    fn an_oversize_request_is_not_scheduled() {
+        let p = Pacer::new(8_000);
+        // 0.9 * 8000 = 7200 usable.
+        assert_eq!(
+            p.delay_for(ModelTier::Fast, 8_000),
+            Duration::ZERO,
+            "cannot wait for room that will never exist"
+        );
+        // And the fix for that is on the caller's side: keep under the budget.
+        p.record(ModelTier::Fast, 7_000);
+        assert!(
+            p.delay_for(ModelTier::Fast, 5_700) > Duration::ZERO,
+            "a request that fits must actually be scheduled"
+        );
     }
 }
 

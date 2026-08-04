@@ -47,12 +47,24 @@ Be strict. Most of what crosses the wire is not news.";
 /// one every 86 seconds. Tokens are abundant; calls are not.
 ///
 /// Batching does not reduce tokens at all: cost scales linearly with items,
-/// roughly 200 apiece either way. It reduces *requests*, three-fold at thirty
-/// items instead of ten, and that is the budget the newsroom actually runs out
-/// of. Thirty items at ~200 tokens each plus the reservation sits near 6k —
-/// inside the per-minute ceiling, so it costs one slow call rather than three
-/// fast ones.
-const BATCH: usize = 30;
+/// roughly 235 apiece once the reservation is counted. It reduces *requests*,
+/// and that is the budget the newsroom actually runs out of.
+///
+/// But the batch cannot grow without limit, and thirty was already too far. A
+/// request whose estimate exceeds the whole per-minute allowance trips the
+/// pacer's "too big to schedule" escape hatch and goes out **unpaced** — which
+/// is how triage went straight back to `retry in 286s` after the batch was
+/// raised. Sizing:
+///
+/// ```text
+///   system prompt        ~1,000 tokens
+///   per item              ~85 in + ~150 reserved out
+///   usable minute budget   7,200  (8,000 less the safety margin)
+/// ```
+///
+/// Twenty items lands near 5,700 — comfortably inside, so it is actually
+/// scheduled — and still halves the request count against ten.
+const BATCH: usize = 20;
 
 #[derive(Debug, Deserialize)]
 struct TriageBatch {
@@ -146,7 +158,7 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
 
             let req = Request::new("gosling.triage", ModelTier::Fast, system, prompt)
                 .with_schema(schema(chunk.len(), beat))
-                .with_max_tokens(4_500);
+                .with_max_tokens(3_000);
             let (parsed, completion) = ctx.llm.complete_json::<TriageBatch>(&req).await?;
 
             let mut n = 0usize;
