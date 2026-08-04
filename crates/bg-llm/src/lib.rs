@@ -157,6 +157,14 @@ pub struct Completion {
     pub completion_tokens: u32,
     pub cost_usd: Decimal,
     pub latency_ms: u32,
+    /// What the provider says is left of our per-minute token allowance, and
+    /// when it refills. Groq returns both on every response, which is strictly
+    /// better than our own estimate: it is their accounting, it covers anything
+    /// else using the same key, and it needs no guessing about tokenisation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_remaining_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_reset: Option<std::time::Duration>,
 }
 
 impl Completion {
@@ -198,9 +206,14 @@ pub trait LlmProvider: Send + Sync {
 /// provider stall a pipeline pass indefinitely.
 const MAX_RATE_LIMIT_RETRIES: u32 = 3;
 
-/// Ceiling on a single wait, however long the provider asks for. A quota that
-/// resets in an hour is an outage to be reported, not slept through.
-const MAX_RATE_LIMIT_WAIT: std::time::Duration = std::time::Duration::from_secs(75);
+/// Longest wait we are willing to sit through. A quota that resets in an hour
+/// is an outage to be reported, not slept through.
+///
+/// Raised from 75s after watching it fail on production. Groq was asking for
+/// 91 seconds; we slept 75, retried, were refused again, and did that three
+/// times — 225 seconds of waiting that could not have worked, because sleeping
+/// *less* than the provider asked for guarantees the next call is refused too.
+const MAX_RATE_LIMIT_WAIT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Ordered, tried left to right, skipping errors that retrying cannot fix. In
 /// practice the chain ends in the stub, so the pipeline degrades to free,
@@ -310,17 +323,22 @@ impl Llm {
             let mut attempt = 0u32;
             let outcome = loop {
                 match p.complete(req).await {
+                    // Only retry when we intend to wait the *full* time asked.
+                    // Truncating the wait and trying anyway is what turned one
+                    // refusal into three: the provider said 91 seconds, we
+                    // slept 75, and of course it refused again.
                     Err(LlmError::RateLimited {
                         provider,
                         retry_after,
-                    }) if attempt < MAX_RATE_LIMIT_RETRIES => {
+                    }) if attempt < MAX_RATE_LIMIT_RETRIES
+                        && retry_after <= MAX_RATE_LIMIT_WAIT =>
+                    {
                         attempt += 1;
-                        let wait = retry_after.min(MAX_RATE_LIMIT_WAIT);
                         warn!(
                             provider, task = %req.task, attempt,
-                            wait_s = wait.as_secs(), "rate limited; waiting"
+                            wait_s = retry_after.as_secs(), "rate limited; waiting"
                         );
-                        tokio::time::sleep(wait).await;
+                        tokio::time::sleep(retry_after).await;
                     }
                     other => break other,
                 }
@@ -334,6 +352,8 @@ impl Llm {
                     if let Some(r) = reservation {
                         self.pacer.settle(r, c.prompt_tokens + c.completion_tokens);
                     }
+                    // The provider's own meter overrides our estimate.
+                    self.pacer.observe(c.rate_remaining_tokens, c.rate_reset);
                     return Ok(c);
                 }
                 Err(e) if e.is_retryable() => {
@@ -480,5 +500,28 @@ mod tests {
             llm.complete(&req).await,
             Err(LlmError::Refused { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod rate_limit_policy {
+    use super::*;
+
+    /// Sleeping less than the provider asked for guarantees the retry is
+    /// refused too. Observed live: Groq asked 91s, the cap was 75s, and three
+    /// attempts burned 225 seconds without a single one able to succeed.
+    #[test]
+    fn a_wait_longer_than_we_will_sit_through_is_not_retried() {
+        let asked = std::time::Duration::from_secs(91);
+        assert!(
+            asked <= MAX_RATE_LIMIT_WAIT,
+            "91s was a real production figure; the ceiling must accommodate it"
+        );
+
+        let too_long = std::time::Duration::from_secs(3_600);
+        assert!(
+            too_long > MAX_RATE_LIMIT_WAIT,
+            "an hour-long quota reset is an outage, not something to sleep through"
+        );
     }
 }

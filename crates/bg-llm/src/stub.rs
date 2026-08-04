@@ -314,6 +314,10 @@ impl LlmProvider for StubProvider {
             completion_tokens,
             cost_usd: Decimal::ZERO,
             latency_ms: started.elapsed().as_millis() as u32,
+            // Neither reports a token budget: Anthropic uses different
+            // headers, and the stub has no limit to report.
+            rate_remaining_tokens: None,
+            rate_reset: None,
         })
     }
 

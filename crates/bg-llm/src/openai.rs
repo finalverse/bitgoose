@@ -36,6 +36,51 @@ fn parse_retry_hint(body: &str) -> Option<f64> {
     num.parse().ok()
 }
 
+fn header_u32(h: &reqwest::header::HeaderMap, name: &str) -> Option<u32> {
+    h.get(name)?.to_str().ok()?.trim().parse().ok()
+}
+
+/// Parse Groq's rate-limit reset format: `577ms`, `7.66s`, `2m52.8s`.
+///
+/// Not a plain number of seconds — the unit varies with magnitude, and reading
+/// `2m52.8s` as 2 seconds would be worse than not reading it at all.
+fn header_duration(h: &reqwest::header::HeaderMap, name: &str) -> Option<std::time::Duration> {
+    parse_reset(h.get(name)?.to_str().ok()?)
+}
+
+fn parse_reset(v: &str) -> Option<std::time::Duration> {
+    let v = v.trim();
+    if let Some(ms) = v.strip_suffix("ms") {
+        return ms
+            .parse::<f64>()
+            .ok()
+            .map(std::time::Duration::from_secs_f64)
+            .map(|d| d / 1000);
+    }
+    let (mins, rest) = match v.split_once('m') {
+        Some((m, r)) if !m.is_empty() && m.chars().all(|c| c.is_ascii_digit()) => {
+            (Some(m.parse::<f64>().ok()?), r)
+        }
+        _ => (None, v),
+    };
+    let secs = rest.strip_suffix('s').unwrap_or(rest);
+    let secs = if secs.is_empty() {
+        // Empty is only meaningful as the tail of something like `1m`. On its
+        // own it means we understood nothing, and answering "zero" would say
+        // "retry immediately" — the worst possible reading of a header we
+        // failed to parse.
+        None
+    } else {
+        Some(secs.parse::<f64>().ok()?)
+    };
+    match (mins, secs) {
+        (None, None) => None,
+        (m, s) => Some(std::time::Duration::from_secs_f64(
+            m.unwrap_or(0.0) * 60.0 + s.unwrap_or(0.0),
+        )),
+    }
+}
+
 /// A non-negative price per million tokens from the environment.
 ///
 /// A negative or unparseable value is ignored rather than clamped: it means the
@@ -236,6 +281,10 @@ impl LlmProvider for OpenAiProvider {
             });
         }
 
+        // Read the budget headers before consuming the body.
+        let rate_remaining_tokens = header_u32(resp.headers(), "x-ratelimit-remaining-tokens");
+        let rate_reset = header_duration(resp.headers(), "x-ratelimit-reset-tokens");
+
         let parsed: ChatResponse = resp.json().await?;
         let latency_ms = started.elapsed().as_millis() as u32;
 
@@ -294,6 +343,8 @@ impl LlmProvider for OpenAiProvider {
             completion_tokens: usage.completion_tokens,
             cost_usd: cost,
             latency_ms,
+            rate_remaining_tokens,
+            rate_reset,
         })
     }
 
@@ -483,5 +534,28 @@ mod local_pricing_tests {
             hosted.spec_for(ModelTier::Top).output_per_mtok > 0.0,
             "a hosted model must still be billed"
         );
+    }
+}
+
+#[cfg(test)]
+mod reset_header_tests {
+    use super::parse_reset;
+    use std::time::Duration;
+
+    /// Groq varies the unit with magnitude. Reading `2m52.8s` as 2 seconds
+    /// would be worse than not reading the header at all — we would hammer a
+    /// limit we had been told, precisely, to wait out.
+    #[test]
+    fn every_unit_groq_actually_sends_is_understood() {
+        assert_eq!(parse_reset("577ms"), Some(Duration::from_millis(577)));
+        assert_eq!(parse_reset("7.66s"), Some(Duration::from_secs_f64(7.66)));
+        assert_eq!(parse_reset("2m52.8s"), Some(Duration::from_secs_f64(172.8)));
+        assert_eq!(parse_reset("1m"), Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn nonsense_yields_nothing_rather_than_a_wrong_number() {
+        assert_eq!(parse_reset(""), None);
+        assert_eq!(parse_reset("soon"), None);
     }
 }

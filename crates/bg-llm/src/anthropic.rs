@@ -232,6 +232,10 @@ impl LlmProvider for AnthropicProvider {
             completion_tokens: parsed.usage.output_tokens,
             cost_usd: cost,
             latency_ms,
+            // Neither reports a token budget: Anthropic uses different
+            // headers, and the stub has no limit to report.
+            rate_remaining_tokens: None,
+            rate_reset: None,
         })
     }
 

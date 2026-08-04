@@ -43,10 +43,16 @@ const SAFETY: f64 = 0.9;
 
 const WINDOW: Duration = Duration::from_secs(60);
 
-/// Rolling one-minute token ledger.
+/// Rolling one-minute token ledger, corrected by whatever the provider tells us.
 pub struct Pacer {
     limit: u32,
     spent: Mutex<VecDeque<(Instant, u32)>>,
+    /// The provider's own account of what is left, and when it refills.
+    ///
+    /// Authoritative when present. Our ledger is an estimate built from
+    /// character counts; this is the meter that actually decides whether the
+    /// next call is refused, and it accounts for anything else sharing the key.
+    observed: Mutex<Option<(Instant, u32, Duration)>>,
 }
 
 impl Pacer {
@@ -54,6 +60,7 @@ impl Pacer {
         Self {
             limit,
             spent: Mutex::new(VecDeque::new()),
+            observed: Mutex::new(None),
         }
     }
 
@@ -68,6 +75,21 @@ impl Pacer {
     fn delay_for(&self, cost: u32) -> Duration {
         if !self.enabled() {
             return Duration::ZERO;
+        }
+
+        // Prefer the provider's own figure when it is fresh. Anything older
+        // than the window it described has been overtaken by our own spending.
+        if let Some((seen, remaining, reset)) =
+            *self.observed.lock().unwrap_or_else(|e| e.into_inner())
+        {
+            let age = Instant::now().duration_since(seen);
+            if age < reset.max(Duration::from_secs(1)) {
+                if remaining >= cost {
+                    return Duration::ZERO;
+                }
+                // Not enough left; wait out what remains of the refill.
+                return reset.saturating_sub(age).min(WINDOW);
+            }
         }
         let budget = (f64::from(self.limit) * SAFETY) as u32;
         let now = Instant::now();
@@ -97,6 +119,21 @@ impl Pacer {
             }
         }
         Duration::ZERO
+    }
+
+    /// Record what the provider says is left of the budget.
+    ///
+    /// Groq returns `x-ratelimit-remaining-tokens` and
+    /// `x-ratelimit-reset-tokens` on every response. Reading them beats
+    /// modelling the bucket ourselves — the real one refills continuously
+    /// rather than in the sixty-second steps this ledger assumes, and it counts
+    /// usage from anything else holding the same key.
+    pub fn observe(&self, remaining: Option<u32>, reset: Option<Duration>) {
+        let (Some(remaining), Some(reset)) = (remaining, reset) else {
+            return;
+        };
+        *self.observed.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((Instant::now(), remaining, reset));
     }
 
     /// Record tokens actually spent.
