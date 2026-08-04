@@ -283,12 +283,25 @@ pub async fn needing_extraction(db: &Db, limit: i64) -> Result<Vec<(RawItemId, S
         // `extract_attempts` bounds the retries. Without it the newest-first
         // ordering parks a wall of permanently-failing URLs at the head of the
         // queue and nothing behind them is ever reached.
+        //
+        // Ordered by the parent story's front-page rank, not by recency.
+        // Extraction exists to feed analysis, analysis follows attention, and
+        // only four pages are fetched per pass on a 15 KB/s link — so those
+        // four should be the ones a reader is about to open. Newest-first spent
+        // them on whatever landed last, which is usually the thinnest item of
+        // the hour.
         "SELECT r.id, r.canonical_url FROM raw_items r
            JOIN sources s ON s.id = r.source_id
+           JOIN stories st ON st.id = r.story_id
           WHERE r.extracted_at IS NULL AND r.story_id IS NOT NULL
             AND r.extract_attempts < $2
             AND s.robots_ok AND s.enabled
-          ORDER BY r.extract_attempts ASC, r.published_at DESC LIMIT $1",
+          ORDER BY r.extract_attempts ASC,
+                   (st.newsworthiness
+                    * exp(-extract(epoch from (now() - st.published_at)) / 21600.0)
+                    + least(st.source_count, 6) * 3) DESC,
+                   r.published_at DESC
+          LIMIT $1",
     )
     .bind(limit)
     .bind(MAX_EXTRACT_ATTEMPTS)

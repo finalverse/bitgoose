@@ -98,24 +98,34 @@ pub async fn for_story(db: &Db, story: StoryId) -> Result<Option<Analysis>> {
 /// items. Genuine multi-source stories in this archive top out around nine.
 const MAX_COHERENT_ITEMS: i64 = 10;
 
-/// Published stories with no analysis yet, richest source material first.
+/// Published stories with no analysis yet, in the order readers will meet them.
 ///
-/// Ordering by available text rather than recency is deliberate: the Skein's
-/// output is only as good as what it read, so when there is a budget for N
-/// analyses they should go to the N stories we can actually support. Newest-
-/// first would spend the budget on whatever happened to land last, which on a
-/// feed-driven site is usually the thinnest item of the hour.
+/// Two gates and then a priority.
 ///
-/// But that ordering has a trap, and it bit immediately: a story that merged
-/// twenty unrelated events has more text than any real one, so the incoherent
-/// blobs sorted straight to the front of the queue and got analysed first. The
-/// first live analysis was of an Argentine court ruling filed under a headline
-/// about BNB Chain. Hence the item-count ceiling — analysing a pile that is not
-/// one story produces a confident paragraph about whichever event happened to
-/// be first in the list.
+/// The gates are grounding (`min_chars` of real source text — the Skein will not
+/// analyse a headline) and coherence ([`MAX_COHERENT_ITEMS`] — a story that
+/// merged twenty unrelated events is not one story, and analysing it produces a
+/// confident paragraph about whichever event happened to be listed first; the
+/// first live analysis was an Argentine court ruling filed under a BNB Chain
+/// headline).
+///
+/// The priority is the **front page's own ranking**, and getting there took two
+/// wrong answers. Ordering by available text seemed right — the Skein's output
+/// is only as good as what it read, so spend the budget where it can be
+/// supported. But it optimised the wrong thing twice over: it put the
+/// incoherent blobs first, because merging twenty events makes for a lot of
+/// text, and once they were excluded it still spent the budget on whatever was
+/// wordiest rather than whatever was read. Measured on the live site: **none of
+/// the first fifteen analyses landed on a story in the front page's top
+/// twenty.** The most distinctive thing the site does was invisible.
+///
+/// So this mirrors `stories::front_page` exactly. Analysis follows attention.
 pub async fn needing_analysis(db: &Db, min_chars: i64, limit: i64) -> Result<Vec<StoryId>> {
     let rows = sqlx::query(
-        "SELECT s.id, sum(length(coalesce(r.body_raw, r.summary_raw, ''))) AS chars
+        "SELECT s.id,
+                max(s.newsworthiness
+                    * exp(-extract(epoch from (now() - s.published_at)) / 21600.0)
+                    + least(s.source_count, 6) * 3) AS rank
            FROM stories s
            JOIN raw_items r ON r.story_id = s.id
            LEFT JOIN analyses a ON a.story_id = s.id
@@ -123,7 +133,7 @@ pub async fn needing_analysis(db: &Db, min_chars: i64, limit: i64) -> Result<Vec
           GROUP BY s.id
          HAVING sum(length(coalesce(r.body_raw, r.summary_raw, ''))) >= $1
             AND count(r.id) <= $3
-          ORDER BY chars DESC
+          ORDER BY rank DESC NULLS LAST
           LIMIT $2",
     )
     .bind(min_chars)
