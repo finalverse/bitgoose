@@ -20,6 +20,7 @@
 //! wall-clock time and gets the work done. The retry loop stays as a backstop
 //! for when our estimate is wrong or another process shares the key.
 
+use bg_core::domain::ModelTier;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -43,24 +44,48 @@ const SAFETY: f64 = 0.9;
 
 const WINDOW: Duration = Duration::from_secs(60);
 
-/// Rolling one-minute token ledger, corrected by whatever the provider tells us.
-pub struct Pacer {
-    limit: u32,
-    spent: Mutex<VecDeque<(Instant, u32)>>,
+#[derive(Default)]
+struct Ledger {
+    spent: VecDeque<(Instant, u32)>,
     /// The provider's own account of what is left, and when it refills.
     ///
-    /// Authoritative when present. Our ledger is an estimate built from
+    /// Authoritative when present. Our own tally is an estimate built from
     /// character counts; this is the meter that actually decides whether the
     /// next call is refused, and it accounts for anything else sharing the key.
-    observed: Mutex<Option<(Instant, u32, Duration)>>,
+    observed: Option<(Instant, u32, Duration)>,
+}
+
+/// Rolling token ledgers, one per model, corrected by what the provider reports.
+///
+/// Per model because that is how the limit is actually enforced. Measured
+/// against Groq with identical ~977-token prompts: `gpt-oss-120b` dropped to
+/// 7023 of 8000 while `gpt-oss-20b` stayed at 8000 throughout. A single shared
+/// budget therefore throttled the cheap Fast-tier traffic — triage, clustering,
+/// wire summaries, the bulk of every pass — against a ceiling that only really
+/// binds the Skein on the Top tier.
+///
+/// Keyed by [`ModelTier`] rather than by model name, since each tier resolves to
+/// one model per provider. Two tiers configured to the same model share a real
+/// bucket, and that corrects itself: both observe the same low remaining figure
+/// from the provider and both back off.
+pub struct Pacer {
+    limit: u32,
+    ledgers: Mutex<[Ledger; 3]>,
+}
+
+fn slot(tier: ModelTier) -> usize {
+    match tier {
+        ModelTier::Fast | ModelTier::None => 0,
+        ModelTier::Mid => 1,
+        ModelTier::Top => 2,
+    }
 }
 
 impl Pacer {
     pub fn new(limit: u32) -> Self {
         Self {
             limit,
-            spent: Mutex::new(VecDeque::new()),
-            observed: Mutex::new(None),
+            ledgers: Mutex::new(Default::default()),
         }
     }
 
@@ -68,51 +93,49 @@ impl Pacer {
         self.limit > 0
     }
 
-    /// How long to wait before spending `cost` tokens.
+    /// How long to wait before spending `cost` tokens on `tier`.
     ///
     /// Separate from the sleeping so it can be tested without a clock: the
     /// caller sleeps for whatever this returns.
-    fn delay_for(&self, cost: u32) -> Duration {
+    fn delay_for(&self, tier: ModelTier, cost: u32) -> Duration {
         if !self.enabled() {
             return Duration::ZERO;
         }
+        let now = Instant::now();
+        let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
+        let l = &mut ledgers[slot(tier)];
 
-        // Prefer the provider's own figure when it is fresh. Anything older
-        // than the window it described has been overtaken by our own spending.
-        if let Some((seen, remaining, reset)) =
-            *self.observed.lock().unwrap_or_else(|e| e.into_inner())
-        {
-            let age = Instant::now().duration_since(seen);
+        // Prefer the provider's own figure while it is still describing the
+        // present. Once older than the refill it described, our own tally is
+        // the better guess.
+        if let Some((seen, remaining, reset)) = l.observed {
+            let age = now.duration_since(seen);
             if age < reset.max(Duration::from_secs(1)) {
                 if remaining >= cost {
                     return Duration::ZERO;
                 }
-                // Not enough left; wait out what remains of the refill.
                 return reset.saturating_sub(age).min(WINDOW);
             }
         }
-        let budget = (f64::from(self.limit) * SAFETY) as u32;
-        let now = Instant::now();
-        let mut spent = self.spent.lock().unwrap_or_else(|e| e.into_inner());
 
-        while let Some((t, _)) = spent.front() {
+        let budget = (f64::from(self.limit) * SAFETY) as u32;
+        while let Some((t, _)) = l.spent.front() {
             if now.duration_since(*t) >= WINDOW {
-                spent.pop_front();
+                l.spent.pop_front();
             } else {
                 break;
             }
         }
 
-        let used: u32 = spent.iter().map(|(_, n)| n).sum();
+        let used: u32 = l.spent.iter().map(|(_, n)| n).sum();
         // A single request larger than the whole budget can never fit. Let it
         // through rather than deadlocking; the provider will decide.
         if used + cost <= budget || cost > budget {
             return Duration::ZERO;
         }
 
-        // Wait until enough of the oldest spend ages out of the window.
         let mut freed = 0u32;
-        for (t, n) in spent.iter() {
+        for (t, n) in l.spent.iter() {
             freed += n;
             if used - freed + cost <= budget {
                 return WINDOW.saturating_sub(now.duration_since(*t));
@@ -121,38 +144,40 @@ impl Pacer {
         Duration::ZERO
     }
 
-    /// Record what the provider says is left of the budget.
+    /// Record what the provider says is left of this model's budget.
     ///
     /// Groq returns `x-ratelimit-remaining-tokens` and
     /// `x-ratelimit-reset-tokens` on every response. Reading them beats
-    /// modelling the bucket ourselves — the real one refills continuously
-    /// rather than in the sixty-second steps this ledger assumes, and it counts
+    /// modelling the bucket ourselves: the real one refills continuously rather
+    /// than in the sixty-second steps our own tally assumes, and it counts
     /// usage from anything else holding the same key.
-    pub fn observe(&self, remaining: Option<u32>, reset: Option<Duration>) {
+    pub fn observe(&self, tier: ModelTier, remaining: Option<u32>, reset: Option<Duration>) {
         let (Some(remaining), Some(reset)) = (remaining, reset) else {
             return;
         };
-        *self.observed.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some((Instant::now(), remaining, reset));
+        let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
+        ledgers[slot(tier)].observed = Some((Instant::now(), remaining, reset));
     }
 
-    /// Record tokens actually spent.
-    pub fn record(&self, tokens: u32) {
+    /// Record tokens spent against a model.
+    pub fn record(&self, tier: ModelTier, tokens: u32) {
         if !self.enabled() || tokens == 0 {
             return;
         }
-        let mut spent = self.spent.lock().unwrap_or_else(|e| e.into_inner());
-        spent.push_back((Instant::now(), tokens));
+        let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
+        ledgers[slot(tier)]
+            .spent
+            .push_back((Instant::now(), tokens));
     }
 
-    /// Block until `cost` tokens fit inside the rolling minute.
+    /// Block until `cost` tokens fit inside this model's budget.
     ///
     /// Returns the reservation, which the caller must hand to [`settle`] with
     /// the real figure once the call returns.
     ///
     /// [`settle`]: Self::settle
-    pub async fn acquire(&self, cost: u32, task: &str) -> Reservation {
-        let wait = self.delay_for(cost);
+    pub async fn acquire(&self, tier: ModelTier, cost: u32, task: &str) -> Reservation {
+        let wait = self.delay_for(tier, cost);
         if wait > Duration::ZERO {
             debug!(
                 task,
@@ -164,8 +189,8 @@ impl Pacer {
         }
         // Reserve up front, before the call: otherwise concurrent callers all
         // see an empty budget and pile in together.
-        self.record(cost);
-        Reservation(cost)
+        self.record(tier, cost);
+        Reservation { tier, cost }
     }
 
     /// Replace a reservation with what the call actually cost.
@@ -177,19 +202,21 @@ impl Pacer {
     /// four fifths of its output allowance and the newsroom paces itself far
     /// slower than the tier actually requires.
     pub fn settle(&self, reservation: Reservation, actual: u32) {
-        if !self.enabled() {
+        if !self.enabled() || actual == reservation.cost {
             return;
         }
-        let estimate = reservation.0;
-        if actual == estimate {
-            return;
-        }
-        let mut spent = self.spent.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
+        let l = &mut ledgers[slot(reservation.tier)];
         // Newest first: our own reservation is the most recent entry of that
         // size, and matching the newest keeps concurrent callers from
         // correcting each other's.
-        if let Some(slot) = spent.iter_mut().rev().find(|(_, n)| *n == estimate) {
-            slot.1 = actual;
+        if let Some(e) = l
+            .spent
+            .iter_mut()
+            .rev()
+            .find(|(_, n)| *n == reservation.cost)
+        {
+            e.1 = actual;
         }
     }
 }
@@ -198,7 +225,10 @@ impl Pacer {
 /// [`Pacer::settle`].
 #[must_use = "a reservation that is never settled over-counts the budget"]
 #[derive(Debug, Clone, Copy)]
-pub struct Reservation(u32);
+pub struct Reservation {
+    tier: ModelTier,
+    cost: u32,
+}
 
 /// Rough token count for a prompt.
 ///
@@ -217,39 +247,46 @@ mod tests {
     #[test]
     fn an_empty_budget_never_waits() {
         let p = Pacer::new(8_000);
-        assert_eq!(p.delay_for(1_000), Duration::ZERO);
+        assert_eq!(p.delay_for(ModelTier::Fast, 1_000), Duration::ZERO);
     }
 
     #[test]
     fn spending_the_minute_forces_a_wait() {
         let p = Pacer::new(8_000);
         // 0.9 * 8000 = 7200 usable.
-        p.record(7_000);
-        assert_eq!(p.delay_for(100), Duration::ZERO, "still fits");
-        assert!(p.delay_for(1_000) > Duration::ZERO, "should wait");
+        p.record(ModelTier::Fast, 7_000);
+        assert_eq!(
+            p.delay_for(ModelTier::Fast, 100),
+            Duration::ZERO,
+            "still fits"
+        );
+        assert!(
+            p.delay_for(ModelTier::Fast, 1_000) > Duration::ZERO,
+            "should wait"
+        );
     }
 
     #[test]
     fn a_request_bigger_than_the_whole_budget_is_let_through() {
         // Otherwise it waits forever for room that can never exist.
         let p = Pacer::new(8_000);
-        p.record(7_000);
-        assert_eq!(p.delay_for(50_000), Duration::ZERO);
+        p.record(ModelTier::Fast, 7_000);
+        assert_eq!(p.delay_for(ModelTier::Fast, 50_000), Duration::ZERO);
     }
 
     #[test]
     fn a_zero_limit_disables_pacing() {
         let p = Pacer::new(0);
         assert!(!p.enabled());
-        p.record(1_000_000);
-        assert_eq!(p.delay_for(1_000_000), Duration::ZERO);
+        p.record(ModelTier::Fast, 1_000_000);
+        assert_eq!(p.delay_for(ModelTier::Fast, 1_000_000), Duration::ZERO);
     }
 
     #[test]
     fn the_wait_never_exceeds_the_window() {
         let p = Pacer::new(8_000);
-        p.record(7_200);
-        assert!(p.delay_for(7_200) <= WINDOW);
+        p.record(ModelTier::Fast, 7_200);
+        assert!(p.delay_for(ModelTier::Fast, 7_200) <= WINDOW);
     }
 
     #[tokio::test]
@@ -258,11 +295,14 @@ mod tests {
         // usually a fraction of it. Without a refund the budget drains four
         // times faster than the tier requires.
         let p = Pacer::new(8_000);
-        let r = p.acquire(2_500, "t").await;
-        assert!(p.delay_for(5_000) > Duration::ZERO, "reserved, so tight");
+        let r = p.acquire(ModelTier::Fast, 2_500, "t").await;
+        assert!(
+            p.delay_for(ModelTier::Fast, 5_000) > Duration::ZERO,
+            "reserved, so tight"
+        );
         p.settle(r, 500);
         assert_eq!(
-            p.delay_for(5_000),
+            p.delay_for(ModelTier::Fast, 5_000),
             Duration::ZERO,
             "refund should leave room again"
         );
@@ -273,21 +313,54 @@ mod tests {
         // The correction has to work in both directions, or a run of
         // longer-than-expected replies silently blows the budget.
         let p = Pacer::new(8_000);
-        let r = p.acquire(500, "t").await;
+        let r = p.acquire(ModelTier::Fast, 500, "t").await;
         p.settle(r, 7_000);
-        assert!(p.delay_for(1_000) > Duration::ZERO, "should now be tight");
+        assert!(
+            p.delay_for(ModelTier::Fast, 1_000) > Duration::ZERO,
+            "should now be tight"
+        );
     }
 
     #[tokio::test]
     async fn settling_touches_only_its_own_reservation() {
         let p = Pacer::new(20_000);
-        let a = p.acquire(1_000, "a").await;
-        let _b = p.acquire(1_000, "b").await;
+        let a = p.acquire(ModelTier::Fast, 1_000, "a").await;
+        let _b = p.acquire(ModelTier::Fast, 1_000, "b").await;
         p.settle(a, 10);
         // One of the two 1,000s became 10; the other must be untouched.
-        let spent = p.spent.lock().unwrap();
+        let ledgers = p.ledgers.lock().unwrap();
+        let spent = &ledgers[slot(ModelTier::Fast)].spent;
         let total: u32 = spent.iter().map(|(_, n)| n).sum();
         assert_eq!(total, 1_010, "settle adjusted more than one entry");
+    }
+
+    /// Measured against Groq: with identical ~977-token prompts, gpt-oss-120b
+    /// fell to 7023 of 8000 while gpt-oss-20b stayed at 8000. The buckets are
+    /// per model, so draining one must not stall the other — a single shared
+    /// budget throttled all the cheap Fast-tier traffic behind the Skein.
+    #[test]
+    fn draining_one_model_does_not_stall_another() {
+        let p = Pacer::new(8_000);
+        p.record(ModelTier::Top, 7_200);
+        assert!(
+            p.delay_for(ModelTier::Top, 2_000) > Duration::ZERO,
+            "the drained tier should wait"
+        );
+        assert_eq!(
+            p.delay_for(ModelTier::Fast, 2_000),
+            Duration::ZERO,
+            "a different model has its own budget"
+        );
+    }
+
+    /// The provider's figure is per model too, so an observation on one tier
+    /// must not silently license spending on another.
+    #[test]
+    fn an_observation_applies_only_to_its_own_model() {
+        let p = Pacer::new(8_000);
+        p.observe(ModelTier::Top, Some(10), Some(Duration::from_secs(30)));
+        assert!(p.delay_for(ModelTier::Top, 5_000) > Duration::ZERO);
+        assert_eq!(p.delay_for(ModelTier::Mid, 5_000), Duration::ZERO);
     }
 
     #[test]

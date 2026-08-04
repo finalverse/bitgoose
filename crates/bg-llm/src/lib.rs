@@ -308,7 +308,7 @@ impl Llm {
         // mechanism by which we discover the limit.
         let reservation = if self.pacer.enabled() {
             let cost = pacer::estimate_tokens(&req.system, &req.user, req.max_tokens);
-            Some(self.pacer.acquire(cost, &req.task).await)
+            Some(self.pacer.acquire(req.tier, cost, &req.task).await)
         } else {
             None
         };
@@ -353,7 +353,8 @@ impl Llm {
                         self.pacer.settle(r, c.prompt_tokens + c.completion_tokens);
                     }
                     // The provider's own meter overrides our estimate.
-                    self.pacer.observe(c.rate_remaining_tokens, c.rate_reset);
+                    self.pacer
+                        .observe(req.tier, c.rate_remaining_tokens, c.rate_reset);
                     return Ok(c);
                 }
                 Err(e) if e.is_retryable() => {
