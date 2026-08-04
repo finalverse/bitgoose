@@ -35,6 +35,26 @@ pub fn limit_from_env() -> u32 {
         .unwrap_or(0)
 }
 
+/// Tokens per **day**, which on a free tier is the limit that actually stops
+/// the newsroom — and the only one no header reports.
+///
+/// Groq publishes `x-ratelimit-*-tokens` and `-requests` on every response, and
+/// both can read perfectly healthy (`8000/8000`, reset `1ms`) while the daily
+/// allowance is spent. It surfaces only in the body of the 429:
+///
+/// ```text
+/// Rate limit reached ... on tokens per day (TPD):
+/// Limit 200000, Used 196276, Requested 5572. Please try again in 13m18.336s.
+/// ```
+///
+/// So this one has to be tracked locally. `0` disables it.
+pub fn daily_limit_from_env() -> u32 {
+    std::env::var("BG_LLM_TOKENS_PER_DAY")
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 /// Fraction of the stated limit we actually plan to use.
 ///
 /// Estimates are rough and the provider's accounting is not ours, so aiming at
@@ -43,6 +63,18 @@ pub fn limit_from_env() -> u32 {
 const SAFETY: f64 = 0.9;
 
 const WINDOW: Duration = Duration::from_secs(60);
+const DAY: Duration = Duration::from_secs(86_400);
+
+fn prune_day(day: &mut VecDeque<(Instant, u32)>) {
+    let now = Instant::now();
+    while let Some((t, _)) = day.front() {
+        if now.duration_since(*t) >= DAY {
+            day.pop_front();
+        } else {
+            break;
+        }
+    }
+}
 
 #[derive(Default)]
 struct Ledger {
@@ -60,6 +92,10 @@ struct Ledger {
     /// eighty — so pacing tokens alone leaves the newsroom stalling on a quota
     /// it never looked at.
     observed_requests: Option<(Instant, u32, Duration)>,
+    /// Every spend in the last 24 hours, for the daily ceiling.
+    ///
+    /// Kept separately from `spent` because that one is pruned to a minute.
+    day: VecDeque<(Instant, u32)>,
 }
 
 /// Rolling token ledgers, one per model, corrected by what the provider reports.
@@ -77,6 +113,7 @@ struct Ledger {
 /// from the provider and both back off.
 pub struct Pacer {
     limit: u32,
+    daily_limit: u32,
     ledgers: Mutex<[Ledger; 3]>,
 }
 
@@ -90,10 +127,23 @@ fn slot(tier: ModelTier) -> usize {
 
 impl Pacer {
     pub fn new(limit: u32) -> Self {
+        Self::with_daily(limit, daily_limit_from_env())
+    }
+
+    pub fn with_daily(limit: u32, daily_limit: u32) -> Self {
         Self {
             limit,
+            daily_limit,
             ledgers: Mutex::new(Default::default()),
         }
+    }
+
+    /// Tokens spent on this model in the last 24 hours, and the ceiling.
+    pub fn day_usage(&self, tier: ModelTier) -> (u32, u32) {
+        let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
+        let l = &mut ledgers[slot(tier)];
+        prune_day(&mut l.day);
+        (l.day.iter().map(|(_, n)| n).sum(), self.daily_limit)
     }
 
     pub fn enabled(&self) -> bool {
@@ -133,6 +183,29 @@ impl Pacer {
             let age = now.duration_since(seen);
             if remaining == 0 {
                 return reset.saturating_sub(age).min(WINDOW);
+            }
+        }
+
+        // The daily ceiling. Nothing announces this one in advance, so if we
+        // do not count it ourselves the first sign is a 429 asking for a
+        // thirteen-minute wait — repeatedly, for the rest of the day.
+        if self.daily_limit > 0 {
+            prune_day(&mut l.day);
+            let day_used: u32 = l.day.iter().map(|(_, n)| n).sum();
+            if day_used + cost > self.daily_limit {
+                warn!(
+                    day_used,
+                    limit = self.daily_limit,
+                    cost,
+                    "daily token allowance spent; holding until it rolls over"
+                );
+                // Wait for the oldest spend to fall out of the 24h window.
+                return l
+                    .day
+                    .front()
+                    .map(|(t, _)| DAY.saturating_sub(now.duration_since(*t)))
+                    .unwrap_or(DAY)
+                    .min(WINDOW);
             }
         }
 
@@ -224,9 +297,12 @@ impl Pacer {
             return;
         }
         let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
-        ledgers[slot(tier)]
-            .spent
-            .push_back((Instant::now(), tokens));
+        let l = &mut ledgers[slot(tier)];
+        let now = Instant::now();
+        l.spent.push_back((now, tokens));
+        // The same spend counts against the daily ceiling, which is pruned on a
+        // 24-hour window rather than a one-minute one.
+        l.day.push_back((now, tokens));
     }
 
     /// Block until `cost` tokens fit inside this model's budget.
@@ -275,6 +351,12 @@ impl Pacer {
             .rev()
             .find(|(_, n)| *n == reservation.cost)
         {
+            e.1 = actual;
+        }
+        // The daily ledger holds the same reservation and needs the same
+        // correction; leaving it would drift the day's total high and stop the
+        // newsroom well before the real ceiling.
+        if let Some(e) = l.day.iter_mut().rev().find(|(_, n)| *n == reservation.cost) {
             e.1 = actual;
         }
     }
@@ -486,5 +568,53 @@ mod request_quota_tests {
         let p = Pacer::new(8_000);
         p.observe_requests(ModelTier::Top, Some(0), Some(Duration::from_secs(45)));
         assert_eq!(p.delay_for(ModelTier::Fast, 10), Duration::ZERO);
+    }
+}
+
+#[cfg(test)]
+mod daily_budget_tests {
+    use super::*;
+
+    /// The limit that actually stopped the newsroom, and the only one no
+    /// header reports. Groq's per-minute figures read 8000/8000 with a 1ms
+    /// reset while the daily allowance was 98% spent; it appears solely in the
+    /// body of the 429. If we do not count it ourselves, the first sign is a
+    /// request for a thirteen-minute wait, repeated for the rest of the day.
+    #[test]
+    fn a_spent_daily_allowance_stops_further_calls() {
+        let p = Pacer::with_daily(8_000, 200_000);
+        p.record(ModelTier::Fast, 196_000);
+        assert!(
+            p.delay_for(ModelTier::Fast, 5_600) > Duration::ZERO,
+            "should hold rather than take a 429"
+        );
+        let (used, limit) = p.day_usage(ModelTier::Fast);
+        assert_eq!((used, limit), (196_000, 200_000));
+    }
+
+    #[test]
+    fn the_daily_ceiling_is_per_model_as_well() {
+        let p = Pacer::with_daily(8_000, 200_000);
+        p.record(ModelTier::Fast, 199_000);
+        assert_eq!(p.delay_for(ModelTier::Top, 5_600), Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn settling_corrects_the_day_not_just_the_minute() {
+        // Otherwise the day drifts high on every over-reservation and the
+        // newsroom stops well short of the real ceiling.
+        let p = Pacer::with_daily(8_000, 200_000);
+        let r = p.acquire(ModelTier::Fast, 5_000, "t").await;
+        p.settle(r, 800);
+        assert_eq!(p.day_usage(ModelTier::Fast).0, 800);
+    }
+
+    #[test]
+    fn zero_disables_the_daily_ceiling() {
+        let p = Pacer::with_daily(8_000, 0);
+        p.record(ModelTier::Fast, 10_000_000);
+        // Only the per-minute rule applies; a small call is unaffected by the
+        // huge historical total once the minute window has moved on.
+        assert_eq!(p.day_usage(ModelTier::Fast).1, 0);
     }
 }
