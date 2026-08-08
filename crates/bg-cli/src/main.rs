@@ -471,11 +471,15 @@ async fn doctor(url: &str) -> Result<()> {
 
     // -- agents -------------------------------------------------------------
     let agents = bg_db::agents::all(&db).await.unwrap_or_default();
-    if agents.len() == 10 {
-        println!("\n  [ok]   flock roster complete (10 agents)");
+    // Against the enum. This is the third place a literal ten had to be
+    // corrected after the Flock gained a member; the count belongs in one place
+    // and `AgentRole::ALL` is it.
+    let expected = bg_core::domain::AgentRole::ALL.len();
+    if agents.len() == expected {
+        println!("\n  [ok]   flock roster complete ({expected} agents)");
     } else {
         println!(
-            "\n  [FAIL] roster has {} of 10 agents — run: bg seed",
+            "\n  [FAIL] roster has {} of {expected} agents — run: bg seed",
             agents.len()
         );
     }
@@ -512,6 +516,13 @@ async fn doctor(url: &str) -> Result<()> {
     }
     if let Ok(n) = bg_db::violations::count_blocks_24h(&db).await {
         println!("  policy blocks in last 24h: {n}");
+    }
+
+    // The queue is the health signal that matters on a constrained tier: if
+    // `waiting` climbs pass after pass, intake is outrunning the budget and
+    // either the news horizon or the source list needs attention.
+    if let Ok((waiting, lapsed)) = bg_db::items::queue_health(&db).await {
+        println!("  triage queue: {waiting} waiting, {lapsed} lapsed past the news horizon");
     }
 
     Ok(())
@@ -561,6 +572,13 @@ async fn stats(url: &str) -> Result<()> {
         "\n  analyses: {}",
         bg_db::analyses::count(&db).await.unwrap_or(0)
     );
+
+    // The queue is the newsroom's real health signal on a constrained tier: if
+    // `waiting` keeps climbing pass after pass, intake is outrunning what the
+    // budget can process and the horizon or the source list needs attention.
+    if let Ok((waiting, lapsed)) = bg_db::items::queue_health(&db).await {
+        println!("  triage queue: {waiting} waiting, {lapsed} lapsed past the news horizon");
+    }
 
     // Loud, because nothing else surfaces it: these stories render as one
     // event on the site and are not one. They are excluded from analysis but

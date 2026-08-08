@@ -20,6 +20,7 @@ pub struct PipelineReport {
     pub desk_killed: usize,
     pub wire_published: usize,
     pub enriched: usize,
+    pub lapsed: usize,
     pub analysed: usize,
     pub corrections: usize,
     pub errors: Vec<String>,
@@ -30,7 +31,7 @@ impl PipelineReport {
     pub fn summary(&self) -> String {
         format!(
             "ingested {} · triaged {} · clustered {} · desk {}✓/{}⏸/{}✗ · wire {} · \
-             enriched {} · analysed {} · corrections {} · ${:.4}",
+             enriched {} · analysed {} · lapsed {} · corrections {} · ${:.4}",
             self.items_ingested,
             self.items_triaged,
             self.items_clustered,
@@ -40,6 +41,7 @@ impl PipelineReport {
             self.wire_published,
             self.enriched,
             self.analysed,
+            self.lapsed,
             self.corrections,
             self.cost_usd
         )
@@ -54,6 +56,17 @@ pub struct RunOpts {
     pub ombuds: bool,
     pub max_triage: i64,
     pub max_cluster: i64,
+    /// How old an item may be and still be worth triaging, in hours.
+    ///
+    /// The newsroom ingests roughly three times what a free inference tier can
+    /// process, so a queue builds and is almost entirely stale — 3,627 of 3,764
+    /// waiting items were over a day old when this was added. Working through
+    /// it in order spends today's budget on last week's news.
+    ///
+    /// Three days. Long enough that a slow weekend does not drop real stories,
+    /// short enough that the queue stays about one horizon deep instead of
+    /// growing without bound.
+    pub news_horizon_hours: i64,
     /// Article pages to fetch per pass.
     ///
     /// Small because of arithmetic, not caution. This host downloads at roughly
@@ -80,6 +93,7 @@ impl Default for RunOpts {
             ombuds: true,
             max_triage: 100,
             max_cluster: 60,
+            news_horizon_hours: 72,
             max_enrich: 4,
             max_analyses: 3,
         }
@@ -101,6 +115,24 @@ pub async fn run_once(ctx: &Ctx, opts: &RunOpts) -> Result<PipelineReport> {
     if opts.prices {
         if let Err(e) = scout::refresh_prices(ctx).await {
             rep.errors.push(format!("prices: {e}"));
+        }
+    }
+
+    // -- Let go of what is no longer news -------------------------------------
+    // Before triage, so the budget goes to items that can still be published as
+    // news rather than to the oldest thing in the queue.
+    if opts.news_horizon_hours > 0 {
+        match bg_db::items::expire_stale_untriaged(&ctx.db, opts.news_horizon_hours).await {
+            Ok(n) if n > 0 => {
+                rep.lapsed = n as usize;
+                info!(
+                    lapsed = n,
+                    hours = opts.news_horizon_hours,
+                    "items aged out of the queue"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => rep.errors.push(format!("expiry: {e}")),
         }
     }
 

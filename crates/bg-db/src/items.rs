@@ -140,7 +140,9 @@ pub async fn count(db: &Db) -> Result<i64> {
 /// Items Gosling has not yet read, newest first.
 pub async fn untriaged(db: &Db, limit: i64) -> Result<Vec<RawItem>> {
     let rows = crate::sql(format!(
-        "SELECT {COLS} FROM raw_items WHERE NOT triaged ORDER BY published_at DESC LIMIT $1"
+        "SELECT {COLS} FROM raw_items
+          WHERE NOT triaged AND aged_out_at IS NULL
+          ORDER BY published_at DESC LIMIT $1"
     ))
     .bind(limit)
     .fetch_all(&db.pool)
@@ -172,7 +174,7 @@ pub async fn mark_triaged(
 pub async fn unclustered(db: &Db, limit: i64) -> Result<Vec<RawItem>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM raw_items
-         WHERE triaged AND story_id IS NULL
+         WHERE triaged AND story_id IS NULL AND aged_out_at IS NULL
          ORDER BY published_at DESC LIMIT $1"
     ))
     .bind(limit)
@@ -259,6 +261,41 @@ pub async fn recent_public(db: &Db, limit: i64) -> Result<Vec<RawItemPublic>> {
 }
 
 // -- full-text extraction ---------------------------------------------------
+
+/// Let go of items that stopped being news before we reached them.
+///
+/// The newsroom ingests about three times what a free inference tier can
+/// triage, so a queue builds — and almost all of it is stale. Measured on the
+/// live archive: of 3,764 waiting items, 137 were from the last day and 3,627
+/// were older. Working through that in order would spend today's token budget
+/// on last week's news and then publish it as new.
+///
+/// So past the horizon an item lapses. It stays in the database, keeps its
+/// place in URL de-duplication, and simply stops competing for attention it can
+/// no longer justify. Returns how many lapsed, for the log.
+pub async fn expire_stale_untriaged(db: &Db, horizon_hours: i64) -> Result<u64> {
+    let r = sqlx::query(
+        "UPDATE raw_items SET aged_out_at = now()
+          WHERE NOT triaged AND aged_out_at IS NULL
+            AND published_at < now() - make_interval(hours => $1)",
+    )
+    .bind(horizon_hours as i32)
+    .execute(&db.pool)
+    .await?;
+    Ok(r.rows_affected())
+}
+
+/// How many items are waiting, and how many have lapsed. For `bg doctor`.
+pub async fn queue_health(db: &Db) -> Result<(i64, i64)> {
+    let row = sqlx::query(
+        "SELECT count(*) FILTER (WHERE NOT triaged AND aged_out_at IS NULL) AS waiting,
+                count(*) FILTER (WHERE aged_out_at IS NOT NULL) AS lapsed
+           FROM raw_items",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    Ok((row.try_get("waiting")?, row.try_get("lapsed")?))
+}
 
 /// How many times we will try a URL that errors before giving up on it.
 ///
