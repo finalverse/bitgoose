@@ -378,6 +378,18 @@ fn WireRow(story: StoryCard, #[prop(optional)] show_beat: bool) -> impl IntoView
                 <div class="wire-foot">
                     <span class="kicker">{story.category_label.clone()}</span>
                     <KindTag kind=story.source_kind.clone() />
+                    // The Wire is where most of the site's stories live, so a
+                    // marker that appears only on `Card` is a marker almost
+                    // nobody sees.
+                    {story
+                        .has_analysis
+                        .then(|| {
+                            view! {
+                                <span class="has-analysis" title="Includes BitGoose analysis">
+                                    "Analysis"
+                                </span>
+                            }
+                        })}
                     // Only on blended surfaces. On /ai every card is AI, and a
                     // tag repeated down the whole page is noise that competes
                     // with the one tag that does carry information.

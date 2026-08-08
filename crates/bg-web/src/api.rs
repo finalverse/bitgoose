@@ -42,6 +42,29 @@ fn e(err: impl std::fmt::Display) -> ServerFnError {
     ServerFnError::new(err.to_string())
 }
 
+/// Mark wire cards whose stories carry an analysis.
+///
+/// The Wire needs its own pass because its entries come from a different query
+/// than `front_page` and carry their own `story_id`. Saying so in a comment and
+/// not writing it — which is what happened first time — left the marker
+/// invisible on the surface where most of the site's stories actually live.
+#[cfg(feature = "ssr")]
+async fn flag_analysis_wire(
+    db: &bg_db::Db,
+    entries: &[bg_core::domain::WireEntry],
+    cards: &mut [StoryCard],
+) {
+    let ids: Vec<_> = entries.iter().map(|w| w.story_id).collect();
+    let Ok(have) = bg_db::analyses::which_have_analysis(db, &ids).await else {
+        return;
+    };
+    for c in cards.iter_mut() {
+        if let Some(w) = entries.iter().find(|w| w.slug == c.slug) {
+            c.has_analysis = have.contains(&w.story_id.into_uuid());
+        }
+    }
+}
+
 /// Mark the cards whose stories carry an analysis.
 ///
 /// Done as a pass over a finished page rather than inside [`card`] so it costs
@@ -171,7 +194,7 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
     }
 
     let wire_entries = bg_db::stories::wire(db, beat, 14, 0).await.map_err(e)?;
-    let wire: Vec<StoryCard> = wire_entries
+    let mut wire: Vec<StoryCard> = wire_entries
         .iter()
         .filter(|w| Some(&w.slug) != lead.as_ref().map(|l| &l.slug))
         .map(|w| StoryCard {
@@ -198,6 +221,7 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
                 .unwrap_or_default(),
         })
         .collect();
+    flag_analysis_wire(db, &wire_entries, &mut wire).await;
 
     let prices = bg_db::prices::latest_all(db)
         .await
@@ -254,7 +278,7 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
     let k = bg_core::domain::StoryKind::from_str(&kind).ok();
     if k == Some(bg_core::domain::StoryKind::Wire) {
         let entries = bg_db::stories::wire(db, None, limit, 0).await.map_err(e)?;
-        return Ok(entries
+        let mut cards: Vec<StoryCard> = entries
             .iter()
             .map(|w| StoryCard {
                 slug: w.slug.clone(),
@@ -279,7 +303,9 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
                 source_kind: w.source_kind.as_str().into(),
                 has_analysis: false,
             })
-            .collect());
+            .collect();
+        flag_analysis_wire(db, &entries, &mut cards).await;
+        return Ok(cards);
     }
     let stories = bg_db::stories::published(db, k, limit, 0)
         .await
