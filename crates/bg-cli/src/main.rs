@@ -97,6 +97,29 @@ enum Cmd {
         #[arg(long, default_value_t = 2)]
         delay: u64,
     },
+    /// Withdraw material we should not be serving.
+    ///
+    /// Two things, both consequences of bugs already fixed:
+    ///
+    /// Seven sources were polled for weeks against a `Disallow: /`, because
+    /// the function that re-reads robots.txt existed and was never called.
+    /// Stopping was half the fix; the other half is not continuing to serve
+    /// what was taken. Stories with at least one permitted source stand — the
+    /// event is real and someone we could read reported it. Stories whose every
+    /// source disallows us do not.
+    ///
+    /// And eight stories merge up to twenty unrelated events, artifacts of one
+    /// early run whose clustering was adjudicated by the deterministic stub.
+    /// A site claiming every assertion shows its sources cannot serve a page
+    /// that is not about one thing.
+    ///
+    /// Killed, not deleted, in every case: reversible, auditable, and the
+    /// record of what was published and withdrawn stays intact.
+    Retract {
+        /// Report what would change without changing it.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Run the Skein over published stories: what it means, where it goes.
     ///
     /// Skips any story without enough real source text behind it. Run `enrich`
@@ -304,6 +327,25 @@ async fn main() -> Result<()> {
                 }
             }
             println!("{done} refreshed, {failed} failed");
+        }
+
+        Cmd::Retract { dry_run } => {
+            let db = Db::connect(&url).await?;
+            if dry_run {
+                let (waiting, _) = bg_db::items::queue_health(&db).await.unwrap_or((0, 0));
+                println!("dry run — nothing will be changed (queue: {waiting} waiting)");
+                for (slug, n) in bg_db::analyses::incoherent_stories(&db).await? {
+                    println!("  would retract (incoherent, {n} items): /story/{slug}");
+                }
+                println!("  run without --dry-run to apply");
+                return Ok(());
+            }
+            let text = bg_db::items::purge_disallowed_text(&db).await?;
+            let robots = bg_db::stories::retract_disallowed(&db).await?;
+            let blobs = bg_db::stories::retract_incoherent(&db, 10).await?;
+            println!("purged working text from {text} item(s) of disallowed sources");
+            println!("retracted {robots} story(ies) sourced only from disallowed feeds");
+            println!("retracted {blobs} story(ies) that merged unrelated events");
         }
 
         Cmd::Enrich { limit, delay } => {

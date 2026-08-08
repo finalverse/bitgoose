@@ -430,3 +430,61 @@ pub async fn flyway(db: &Db, days: i32) -> Result<Vec<(String, chrono::NaiveDate
         .map(|r| (r.get("category"), r.get("day"), r.get("n")))
         .collect())
 }
+
+/// Withdraw stories that exist only because we ignored a robots.txt.
+///
+/// A story with at least one permitted source stands: the event is real and
+/// somebody we were allowed to read reported it. A story whose every source is
+/// one that told us not to crawl has no such footing, and publishing it while
+/// claiming to honour robots.txt is the contradiction worth removing.
+///
+/// Killed, not deleted — the status is a flag, the record of what we published
+/// and then withdrew stays intact, and it is reversible if a publisher's terms
+/// change.
+pub async fn retract_disallowed(db: &Db) -> Result<u64> {
+    let r = sqlx::query(
+        "UPDATE stories st
+            SET status = 'killed',
+                editor_note = 'retracted: every source disallows crawling',
+                -- The stories_published_has_ts CHECK ties status to the
+                -- timestamp; leaving published_at set on a killed story
+                -- violates it and the whole statement rolls back.
+                published_at = NULL,
+                updated_at = now()
+          WHERE st.status = 'published'
+            AND EXISTS (SELECT 1 FROM raw_items r JOIN sources s ON s.id = r.source_id
+                         WHERE r.story_id = st.id AND NOT s.robots_ok)
+            AND NOT EXISTS (SELECT 1 FROM raw_items r JOIN sources s ON s.id = r.source_id
+                             WHERE r.story_id = st.id AND s.robots_ok)",
+    )
+    .execute(&db.pool)
+    .await?;
+    Ok(r.rows_affected())
+}
+
+/// Withdraw stories that merge too many unrelated events to be one story.
+///
+/// Artifacts of a single early run whose clustering was adjudicated by the
+/// deterministic stub, which answers "same event?" with a constant yes. The
+/// worst welded twenty separate events — an Argentine court ruling, a Grayscale
+/// filing, the ECB digital euro — under one headline.
+///
+/// On a site whose whole claim is that every assertion shows its sources, a
+/// page that is not about one thing cannot show them honestly. Killed rather
+/// than re-clustered: the items are months stale now, and re-running them would
+/// spend a scarce token budget to recover news nobody needs.
+pub async fn retract_incoherent(db: &Db, max_items: i64) -> Result<u64> {
+    let r = sqlx::query(
+        "UPDATE stories st
+            SET status = 'killed',
+                editor_note = 'retracted: merged unrelated events (stub-era clustering)',
+                published_at = NULL,
+                updated_at = now()
+          WHERE st.status = 'published'
+            AND (SELECT count(*) FROM raw_items r WHERE r.story_id = st.id) > $1",
+    )
+    .bind(max_items)
+    .execute(&db.pool)
+    .await?;
+    Ok(r.rows_affected())
+}

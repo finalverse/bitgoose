@@ -448,3 +448,29 @@ pub async fn bodies_for_story(db: &Db, story: StoryId) -> Result<Vec<(String, St
         .map(|r| (r.get("slug"), r.get("body")))
         .collect())
 }
+
+// -- retraction --------------------------------------------------------------
+
+/// Discard the working text taken from sources that disallow us.
+///
+/// `refresh_robots` was written and never called, so `robots_ok` held its
+/// seed-time default and seven sources were polled for weeks against a
+/// `Disallow: /`. Stopping was the first half of the fix; this is the second.
+///
+/// The row survives with its URL and title. That is deliberate: the URL hash is
+/// what stops a re-post being ingested twice, and throwing it away would mean
+/// re-fetching the same disallowed page the moment anything changed. What goes
+/// is the material we should never have held — the body and the summary.
+pub async fn purge_disallowed_text(db: &Db) -> Result<u64> {
+    let r = sqlx::query(
+        "UPDATE raw_items r
+            SET body_raw = NULL, summary_raw = NULL, body_hash = NULL
+           FROM sources s
+          WHERE s.id = r.source_id
+            AND NOT s.robots_ok
+            AND (r.body_raw IS NOT NULL OR r.summary_raw IS NOT NULL)",
+    )
+    .execute(&db.pool)
+    .await?;
+    Ok(r.rows_affected())
+}
