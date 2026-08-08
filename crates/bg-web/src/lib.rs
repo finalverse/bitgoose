@@ -7,6 +7,10 @@
 
 pub mod api;
 pub mod model;
+#[cfg(feature = "ssr")]
+pub mod ogcard;
+#[cfg(feature = "ssr")]
+pub mod ogroute;
 pub mod pages;
 pub mod ui;
 

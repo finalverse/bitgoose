@@ -189,11 +189,28 @@ pub fn Footer() -> impl IntoView {
 /// image is without fetching it. `None` means the URL says nothing — we assume
 /// it is fine rather than discarding every image that lacks the hint.
 fn declared_width(url: &str) -> Option<u32> {
-    let (_, query) = url.split_once('?')?;
-    query.split('&').find_map(|pair| {
-        let (k, v) = pair.split_once('=')?;
-        matches!(k, "width" | "w").then(|| v.parse().ok())?
-    })
+    // A query parameter, as most image CDNs use.
+    if let Some((_, query)) = url.split_once('?') {
+        if let Some(w) = query.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            matches!(k, "width" | "w").then(|| v.parse().ok())?
+        }) {
+            return Some(w);
+        }
+    }
+    // Or baked into the filename, which is what WordPress does for every
+    // resized copy it generates: `IRS-e1746518301375-600x450.jpg`. Missing this
+    // meant a 150x150 thumbnail read as "no size declared" and was waved
+    // through as a full-bleed card.
+    let stem = url.split('?').next()?.rsplit('/').next()?;
+    let stem = stem.rsplit_once('.').map(|(s, _)| s).unwrap_or(stem);
+    let (_, dims) = stem.rsplit_once('-')?;
+    let (w, h) = dims.split_once('x')?;
+    // Both halves must parse, or a filename like `photo-2x-retina` would read
+    // as a 2-pixel-wide image and send every such story to a generated card.
+    let w: u32 = w.parse().ok()?;
+    h.parse::<u32>().ok()?;
+    Some(w)
 }
 
 #[component]
@@ -205,9 +222,28 @@ pub fn ShareMeta(
     /// Story image if there is one; the branded card is used when empty.
     #[prop(optional, into)]
     image: String,
+    /// Slug of a story that can have a card generated for it.
+    ///
+    /// When the publisher gave us no usable picture, `/og/<slug>.png` renders
+    /// one from the story itself — headline, desk, source count. Far better
+    /// than the single static card, which turns a timeline of shares into a row
+    /// of identical logos telling the reader nothing.
+    #[prop(optional, into)]
+    card_slug: String,
     /// `article` for a story, `website` for everything else.
     #[prop(default = "website")]
     kind: &'static str,
+    /// ISO-8601 publication time. LinkedIn and Facebook show a date on the card
+    /// when this is present and nothing when it is not, which makes a fresh
+    /// story look undated rather than new.
+    #[prop(optional, into)]
+    published_time: String,
+    /// Section name, e.g. "AI". LinkedIn renders it above the headline.
+    #[prop(optional, into)]
+    section: String,
+    /// ISO-8601 last-modified time, when a correction has changed the story.
+    #[prop(optional, into)]
+    modified_time: String,
 ) -> impl IntoView {
     use leptos_meta::Meta;
     let base = url
@@ -226,6 +262,10 @@ pub fn ShareMeta(
     let usable = !image.trim().is_empty() && declared_width(&image).is_none_or(|w| w >= 600);
     let (img, own_card) = if usable {
         (image, false)
+    } else if !card_slug.trim().is_empty() {
+        // Generated per story. Still our own domain and our own dimensions, so
+        // the width/height declarations below stay truthful.
+        (format!("{base}/og/{card_slug}.png"), true)
     } else {
         (format!("{base}/og-default.png"), true)
     };
@@ -257,7 +297,30 @@ pub fn ShareMeta(
         <Meta name="twitter:card" content="summary_large_image" />
         <Meta name="twitter:title" content=title />
         <Meta name="twitter:description" content=description />
-        <Meta name="twitter:image" content=img />
+        <Meta name="twitter:image" content=img.clone() />
+        // LinkedIn reads og:image:secure_url in preference to og:image and
+        // silently shows no picture when only the latter is present over some
+        // of its crawler paths. Same URL — we are https-only — so this costs a
+        // line and removes a whole class of blank card.
+        <Meta property="og:image:secure_url" content=img />
+        // Article facts. LinkedIn and Facebook use these to date and file the
+        // card; X ignores them. Emitted only for stories, since a section front
+        // has no publication time and claiming one would be a small lie in
+        // structured data.
+        {(!published_time.is_empty())
+            .then(|| {
+                view! { <Meta property="article:published_time" content=published_time.clone() /> }
+            })}
+        {(!section.is_empty())
+            .then(|| view! { <Meta property="article:section" content=section.clone() /> })}
+        {(!modified_time.is_empty())
+            .then(|| {
+                view! { <Meta property="article:modified_time" content=modified_time.clone() /> }
+            })}
+        {(kind == "article")
+            .then(|| {
+                view! { <Meta property="article:author" content="The BitGoose Flock" /> }
+            })}
     }
 }
 
@@ -379,6 +442,10 @@ pub fn ShareBar(title: String, url: String) -> impl IntoView {
         urlencode(&title),
         urlencode(&url)
     );
+    let li_share = format!(
+        "https://www.linkedin.com/sharing/share-offsite/?url={}",
+        urlencode(&url)
+    );
     // Rendered by an image service rather than a JS library: a QR is a static
     // image, and shipping a generator to every reader to draw one on demand is
     // weight for a feature most will not use.
@@ -409,6 +476,13 @@ pub fn ShareBar(title: String, url: String) -> impl IntoView {
             <span class="sharebar-label">"Share"</span>
             <a class="share-btn" href=x_intent target="_blank" rel="noopener noreferrer">
                 "X"
+            </a>
+            // LinkedIn's sharing endpoint takes only the URL — title and
+            // summary come from the page's own Open Graph tags, which is why
+            // the `article:*` metadata in `ShareMeta` matters more here than
+            // anything we could put in the link.
+            <a class="share-btn" href=li_share target="_blank" rel="noopener noreferrer">
+                "LinkedIn"
             </a>
             <button class="share-btn" on:click=native title="Share via your device">
                 "Share…"
@@ -809,6 +883,33 @@ mod share_meta_tests {
             declared_width("https://img.example.com/a.jpg?w=1600&q=80"),
             Some(1600)
         );
+    }
+
+    #[test]
+    fn wordpress_size_suffixes_are_read_from_the_filename() {
+        // A live story shipped this one, and the size is in the name, not the
+        // query — so it read as "no size declared" and was accepted.
+        assert_eq!(
+            declared_width(
+                "https://www.tbstat.com/wp/uploads/2020/03/IRS-e1746518301375-600x450.jpg"
+            ),
+            Some(600)
+        );
+        assert_eq!(
+            declared_width("https://x.example/a/photo-150x150.png"),
+            Some(150)
+        );
+    }
+
+    #[test]
+    fn a_filename_that_merely_looks_dimensional_is_ignored() {
+        // Rejecting these would send perfectly good photographs to a generated
+        // card, which is the opposite of the intent.
+        assert_eq!(
+            declared_width("https://x.example/photo-2x-retina.jpg"),
+            None
+        );
+        assert_eq!(declared_width("https://x.example/chart-q3xq4.png"), None);
     }
 
     #[test]

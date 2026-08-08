@@ -51,7 +51,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         // Explicit API routes are registered ahead of the site's catch-all, so
         // `/v1/...` can never be swallowed by client-side routing.
-        .merge(bg_api::router(db))
+        .merge(bg_api::router(db.clone()))
+        // Generated share cards. Registered before the site's catch-all so
+        // `/og/...` reaches the renderer rather than client-side routing.
+        .merge(bg_web::ogroute::router(db))
         .merge(site)
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http());

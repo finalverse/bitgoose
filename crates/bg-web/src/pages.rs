@@ -4,7 +4,7 @@ use crate::api::*;
 use crate::model::*;
 use crate::ui::*;
 use leptos::prelude::*;
-use leptos_meta::{Link, Meta, Title};
+use leptos_meta::{Link, Title};
 use leptos_router::hooks::use_params_map;
 
 /// Load a resource and render it, with loading and empty states handled once.
@@ -711,10 +711,11 @@ fn StoryMeta(story: StoryPage) -> impl IntoView {
             description=desc.clone()
             url=story.canonical.clone()
             image=story.image_url.clone()
+            card_slug=story.slug.clone()
+            published_time=story.iso_published.clone()
+            modified_time=story.iso_modified.clone()
+            section=story.category_label.clone()
         />
-        <Meta property="article:published_time" content=story.iso_published.clone() />
-        <Meta property="article:modified_time" content=story.iso_modified.clone() />
-        <Meta property="article:section" content=story.category_label.clone() />
 
 
         // Rendered as a raw script body: JSON-LD must reach the crawler as
