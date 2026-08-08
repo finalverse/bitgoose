@@ -26,6 +26,7 @@ pub mod articles;
 pub mod claims;
 pub mod convert;
 pub mod entities;
+pub mod gaggles;
 pub mod items;
 pub mod prices;
 pub mod sources;

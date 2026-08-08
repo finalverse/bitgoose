@@ -4,7 +4,9 @@
 //! the Wire and hand it to Gander. Failures are per-story — one bad draft must
 //! not stop the run — and the whole pass is bounded by the spend ceiling.
 
-use crate::{curator, gander, gosling, herald, ombuds, quant, scout, scribe, sentinel, skein};
+use crate::{
+    curator, gaggle, gander, gosling, herald, ombuds, quant, scout, scribe, sentinel, skein,
+};
 use crate::{Ctx, FlockError, Result};
 use bg_core::domain::StoryStatus;
 use rust_decimal::Decimal;
@@ -21,6 +23,7 @@ pub struct PipelineReport {
     pub wire_published: usize,
     pub enriched: usize,
     pub lapsed: usize,
+    pub gaggles: usize,
     pub analysed: usize,
     pub corrections: usize,
     pub errors: Vec<String>,
@@ -31,7 +34,7 @@ impl PipelineReport {
     pub fn summary(&self) -> String {
         format!(
             "ingested {} · triaged {} · clustered {} · desk {}✓/{}⏸/{}✗ · wire {} · \
-             enriched {} · analysed {} · lapsed {} · corrections {} · ${:.4}",
+             enriched {} · analysed {} · lapsed {} · gaggles {} · corrections {} · ${:.4}",
             self.items_ingested,
             self.items_triaged,
             self.items_clustered,
@@ -42,6 +45,7 @@ impl PipelineReport {
             self.enriched,
             self.analysed,
             self.lapsed,
+            self.gaggles,
             self.corrections,
             self.cost_usd
         )
@@ -79,6 +83,12 @@ pub struct RunOpts {
     /// items per pass — and lets the backlog drain slowly in the gaps rather
     /// than at the readers' expense.
     pub max_enrich: i64,
+    /// Special topics to open per pass.
+    ///
+    /// One. Detection is free arithmetic over headlines, but framing a topic
+    /// costs a call, and a newsroom that opens five special topics an hour has
+    /// not made anything special.
+    pub max_gaggles: usize,
     /// Analyses to attempt per pass. Small on purpose: the Skein runs on the
     /// top tier, and a free-tier token budget spent analysing twenty stories is
     /// a budget not spent publishing the next twenty.
@@ -95,6 +105,7 @@ impl Default for RunOpts {
             max_cluster: 60,
             news_horizon_hours: 72,
             max_enrich: 4,
+            max_gaggles: 1,
             max_analyses: 3,
         }
     }
@@ -256,6 +267,17 @@ pub async fn run_once(ctx: &Ctx, opts: &RunOpts) -> Result<PipelineReport> {
                 }
             }
             Err(e) => rep.errors.push(format!("skein: {e}")),
+        }
+    }
+
+    // -- Gaggle ---------------------------------------------------------------
+    // After publishing: a special topic collects stories, so it wants them to
+    // exist first. Detection is free, so this runs every pass even when the
+    // token budget is spent — the page membership refreshes regardless.
+    if opts.max_gaggles > 0 {
+        match gaggle::run(ctx, opts.max_gaggles).await {
+            Ok(n) => rep.gaggles = n,
+            Err(e) => rep.errors.push(format!("gaggle: {e}")),
         }
     }
 

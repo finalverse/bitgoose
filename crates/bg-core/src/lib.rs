@@ -26,6 +26,7 @@ pub mod media;
 pub mod policy;
 pub mod slug;
 pub mod text;
+pub mod trends;
 
 pub use domain::*;
 pub use error::{CoreError, Result};

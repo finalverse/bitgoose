@@ -1512,3 +1512,73 @@ a:hover > .media-play::after,
   color: var(--gold);
   opacity: 0.9;
 }
+
+/* ---------------------------------------------------------------------------
+   Gaggles — special topics
+   ---------------------------------------------------------------------------
+   A strip rather than a card grid. These appear rarely (a topic needs five
+   independent outlets inside two days), so they should read as a banner the
+   reader notices, not as another row of the same furniture. */
+
+.gaggle-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0 0 1.5rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.gaggle-strip-label {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 0.2rem;
+}
+
+.gaggle-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--gold-line);
+  background: var(--gold-dim);
+  border-radius: 999px;
+  text-decoration: none;
+
+  .gaggle-chip-title { color: var(--paper); font-weight: 600; font-size: 0.9rem; }
+  .gaggle-chip-meta { font-family: var(--mono); font-size: 0.68rem; color: var(--gold); }
+  &:hover { border-color: var(--gold); }
+}
+
+.gaggle-head {
+  margin-bottom: 1.75rem;
+
+  h1 { margin: 0.5rem 0 0.6rem; }
+}
+
+.gaggle-tag {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-line);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
+
+/* The page states its own justification. Seven newsrooms converging is the
+   whole argument for it existing, so it is printed rather than implied. */
+.gaggle-why {
+  margin: 0.9rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  strong { color: var(--paper-dim); }
+  .gaggle-model { font-family: var(--mono); color: var(--faint); }
+}

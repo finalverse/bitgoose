@@ -258,10 +258,28 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
         desk = it.collect();
     }
 
+    // Live only — a topic nobody has written about for two days is an archive
+    // page, not a special topic, and offering it as one is how a news site ends
+    // up looking abandoned.
+    let gaggles: Vec<GaggleCard> = bg_db::gaggles::live(db, 48, 3)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| GaggleCard {
+            slug: g.slug,
+            title: g.title,
+            standfirst: g.standfirst,
+            sources: g.source_count,
+            stories: g.story_count,
+            model: g.model.unwrap_or_default(),
+        })
+        .collect();
+
     Ok(FrontPage {
         lead,
         desk,
         wire,
+        gaggles,
         prices,
         honk,
     })
@@ -313,6 +331,36 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
     let mut cards: Vec<StoryCard> = stories.iter().map(|s| card(s, None)).collect();
     flag_analysis(db, &stories, &mut cards).await;
     Ok(cards)
+}
+
+#[server(name = GetGaggle, prefix = "/rpc")]
+pub async fn get_gaggle(slug: String) -> Result<Option<GagglePage>, ServerFnError> {
+    let db = db();
+    let Some(g) = bg_db::gaggles::by_slug(db, &slug).await.map_err(e)? else {
+        return Ok(None);
+    };
+    let ids = bg_db::gaggles::story_ids(db, &slug).await.map_err(e)?;
+
+    let mut stories = Vec::with_capacity(ids.len());
+    for id in &ids {
+        if let Ok(s) = bg_db::stories::by_id(db, *id).await {
+            stories.push(s);
+        }
+    }
+    let mut cards: Vec<StoryCard> = stories.iter().map(|s| card(s, None)).collect();
+    flag_analysis(db, &stories, &mut cards).await;
+
+    Ok(Some(GagglePage {
+        card: GaggleCard {
+            slug: g.slug,
+            title: g.title,
+            standfirst: g.standfirst,
+            sources: g.source_count,
+            stories: g.story_count,
+            model: g.model.unwrap_or_default(),
+        },
+        stories: cards,
+    }))
 }
 
 #[server(name = GetSection, prefix = "/rpc")]

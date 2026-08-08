@@ -50,6 +50,8 @@ pub struct FrontPage {
     pub desk: Vec<StoryCard>,
     pub wire: Vec<StoryCard>,
     pub prices: Vec<Tick>,
+    /// Live special topics, hottest first. Usually empty — that is the point.
+    pub gaggles: Vec<GaggleCard>,
     pub honk: Option<StoryCard>,
 }
 
@@ -145,6 +147,26 @@ pub struct QuoteCard {
     pub speaker: String,
     pub source_name: String,
     pub source_url: String,
+}
+
+/// A special topic — many independent outlets converging on one subject.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GaggleCard {
+    pub slug: String,
+    pub title: String,
+    pub standfirst: String,
+    /// The evidence for calling this a topic at all. Shown, because "seven
+    /// newsrooms decided this mattered" is the entire argument for the page
+    /// existing and a reader is entitled to check it.
+    pub sources: i32,
+    pub stories: i32,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GagglePage {
+    pub card: GaggleCard,
+    pub stories: Vec<StoryCard>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

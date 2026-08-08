@@ -22,6 +22,7 @@
 
 pub mod copydesk;
 pub mod curator;
+pub mod gaggle;
 pub mod gander;
 pub mod gosling;
 pub mod herald;

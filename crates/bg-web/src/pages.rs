@@ -116,6 +116,32 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
             data,
             |fp| view! {
                 {fp.honk.clone().map(|h| view! { <HonkBar story=h /> })}
+                // Special topics, when there are any. Placed under the honk
+                // and above the lead: a subject seven newsrooms converged on
+                // outranks any single story about it, including ours.
+                {(!fp.gaggles.is_empty())
+                    .then(|| {
+                        let gs = fp.gaggles.clone();
+                        view! {
+                            <div class="gaggle-strip">
+                                <span class="gaggle-strip-label">"Special topics"</span>
+                                {gs
+                                    .into_iter()
+                                    .map(|g| {
+                                        view! {
+                                            <a class="gaggle-chip" href=format!("/gaggle/{}", g.slug)>
+                                                <span class="gaggle-chip-title">{g.title.clone()}</span>
+                                                <span class="gaggle-chip-meta">
+                                                    {g.sources}
+                                                    " outlets"
+                                                </span>
+                                            </a>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </div>
+                        }
+                    })}
                 // The ticker is crypto spot prices. On the AI desk it is not
                 // just irrelevant, it is misleading furniture — a reader could
                 // reasonably read a price strip as being about what they are
@@ -315,6 +341,86 @@ pub fn Desk() -> impl IntoView {
                 }
             )}
         </div>
+    }
+}
+
+/// A special topic: everything the newsroom has on one subject.
+#[component]
+pub fn Gaggle() -> impl IntoView {
+    let params = use_params_map();
+    let data = Resource::new(
+        move || params.read().get("slug").unwrap_or_default(),
+        get_gaggle,
+    );
+    view! {
+        {loaded!(
+            data,
+            |maybe| match maybe {
+                None => {
+                    view! {
+                        <div class="shell page">
+                            <Empty message="No such topic." hint="" />
+                        </div>
+                    }
+                        .into_any()
+                }
+                Some(g) => {
+                    let c = g.card.clone();
+                    let stories = g.stories.clone();
+                    let has_model = !c.model.is_empty();
+                    view! {
+                        <Title text=format!("{} — BitGoose", c.title) />
+                        <ShareMeta
+                            title=c.title.clone()
+                            description=c.standfirst.clone()
+                            url=format!("https://{}/gaggle/{}", bg_core::brand::DOMAIN, c.slug)
+                        />
+                        <div class="shell page">
+                            <div class="gaggle-head">
+                                <span class="gaggle-tag">"Special topic"</span>
+                                <h1>{c.title.clone()}</h1>
+                                <p class="lede">{c.standfirst.clone()}</p>
+                                // The argument for the page existing, stated
+                                // rather than implied.
+                                <p class="gaggle-why">
+                                    "Opened because "
+                                    <strong>{c.sources}</strong>
+                                    " independent outlets covered this within two days. "
+                                    {stories.len()}
+                                    " stories collected."
+                                    {has_model
+                                        .then(|| {
+                                            view! {
+                                                <span class="gaggle-model">
+                                                    " · Framed by "
+                                                    {c.model.clone()}
+                                                </span>
+                                            }
+                                        })}
+                                </p>
+                            </div>
+                            {if stories.is_empty() {
+                                view! {
+                                    <Empty message="Nothing published on this yet." hint="" />
+                                }
+                                    .into_any()
+                            } else {
+                                view! {
+                                    <div>
+                                        {stories
+                                            .into_iter()
+                                            .map(|st| view! { <WireRow story=st show_beat=true /> })
+                                            .collect_view()}
+                                    </div>
+                                }
+                                    .into_any()
+                            }}
+                        </div>
+                    }
+                        .into_any()
+                }
+            }
+        )}
     }
 }
 

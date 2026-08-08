@@ -77,6 +77,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/markets") view=pages::DeskMarkets />
                     <Route path=path!("/tech") view=pages::DeskTech />
                     <Route path=path!("/wire") view=pages::Wire />
+                    <Route path=path!("/gaggle/:slug") view=pages::Gaggle ssr=SsrMode::Async />
                     <Route path=path!("/desk") view=pages::Desk />
                     <Route path=path!("/section/:category") view=pages::Section />
                     // The one route that must not stream out of order.
