@@ -28,7 +28,12 @@ CHUNK="${BG_CHUNK:-262144}"   # 256 KB — the largest size observed to complete
 PWFILE="${BG_PWFILE:-$HOME/.ssh/.nyc01}"
 
 WORK="$(mktemp -d)"
-CTL="$WORK/ssh-%r@%h:%p"
+# The control socket goes somewhere short, NOT under $WORK. A Unix domain
+# socket path is capped around 104 characters and macOS mktemp hands out
+# `/var/folders/56/v6pzz…/T/tmp.fxN9iWQO2R`, which blows the limit on its own:
+#   unix_listener: path "…/ssh-bg@host:22022.4VpwpuABcLfheyeq" too long
+# Multiplexing then silently never starts.
+CTL="/tmp/.bgpush-$$"
 # One multiplexed connection for every chunk. Each scp and each verification
 # was opening its own, and on a link this lossy the handshake costs more than
 # the payload — measured at ~150s per chunk with two connections against ~31s
@@ -60,11 +65,18 @@ split -b "$CHUNK" bundle.tar.gz part.
 COUNT=$(ls part.* | wc -l | tr -d ' ')
 say "split into $COUNT chunks of $CHUNK bytes"
 
+# Prove the multiplexed connection works before splitting anything. The first
+# run printed a socket error, transferred nothing, and still exited 0 — a
+# deploy script that reports success on failure is worse than one that crashes.
+ssh "${SSHOPTS[@]}" -p "$PORT" "$HOST" true \
+  || { echo "cannot open a control connection to $HOST" >&2; exit 1; }
+
 # A stalled installer competes for the same link and will starve this.
-ssh "${SSHOPTS[@]}" -p "$PORT" "$HOST" 'systemctl is-active bitgoose-install' 2>/dev/null | grep -q active && {
-  say "an install is running and will contend for the link; stop it first" >&2
+if ssh "${SSHOPTS[@]}" -p "$PORT" "$HOST" 'systemctl is-active bitgoose-install' 2>/dev/null \
+   | grep -q active; then
+  echo "an install is running and will contend for the link; stop it first" >&2
   exit 1
-}
+fi
 
 # Resumable: chunks already on the far side at the right size are skipped, so
 # an interrupted push picks up where it stopped instead of starting over.
@@ -110,5 +122,15 @@ ssh "${SSHOPTS[@]}" -p "$PORT" "$HOST" \
      /tmp/bgpush/$SHA.tar.gz /var/cache/bitgoose/$SHA.tar.gz && rm -rf /tmp/bgpush" \
   < "$PWFILE"
 
-say "done — now run: sudo systemd-run --unit=bitgoose-install --collect \
-/usr/local/bin/bitgoose-install $TAG"
+# Confirm it is actually where the installer will look, rather than trusting
+# that the previous command did what it said.
+placed=$(ssh "${SSHOPTS[@]}" -p "$PORT" "$HOST" \
+  "sudo -S -p '' stat -c %s /var/cache/bitgoose/$SHA.tar.gz 2>/dev/null || echo 0" \
+  < "$PWFILE")
+[ "$placed" = "$SIZE" ] || {
+  echo "bundle is not in the cache (saw '$placed', expected $SIZE)" >&2
+  exit 1
+}
+
+say "in cache, $placed bytes — now run: sudo systemd-run --unit=bitgoose-install \
+--collect /usr/local/bin/bitgoose-install $TAG"
