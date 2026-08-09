@@ -342,3 +342,58 @@ mod tests {
         assert!(ab > ac);
     }
 }
+
+/// Normalise a language tag to its primary subtag, lowercased.
+///
+/// Feeds spell the same language three ways — the live corpus holds `en-us`,
+/// `en` and `en-US` for 1,396 English items — so any filter or per-language
+/// surface built on the raw value silently misses most of its own rows. BCP-47
+/// says the primary subtag is the language; the region is a separate question
+/// and not one a newsroom sorts by.
+///
+/// Unparseable input yields `und` (BCP-47 "undetermined") rather than a guess:
+/// mislabelling something as English is worse than admitting we do not know.
+pub fn normalize_lang(tag: &str) -> String {
+    let primary = tag
+        .trim()
+        .split(['-', '_'])
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+    // Two- and three-letter codes only; anything else is not a language tag.
+    if (2..=3).contains(&primary.chars().count())
+        && primary.chars().all(|c| c.is_ascii_alphabetic())
+    {
+        primary
+    } else {
+        "und".to_string()
+    }
+}
+
+#[cfg(test)]
+mod lang_tests {
+    use super::normalize_lang;
+
+    #[test]
+    fn the_three_spellings_in_the_live_corpus_become_one() {
+        for tag in ["en-us", "en", "en-US", "EN", " en_GB "] {
+            assert_eq!(normalize_lang(tag), "en", "{tag} did not normalise");
+        }
+    }
+
+    #[test]
+    fn other_languages_keep_their_own_identity() {
+        assert_eq!(normalize_lang("zh-Hans"), "zh");
+        assert_eq!(normalize_lang("ja"), "ja");
+        assert_eq!(normalize_lang("pt-BR"), "pt");
+    }
+
+    #[test]
+    fn nonsense_is_undetermined_rather_than_assumed_english() {
+        // Defaulting to English is how a Japanese story ends up on an English
+        // front page with nobody noticing.
+        assert_eq!(normalize_lang(""), "und");
+        assert_eq!(normalize_lang("javascript:void"), "und");
+        assert_eq!(normalize_lang("12"), "und");
+    }
+}

@@ -256,7 +256,10 @@ async fn poll_inner(
             body_hash: body.as_deref().map(sha256_hex),
             body_raw: body,
             simhash: simhash64(&fingerprint_input),
-            lang: feed.language.clone().unwrap_or_else(|| "en".into()),
+            // Normalised at the boundary. The corpus already holds `en-us`,
+            // `en` and `en-US` for the same language, which makes any
+            // per-language surface built on this quietly wrong.
+            lang: bg_core::text::normalize_lang(feed.language.as_deref().unwrap_or("en")),
             // YouTube's media:content is the player URL, not a picture.
             // Converting here means the column holds something an <img> can
             // actually load, rather than every reader having to know.
