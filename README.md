@@ -105,7 +105,7 @@ cp .env.example .env          # works as-is; no API key needed
 
 docker compose up -d          # Postgres 17 + pgvector
 cargo run -p bg-cli -- migrate
-cargo run -p bg-cli -- seed   # 32 sources, 12 assets, 15 entities, 11 agents
+cargo run -p bg-cli -- seed   # 33 sources, 12 assets, 15 entities, 11 agents
 cargo run -p bg-cli -- doctor # verify everything is wired up
 
 cargo run -p bg-cli -- run    # one full newsroom pass against live feeds
@@ -131,6 +131,7 @@ bg run                one full newsroom pass
 bg worker --interval  run the pipeline on a loop
 bg stats              24h newsroom statistics
 bg violations         recent policy blocks
+bg retract            withdraw material we should not be serving
 ```
 
 ---
@@ -207,6 +208,34 @@ tidied quote is a fabricated one.
 
 ---
 
+## Trends, and what counts as one
+
+A trend here is not the loudest thing. It is the thing **independent newsrooms
+reached separately**.
+
+That distinction is the whole design. Virality measures how hard something is
+being pushed; convergence measures how many editors decided on their own that a
+subject mattered. For a publication whose argument is corroboration, the second
+is both truer and free — it is arithmetic over headlines already in the
+database, so no model is consulted to notice that seven outlets wrote about the
+same bill this morning.
+
+Scored against each subject's **own** fortnight, not raw volume. The first time
+this ran it nominated "bitcoin, 7 sources" — true, and not a special topic on a
+crypto site. Departure from normal is what makes a subject worth a page; the
+same corpus then produced the Clarity Act.
+
+**A gaggle** — geese on the ground, where a skein is geese in flight — is the
+page that opens when a subject clears five independent outlets inside 48 hours.
+Roughly four topics in two days on a live corpus of 1,235 headlines. The page
+states its own justification, because "seven newsrooms converged on this" is the
+entire argument for it existing and a reader is entitled to check it.
+
+Detection runs every 90 seconds; it costs nothing. A model is consulted once per
+topic, to name and frame it.
+
+---
+
 ## Editorial policy
 
 BitGoose reads other people's journalism. That is only defensible if the boundary
@@ -270,7 +299,7 @@ is never redistributed through this API, because it is not ours to redistribute.
 
 ## Sources
 
-Thirty-two configured, twenty-five polled — see *Who we do not poll* below.
+Thirty-three configured, twenty-six polled — see *Who we do not poll* below.
 Weighted by a trust score that reflects *editorial process* — named reporters, a
 corrections policy, original reporting vs reprints — not whether we like the
 coverage. Scores are visible on `/standards` precisely because they are
@@ -288,6 +317,28 @@ Yahoo Finance. Their feeds are mostly equities and rates, so each item passes a
 crypto/AI relevance gate before it is stored rather than being taken wholesale.
 
 Market data from CoinGecko, with Coinbase as fallback.
+
+### Reading sites that have no feed
+
+Depending on RSS is a dependency on other people's infrastructure choices, and
+plenty of publications worth reading have no feed, a truncated one, or one they
+stopped maintaining. `bg-ingest::crawl` reads an index page and follows the
+links; downstream, its items are indistinguishable from feed items.
+
+`SourceKind::Html` selects it. The first such source is Anthropic, whose news
+page returns 404 for both `/rss` and `/feed`.
+
+Most of the work is in refusing things: tag pages, author pages, subscribe links
+and section indexes all look like articles to a naive link scraper, and footer
+boilerplate has article-shaped URLs — an early run happily ingested "Responsible
+disclosure policy". Headlines need care too, because a modern card is one anchor
+wrapping the date, category, headline and standfirst; among a card's leaf
+elements the headline is reliably the longest, since a date is eleven characters
+and a category is one word.
+
+**robots.txt still governs, and that is the point rather than a limitation.** A
+crawler that ignores it is why publishers stop allowing crawlers at all. Sites
+that actively block automated access are not sources.
 
 ### Who we do not poll
 
@@ -310,14 +361,20 @@ has no editor and no peer review, and a forum thread is an argument rather than
 a report. Both are tagged as such and neither counts as corroboration for a
 claim.
 
-**Why there is no X/Twitter.** Its API starts at $200/month, and the free route
-is third-party scrapers that work intermittently and operate against X's terms.
-A newsroom that publishes a [`/bot`](https://bitgoose.com/bot) page promising to
-honour robots.txt should not run on a scraping proxy.
+**Why there is no X/Twitter.** Its API starts at $200/month. The free route is
+third-party mirrors that work intermittently and operate against X's terms — and
+beyond that, x.com sits behind a Cloudflare bot wall that blocks even
+`/robots.txt` with "Sorry, you have been blocked". Reading it means defeating bot
+detection rather than making a judgement about a crawl directive, which is a
+different kind of act. A newsroom that publishes a
+[`/bot`](https://bitgoose.com/bot) page promising to honour robots.txt does not
+do that.
 
-Four candidates were tested and rejected: Anthropic publishes no RSS, Hugging
-Face's papers feed requires auth, VentureBeat's AI feed stopped updating, and
-Reuters' public RSS endpoints 404.
+Of four candidates once tested and rejected, one has since been recovered:
+**Anthropic** publishes no RSS and is now read by crawling its index. The others
+still stand — Hugging Face's papers feed requires auth, VentureBeat's AI feed
+stopped updating, and Reuters' public RSS endpoints 404. Crawling makes the
+first kind of rejection reversible; it does nothing about a login wall.
 
 ---
 
