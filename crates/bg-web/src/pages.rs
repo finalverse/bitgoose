@@ -123,8 +123,13 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
                     .then(|| {
                         let gs = fp.gaggles.clone();
                         view! {
-                            <div class="gaggle-strip">
-                                <span class="gaggle-strip-label">"Special topics"</span>
+                            // The band spans the viewport; its contents sit
+                            // inside `.shell` like the honk bar above it.
+                            // Without that the label starts at x=0 and the
+                            // first characters fall outside the gutter.
+                            <div class="gaggle-band">
+                                <div class="shell gaggle-strip">
+                                    <span class="gaggle-strip-label">"Special topics"</span>
                                 {gs
                                     .into_iter()
                                     .map(|g| {
@@ -138,7 +143,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
                                             </a>
                                         }
                                     })
-                                    .collect_view()}
+                                        .collect_view()}
+                                </div>
                             </div>
                         }
                     })}

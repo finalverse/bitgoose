@@ -1520,15 +1520,20 @@ a:hover > .media-play::after,
    independent outlets inside two days), so they should read as a banner the
    reader notices, not as another row of the same furniture. */
 
+/* The rules span the viewport; the contents stay in the page gutter. */
+.gaggle-band {
+  margin: 0 0 1.5rem;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
 .gaggle-strip {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
-  margin: 0 0 1.5rem;
-  padding: 0.75rem 0;
-  border-top: 1px solid var(--line-soft);
-  border-bottom: 1px solid var(--line-soft);
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
 }
 
 .gaggle-strip-label {
