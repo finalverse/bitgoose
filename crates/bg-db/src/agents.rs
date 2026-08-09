@@ -269,3 +269,35 @@ pub async fn newsroom_totals(db: &Db) -> Result<NewsroomTotals> {
         claims_24h: r.try_get("claims")?,
     })
 }
+
+/// Tokens spent per model tier in the last 24 hours.
+///
+/// The pacer's daily ledger lives in memory, so a worker restart forgot
+/// everything and the newsroom went straight back to hammering a quota it had
+/// already spent — Groq answers those with `retry in 291s`, repeatedly, for the
+/// rest of the day. The ledger of record is right here: every call writes its
+/// token counts to `agent_runs`, so the pacer can be seeded from it at startup
+/// instead of starting each restart in blissful ignorance.
+///
+/// Keyed by the role's tier rather than the model name, matching how the pacer
+/// buckets its budgets.
+pub async fn tokens_by_tier_24h(db: &Db) -> Result<Vec<(bg_core::domain::ModelTier, i64)>> {
+    let rows = sqlx::query(
+        "SELECT a.role, COALESCE(sum(r.prompt_tokens + r.completion_tokens), 0)::bigint AS toks
+           FROM agent_runs r JOIN agents a ON a.id = r.agent_id
+          WHERE r.started_at > now() - interval '24 hours'
+          GROUP BY a.role",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+
+    let mut out: std::collections::HashMap<bg_core::domain::ModelTier, i64> = Default::default();
+    for r in &rows {
+        let role: String = r.try_get("role")?;
+        let Ok(role) = <bg_core::domain::AgentRole as std::str::FromStr>::from_str(&role) else {
+            continue;
+        };
+        *out.entry(role.tier()).or_default() += r.try_get::<i64, _>("toks")?;
+    }
+    Ok(out.into_iter().collect())
+}

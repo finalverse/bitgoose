@@ -308,6 +308,18 @@ impl Llm {
         self.chain.iter().map(|p| p.name()).collect()
     }
 
+    /// Prime the daily ledger from usage already on record.
+    ///
+    /// The in-memory tally starts empty on every restart, which on a metered
+    /// tier means the first pass after a restart spends a budget that is
+    /// already gone. The caller reads what was actually used from the run
+    /// ledger and hands it over.
+    pub fn seed_daily(&self, tier: ModelTier, tokens: u32) {
+        if tokens > 0 {
+            self.pacer.record(tier, tokens);
+        }
+    }
+
     /// Run a request through the chain.
     pub async fn complete(&self, req: &Request) -> Result<Completion> {
         // Spend the minute deliberately. The retry loop below stays as a

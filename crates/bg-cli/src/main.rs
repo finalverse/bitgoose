@@ -275,7 +275,12 @@ async fn main() -> Result<()> {
                 // Fast passes fill the gap. Feeds, index crawls and trend
                 // scoring cost no tokens, so the front page stays current even
                 // while the budgeted half of the pipeline is waiting its turn.
-                let fast = Duration::from_secs(fast_interval.max(30));
+                //
+                // Capped to the gap: when the adaptive interval shortens to a
+                // quarter of base because work is flowing, a 90s fast pass does
+                // not fit inside a 75s wait and none ran at all — the fast lane
+                // was idling exactly when the news was moving.
+                let fast = Duration::from_secs(fast_interval.max(30)).min(wait / 2);
                 let deadline = std::time::Instant::now() + wait;
                 while std::time::Instant::now() + fast < deadline {
                     tokio::time::sleep(fast).await;
@@ -477,7 +482,10 @@ async fn context(url: &str, provider_override: Option<String>) -> Result<Ctx> {
     }
     let db = Db::connect(url).await?;
     let llm = Llm::from_env();
-    Ok(Ctx::new(db, llm, FlockConfig::from_env())?)
+    // Resumed, not new: the pacer's daily ledger is in memory, and a restart
+    // that forgets the day's spend walks straight back into a quota that is
+    // already gone.
+    Ok(Ctx::resumed(db, llm, FlockConfig::from_env()).await?)
 }
 
 async fn doctor(url: &str) -> Result<()> {

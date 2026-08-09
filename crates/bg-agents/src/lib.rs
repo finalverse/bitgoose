@@ -129,6 +129,33 @@ impl Ctx {
         Ok(Self { db, llm, http, cfg })
     }
 
+    /// As [`Ctx::new`], with the day's token spend restored from the run ledger.
+    ///
+    /// Prefer this anywhere long-running. Without it a restart resets the
+    /// pacer's daily count to zero while the provider's own count carries on,
+    /// so the newsroom immediately overruns a quota it had already spent and
+    /// spends the rest of the day taking `retry in 291s`.
+    pub async fn resumed(db: Db, llm: Llm, cfg: FlockConfig) -> Result<Self> {
+        let ctx = Self::new(db, llm, cfg)?;
+        match agents_repo::tokens_by_tier_24h(&ctx.db).await {
+            Ok(used) => {
+                for (tier, toks) in used {
+                    let toks = toks.clamp(0, u32::MAX as i64) as u32;
+                    ctx.llm.seed_daily(tier, toks);
+                    if toks > 0 {
+                        info!(
+                            ?tier,
+                            tokens = toks,
+                            "restored today's spend from the run ledger"
+                        );
+                    }
+                }
+            }
+            Err(e) => warn!(error = %e, "could not restore today's token spend; pacing from zero"),
+        }
+        Ok(ctx)
+    }
+
     /// Spend in the last hour, the window the run budget is measured over.
     pub async fn spent_recently(&self) -> Decimal {
         agents_repo::cost_since(&self.db, 60)

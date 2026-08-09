@@ -179,19 +179,30 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
     let db = db();
     let ranked = bg_db::stories::front_page(db, beat, 40).await.map_err(e)?;
 
-    let mut lead = None;
-    let mut desk = Vec::new();
-    for s in ranked
+    // The lead is the best story on the site right now, whatever form it took.
+    //
+    // It used to be the best *Desk* story, which quietly froze the front page:
+    // a Desk story needs two independent sources, clustering rarely produces
+    // that (1,407 of 1,438 published stories carry exactly one), so only two
+    // Desk stories existed and the newest was seven days old. The site was
+    // publishing thirty-three stories every six hours and leading with a
+    // week-old one. Tying the most prominent slot to the rarest category is
+    // the kind of coupling that looks fine until the rare thing stops
+    // happening.
+    //
+    // A newsroom leads with the biggest news. `ranked` is already ordered by
+    // newsworthiness decayed against age, so its head is exactly that.
+    let mut lead = ranked.first().map(|s| card(s, None));
+
+    // The Desk row keeps its own character — original synthesis, not pointers —
+    // minus whatever became the lead.
+    let mut desk: Vec<StoryCard> = ranked
         .iter()
         .filter(|s| s.kind == bg_core::domain::StoryKind::Desk)
-    {
-        let c = card(s, None);
-        if lead.is_none() {
-            lead = Some(c);
-        } else if desk.len() < 8 {
-            desk.push(c);
-        }
-    }
+        .filter(|s| Some(&s.slug) != lead.as_ref().map(|l| &l.slug))
+        .take(8)
+        .map(|s| card(s, None))
+        .collect();
 
     let wire_entries = bg_db::stories::wire(db, beat, 14, 0).await.map_err(e)?;
     let mut wire: Vec<StoryCard> = wire_entries
