@@ -45,9 +45,16 @@ enum Cmd {
     },
     /// Run the pipeline on a loop.
     Worker {
-        /// Seconds between passes.
+        /// Seconds between full passes.
         #[arg(long, default_value_t = 300)]
         interval: u64,
+        /// Seconds between fast passes — feeds, crawls and trend scoring.
+        ///
+        /// Separate because that work consults no model and so is not paced by
+        /// the token budget. A full pass can take most of an hour on a free
+        /// tier; a trending topic that updates hourly is not trending.
+        #[arg(long, default_value_t = 90)]
+        fast_interval: u64,
     },
     /// Print newsroom statistics.
     Stats,
@@ -205,9 +212,14 @@ async fn main() -> Result<()> {
             }
         }
 
-        Cmd::Worker { interval } => {
+        Cmd::Worker {
+            interval,
+            fast_interval,
+        } => {
             let ctx = context(&url, None).await?;
-            println!("worker started, {interval}s base interval — ctrl-c to stop");
+            println!(
+                "worker started — full pass every {interval}s, fast pass every {fast_interval}s"
+            );
 
             // The gap is measured from the *end* of a pass, not its start.
             // Token pacing means a pass now takes as long as the budget
@@ -258,8 +270,28 @@ async fn main() -> Result<()> {
                     base
                 };
 
-                println!("  next pass in {}s", wait.as_secs());
-                tokio::time::sleep(wait).await;
+                println!("  next full pass in {}s", wait.as_secs());
+
+                // Fast passes fill the gap. Feeds, index crawls and trend
+                // scoring cost no tokens, so the front page stays current even
+                // while the budgeted half of the pipeline is waiting its turn.
+                let fast = Duration::from_secs(fast_interval.max(30));
+                let deadline = std::time::Instant::now() + wait;
+                while std::time::Instant::now() + fast < deadline {
+                    tokio::time::sleep(fast).await;
+                    match runner::run_fast(&ctx).await {
+                        Ok(r) if r.items_ingested > 0 || r.gaggles > 0 => println!(
+                            "  [{}] fast: {} new, {} topics refreshed",
+                            chrono::Utc::now().to_rfc3339(),
+                            r.items_ingested,
+                            r.gaggles
+                        ),
+                        Ok(_) => {}
+                        Err(e) => eprintln!("  fast pass failed: {e}"),
+                    }
+                }
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                tokio::time::sleep(remaining).await;
             }
         }
 

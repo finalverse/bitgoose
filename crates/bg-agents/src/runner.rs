@@ -111,6 +111,37 @@ impl Default for RunOpts {
     }
 }
 
+/// The free half of a pass: poll feeds, crawl indexes, re-score trends.
+///
+/// Everything here is arithmetic and network — no model is consulted — so it
+/// can run on a cadence set by how fresh the site should feel rather than by a
+/// token budget. That matters: a full pass is paced by a 200,000-token daily
+/// allowance and can take the better part of an hour, and trending topics that
+/// update hourly are not trending topics.
+///
+/// The expensive half ([`run_once`]) still gates on the budget. Splitting them
+/// is what lets the front page reflect the last few minutes while the
+/// analysis and drafting behind it move at whatever pace the tier allows.
+pub async fn run_fast(ctx: &Ctx) -> Result<PipelineReport> {
+    let mut rep = PipelineReport::default();
+
+    if let Ok(r) = scout::run(ctx).await {
+        rep.items_ingested = r.items_new;
+    }
+    if let Err(e) = scout::refresh_prices(ctx).await {
+        rep.errors.push(format!("prices: {e}"));
+    }
+
+    // Membership and heat, recomputed from headlines already in the database.
+    // A gaggle that is still hot has its story list and counts refreshed; one
+    // that would need *framing* — a model call — is left for the full pass.
+    match gaggle::refresh(ctx).await {
+        Ok(n) => rep.gaggles = n,
+        Err(e) => rep.errors.push(format!("gaggle refresh: {e}")),
+    }
+    Ok(rep)
+}
+
 /// Run the whole newsroom once.
 pub async fn run_once(ctx: &Ctx, opts: &RunOpts) -> Result<PipelineReport> {
     let cost_before = ctx.spent_recently().await;

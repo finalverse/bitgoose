@@ -85,6 +85,54 @@ fn schema() -> serde_json::Value {
     )
 }
 
+/// Re-score heat and refresh existing gaggles, without consulting a model.
+///
+/// The half of the job that is free. Called on the fast cadence so a live topic
+/// page reflects the last few minutes rather than the last full pipeline pass,
+/// which on a constrained tier can be an hour apart.
+///
+/// Opens nothing new — naming a topic costs a call, and that decision belongs
+/// in the budgeted pass.
+pub async fn refresh(ctx: &Ctx) -> Result<usize> {
+    let headlines = bg_db::gaggles::recent_headlines(&ctx.db, WINDOW_HOURS, 4_000).await?;
+    if headlines.is_empty() {
+        return Ok(0);
+    }
+    let baseline = bg_db::gaggles::baseline_headlines(
+        &ctx.db,
+        WINDOW_HOURS,
+        (BASELINE_DAYS as i64) * 24,
+        20_000,
+    )
+    .await?;
+
+    let mut refreshed = 0usize;
+    for heat in bg_core::trends::rank_spikes(&headlines, &baseline, BASELINE_DAYS, MIN_SOURCES) {
+        if !bg_db::gaggles::exists(&ctx.db, &heat.topic).await? {
+            continue;
+        }
+        let stories = bg_db::gaggles::stories_for_topic(&ctx.db, &heat.topic, 60).await?;
+        let id = bg_db::gaggles::upsert(
+            &ctx.db,
+            &bg_db::gaggles::NewGaggle {
+                topic: &heat.topic,
+                slug: &bg_core::slug::slugify(&heat.topic),
+                // The conflict branch keeps the existing framing.
+                title: &heat.topic,
+                standfirst: "-",
+                source_count: heat.sources as i32,
+                story_count: stories.len() as i32,
+                model: None,
+            },
+            None,
+        )
+        .await?;
+        bg_db::gaggles::set_stories(&ctx.db, id, &stories).await?;
+        refreshed += 1;
+    }
+    Ok(refreshed)
+}
+
 /// Detect convergence and open a gaggle for anything that clears the bar.
 ///
 /// Returns how many were opened or refreshed.

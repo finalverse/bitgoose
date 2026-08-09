@@ -9,6 +9,7 @@
 //! a concurrency cap. A source that blocks us is a source we lose permanently.
 
 pub mod canonical;
+pub mod crawl;
 pub mod feeds;
 pub mod http;
 pub mod market;

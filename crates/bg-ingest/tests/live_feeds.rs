@@ -227,3 +227,45 @@ async fn robots_is_checked_against_live_hosts() {
         eprintln!("robots {url} -> {allowed}");
     }
 }
+
+/// Crawling real index pages, with no feed involved.
+///
+/// The point of the crawler is independence from other people's RSS, so the
+/// only test that proves anything is one against live markup. Ignored by
+/// default — it needs the network and is a check on the wider web, not on us.
+///
+/// Run with: `cargo test -p bg-ingest --test live_feeds crawl -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn crawling_real_index_pages_finds_articles() {
+    let ua = bg_core::brand::DEFAULT_UA;
+    let client = bg_ingest::http::client(ua).unwrap();
+
+    let mut any_worked = false;
+    for site in [
+        "https://decrypt.co/",
+        "https://www.theblock.co/",
+        "https://techcrunch.com/",
+        "https://arstechnica.com/",
+    ] {
+        if !bg_ingest::robots::allows(&client, ua, site).await {
+            println!("{site}\n  robots.txt disallows — skipped, correctly");
+            continue;
+        }
+        match bg_ingest::crawl::index(&client, ua, site, None, true, 8).await {
+            Ok(found) if !found.is_empty() => {
+                any_worked = true;
+                println!("{site}\n  {} articles found", found.len());
+                for f in found.iter().take(3) {
+                    println!("    {}", f.title.chars().take(70).collect::<String>());
+                }
+            }
+            Ok(_) => println!("{site}\n  no articles matched the heuristics"),
+            Err(e) => println!("{site}\n  error: {e}"),
+        }
+    }
+    assert!(
+        any_worked,
+        "no site yielded articles — the extraction heuristics have stopped working"
+    );
+}
