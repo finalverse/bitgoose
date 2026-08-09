@@ -25,6 +25,22 @@ pub struct SeedSource {
 }
 
 pub const SOURCES: &[SeedSource] = &[
+    // The first source with no feed at all — /rss and /feed both 404, and
+    // robots.txt permits the index. It is read by crawling, which is the whole
+    // reason `bg-ingest::crawl` exists, and it closes an obvious gap in an AI
+    // roster that already carries OpenAI and DeepMind.
+    SeedSource {
+        slug: "anthropic",
+        name: "Anthropic",
+        kind: SourceKind::Html,
+        url: "https://www.anthropic.com/news",
+        homepage: "https://www.anthropic.com",
+        trust: 80,
+        // An index page changes far less often than a wire feed, and each poll
+        // is a full HTML fetch rather than a small XML one.
+        poll_interval_s: 1800,
+        beat: Some(Beat::Ai),
+    },
     SeedSource {
         slug: "coindesk",
         name: "CoinDesk",

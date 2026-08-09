@@ -60,6 +60,10 @@ str_enum! {
     /// How a source is polled.
     pub enum SourceKind {
         Rss => "rss",
+        /// A site read by crawling its index page. No feed involved — see
+        /// `bg-ingest::crawl`. The kind exists so the poller knows which
+        /// mechanism to use; downstream, its items are ordinary items.
+        Html => "html",
         JsonApi => "json_api",
         /// Regulatory filings (SEC EDGAR, court dockets).
         Filing => "filing",

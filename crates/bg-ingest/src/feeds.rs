@@ -89,6 +89,14 @@ async fn poll_inner(
     src: &Source,
     rep: &mut PollReport,
 ) -> Result<()> {
+    // A crawled source has no feed to parse; everything below this point is
+    // about XML. Dispatching here rather than at the caller keeps the two
+    // mechanisms behind one "poll this source" entry point, so the scheduler,
+    // the robots gate and the reporting do not have to know the difference.
+    if src.kind == bg_core::domain::SourceKind::Html {
+        return crawl_inner(db, client, src, rep).await;
+    }
+
     let fetched = conditional_get(
         client,
         &src.url,
@@ -291,6 +299,59 @@ async fn poll_inner(
 ///
 /// Concurrency is capped rather than unbounded so a sweep looks like a handful
 /// of polite readers instead of a burst that trips rate limiting.
+/// Poll a source that publishes no feed, by reading its index page.
+///
+/// Produces exactly the items a feed would: a title, a canonical URL, a
+/// timestamp. The body is left to `readable::fetch` later in the pipeline, the
+/// same as for a feed item whose summary was truncated — so a crawled source
+/// and a fed one are indistinguishable downstream, which is the point.
+async fn crawl_inner(
+    db: &Db,
+    client: &reqwest::Client,
+    src: &Source,
+    rep: &mut PollReport,
+) -> Result<()> {
+    let agent =
+        std::env::var("BG_USER_AGENT").unwrap_or_else(|_| bg_core::brand::DEFAULT_UA.into());
+    let respect = std::env::var("BG_RESPECT_ROBOTS")
+        .map(|v| v != "false")
+        .unwrap_or(true);
+
+    let found = crate::crawl::index(client, &agent, &src.url, None, respect, 40).await?;
+    rep.fetched = found.len();
+
+    for f in &found {
+        // An index page carries no publication time. Using "now" is honest
+        // about what we know — we saw it now — and the news horizon then treats
+        // a crawled item the same as a freshly published one, which is right:
+        // it appeared on the front page just now.
+        let item = NewItem {
+            source_id: src.id,
+            external_id: None,
+            canonical_url: f.url.clone(),
+            url_hash: url_hash(&f.url),
+            title: f.title.clone(),
+            dek: None,
+            authors: Vec::new(),
+            published_at: chrono::Utc::now(),
+            summary_raw: None,
+            body_raw: None,
+            body_hash: None,
+            simhash: simhash64(&f.title),
+            lang: bg_core::text::normalize_lang("en"),
+            image_url: None,
+            video_id: None,
+            beat: crate::relevance::classify(&f.title),
+        };
+        if bg_db::items::insert_new(db, &item).await?.is_some() {
+            rep.inserted += 1;
+        }
+    }
+
+    sources::record_success(db, src.id, None, None).await?;
+    Ok(())
+}
+
 pub async fn poll_due(db: &Db, client: &reqwest::Client, concurrency: usize) -> Vec<PollReport> {
     let due = match sources::due_for_poll(db, 64).await {
         Ok(d) => d,

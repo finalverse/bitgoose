@@ -69,14 +69,17 @@ async fn real_feeds_ingest_end_to_end() {
         return;
     }
 
+    // Against the seed list, not a literal. This said 9 while the roster had
+    // grown to 32 — the fourth hardcoded count in this codebase to drift, and
+    // it went unnoticed because the test is #[ignore]d and CI never runs it.
     let n = seed::seed_sources(&db).await.unwrap();
-    assert_eq!(n, 9);
+    assert_eq!(n, seed::SOURCES.len());
     seed::seed_assets(&db).await.unwrap();
     seed::seed_entities(&db).await.unwrap();
 
     let srcs = bg_db::sources::all(&db).await.unwrap();
     let reports = feeds::poll_all(&db, &client, &srcs, 4).await;
-    assert_eq!(reports.len(), 9);
+    assert_eq!(reports.len(), srcs.len());
 
     let mut ok = 0;
     let mut total_inserted = 0;
@@ -268,4 +271,31 @@ async fn crawling_real_index_pages_finds_articles() {
         any_worked,
         "no site yielded articles — the extraction heuristics have stopped working"
     );
+}
+
+/// A source with no feed at all, read by crawling.
+///
+/// anthropic.com/news returns 404 for /rss and /feed — it is exactly the case
+/// the crawler exists for, and a gap in an AI roster that already carries
+/// OpenAI and DeepMind. Ignored by default; it needs the network.
+#[tokio::test]
+#[ignore]
+async fn a_feedless_source_can_still_be_read() {
+    let ua = bg_core::brand::DEFAULT_UA;
+    let client = bg_ingest::http::client(ua).unwrap();
+    let url = "https://www.anthropic.com/news";
+
+    assert!(
+        bg_ingest::robots::allows(&client, ua, url).await,
+        "robots.txt must permit this before it becomes a source"
+    );
+
+    let found = bg_ingest::crawl::index(&client, ua, url, None, true, 10)
+        .await
+        .expect("crawl should not error");
+    println!("{url}\n  {} articles", found.len());
+    for f in found.iter().take(4) {
+        println!("    {}", f.title.chars().take(70).collect::<String>());
+    }
+    assert!(!found.is_empty(), "no articles found on a feedless source");
 }
