@@ -21,10 +21,41 @@
 
 use std::sync::OnceLock;
 
-/// Open Graph's large-card size. X, LinkedIn, Facebook and WeChat all crop from
-/// 1200x630; anything smaller degrades to a thumbnail on at least one of them.
+/// Open Graph's large-card size. X, LinkedIn and Facebook all render 1200x630
+/// as a full-bleed card; anything smaller degrades to a thumbnail.
 pub const W: u32 = 1200;
 pub const H: u32 = 630;
+
+/// WeChat is the exception, and the reason this module has two shapes.
+///
+/// A link posted in a WeChat chat renders as a **small square thumbnail** beside
+/// the title, centre-cropped from whatever `og:image` provides. Feed a 1200x630
+/// card into that and the crop takes a horizontal band out of the middle —
+/// half a line of headline, no wordmark, no context. Which is why a Reuters
+/// link shows the Reuters roundel and ours showed nothing worth showing.
+///
+/// So WeChat is served a square card built for the crop it is going to perform.
+/// The story is identical; only the geometry differs, the same way a newspaper
+/// sets a different crop for the front page and the app.
+pub const SQ: u32 = 800;
+
+/// Which card to draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// 1200x630 — X, LinkedIn, Facebook, Slack, iMessage.
+    Wide,
+    /// 800x800 — WeChat, and anywhere else that crops to a square.
+    Square,
+}
+
+impl Shape {
+    pub fn size(self) -> (u32, u32) {
+        match self {
+            Self::Wide => (W, H),
+            Self::Square => (SQ, SQ),
+        }
+    }
+}
 
 /// System fonts, loaded once.
 ///
@@ -55,6 +86,27 @@ fn accent(beat: &str) -> &'static str {
         "tech" => "#bb9af7",
         _ => "#f5b301",
     }
+}
+
+/// The goose mark as a path, at a given origin and scale.
+///
+/// The same geometry as `public/favicon.svg`, drawn on a 64-unit grid. A share
+/// card without the mark is a rectangle of text that could belong to anyone —
+/// and on the platforms that crop hardest, the mark is the only part of the
+/// card that survives at thumbnail size.
+fn mark(x: f32, y: f32, size: f32, accent: &str) -> String {
+    let k = size / 64.0;
+    format!(
+        concat!(
+            // `r#"…"#` will not do here: the fill colours contain `"#`, which
+            // closes the literal early.
+            r##"<g transform="translate({} {}) scale({})">"##,
+            r##"<path fill="{}" d="M22 56C20 44 21 34 26 27C30 21 36 18 41 19C47 20 52 25 52 32"##,
+            r##"L62 34L51 41C47 45 41 46 38 45C34 44 31 41 30 37C29 42 29 49 30 56Z"/>"##,
+            r##"<circle cx="42" cy="28" r="2.6" fill="#0b0d10"/></g>"##,
+        ),
+        x, y, k, accent
+    )
 }
 
 /// Escape for XML text content. A headline containing `&` or `<` would
@@ -121,6 +173,14 @@ pub struct Card<'a> {
 /// Separate from rasterising so the layout can be tested without fonts or a
 /// renderer.
 pub fn svg(card: &Card<'_>) -> String {
+    shaped(card, Shape::Wide)
+}
+
+/// Build the card as SVG at a given shape.
+pub fn shaped(card: &Card<'_>, shape: Shape) -> String {
+    if shape == Shape::Square {
+        return square(card);
+    }
     let accent = accent(card.beat);
     // Longer headlines get set smaller so they still fit three lines. The
     // thresholds are where 3 lines stops being enough at the larger size.
@@ -153,7 +213,8 @@ pub fn svg(card: &Card<'_>) -> String {
   <rect width="{W}" height="{H}" fill="#0b0d10"/>
   <rect x="0" y="0" width="10" height="{H}" fill="{accent}"/>
   <g font-family="Ubuntu, DejaVu Sans, Liberation Sans, Arial, sans-serif">
-    <text x="80" y="96" font-size="26" font-weight="700" fill="{accent}"
+    {mark}
+    <text x="150" y="96" font-size="26" font-weight="700" fill="{accent}"
           letter-spacing="4">BITGOOSE</text>
     <text x="80" y="96" font-size="22" fill="#838c97" letter-spacing="3"
           text-anchor="end" transform="translate({label_x} 0)">{section}</text>
@@ -165,6 +226,7 @@ pub fn svg(card: &Card<'_>) -> String {
         W = W,
         H = H,
         accent = accent,
+        mark = mark(80.0, 58.0, 52.0, accent),
         section = esc(&card.section.to_uppercase()),
         label_x = W - 160,
         size = size,
@@ -174,8 +236,73 @@ pub fn svg(card: &Card<'_>) -> String {
     )
 }
 
+/// The square card, for clients that crop to one.
+///
+/// Not the wide card with its sides trimmed. The frame is different and so is
+/// the *viewing size*: a WeChat link preview is a thumbnail about a hundred
+/// pixels across, sitting beside the headline and standfirst which WeChat
+/// renders as text on its own. Setting the headline again inside a hundred
+/// pixels produces grey texture, so the composition is centred on the mark —
+/// the one element that still reads at that size, and the reason a Reuters
+/// link in the same chat window looks like Reuters.
+///
+/// The headline is still set below it, for the clients that show this bigger.
+fn square(card: &Card<'_>) -> String {
+    let accent = accent(card.beat);
+    // Two lines, generously sized. The headline is supporting matter here, not
+    // the subject, and a four-line block would fight the mark.
+    let (size, per_line) = match card.headline.chars().count() {
+        0..=60 => (40.0_f32, 30),
+        _ => (34.0, 36),
+    };
+    let lines = wrap(card.headline, per_line, 2);
+    let mut tspans = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        tspans.push_str(&format!(
+            r#"<tspan x="{}" dy="{}">{}</tspan>"#,
+            SQ / 2,
+            if i == 0 { 0.0 } else { size * 1.25 },
+            esc(line)
+        ));
+    }
+    let n = card.sources.max(1);
+    let mut footer = format!("{n} source{}", if n == 1 { "" } else { "s" });
+    if card.has_analysis {
+        footer.push_str("  ·  with analysis");
+    }
+
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{SQ}" height="{SQ}" viewBox="0 0 {SQ} {SQ}">
+  <rect width="{SQ}" height="{SQ}" fill="#0b0d10"/>
+  <rect x="0" y="0" width="{SQ}" height="10" fill="{accent}"/>
+  <g font-family="Ubuntu, DejaVu Sans, Liberation Sans, Arial, sans-serif" text-anchor="middle">
+    {mark}
+    <text x="{mid}" y="450" font-size="56" font-weight="700" fill="{accent}"
+          letter-spacing="8">BITGOOSE</text>
+    <text x="{mid}" y="492" font-size="24" fill="#838c97" letter-spacing="6">{section}</text>
+    <text x="{mid}" y="580" font-size="{size}" font-weight="700" fill="#edeae3">{tspans}</text>
+    <text x="{mid}" y="742" font-size="24" fill="#5c646e">{footer}</text>
+  </g>
+</svg>"##,
+        SQ = SQ,
+        mid = SQ / 2,
+        accent = accent,
+        // Centred and large: at thumbnail size this is the entire card.
+        mark = mark((SQ as f32 - 230.0) / 2.0, 150.0, 230.0, accent),
+        section = esc(&card.section.to_uppercase()),
+        size = size,
+        tspans = tspans,
+        footer = esc(&footer),
+    )
+}
+
 /// Rasterise a card to PNG. `None` when no font is available.
 pub fn png(card: &Card<'_>) -> Option<Vec<u8>> {
+    png_shaped(card, Shape::Wide)
+}
+
+/// Rasterise at a given shape. `None` when no font is available.
+pub fn png_shaped(card: &Card<'_>, shape: Shape) -> Option<Vec<u8>> {
     let db = fonts()?;
     let mut opts = resvg::usvg::Options {
         fontdb: std::sync::Arc::new(db.clone()),
@@ -183,8 +310,9 @@ pub fn png(card: &Card<'_>) -> Option<Vec<u8>> {
     };
     opts.font_family = "Ubuntu".to_string();
 
-    let tree = resvg::usvg::Tree::from_str(&svg(card), &opts).ok()?;
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(W, H)?;
+    let (w, h) = shape.size();
+    let tree = resvg::usvg::Tree::from_str(&shaped(card, shape), &opts).ok()?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)?;
     resvg::render(
         &tree,
         resvg::tiny_skia::Transform::identity(),
@@ -284,5 +412,30 @@ mod tests {
         seen.sort_unstable();
         seen.dedup();
         assert_eq!(seen.len(), 4, "two desks share an accent");
+    }
+}
+
+#[cfg(test)]
+mod render_preview {
+    use super::*;
+    /// Writes both cards to $BG_CARD_OUT so they can be looked at. A card that
+    /// compiles is not a card that reads.
+    #[test]
+    fn emit() {
+        let Ok(dir) = std::env::var("BG_CARD_OUT") else {
+            return;
+        };
+        let c = Card {
+            headline: "China says Long March 7A rocket failed after flight anomaly",
+            beat: "ai",
+            section: "Space",
+            sources: 6,
+            has_analysis: true,
+        };
+        for (shape, name) in [(Shape::Wide, "wide"), (Shape::Square, "square")] {
+            if let Some(b) = png_shaped(&c, shape) {
+                std::fs::write(format!("{dir}/card-{name}.png"), b).unwrap();
+            }
+        }
     }
 }

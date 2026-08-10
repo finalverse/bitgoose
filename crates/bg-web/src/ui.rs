@@ -230,6 +230,12 @@ pub fn ShareMeta(
     /// of identical logos telling the reader nothing.
     #[prop(optional, into)]
     card_slug: String,
+    /// Advertise the square card rather than the wide one.
+    ///
+    /// Set for WeChat, whose preview is a small centre-cropped square. The
+    /// story is the same; only the crop the client is going to perform differs.
+    #[prop(optional)]
+    square: bool,
     /// `article` for a story, `website` for everything else.
     #[prop(default = "website")]
     kind: &'static str,
@@ -259,13 +265,24 @@ pub fn ShareMeta(
     // `summary_large_image` card renders as a blurred smear or is dropped
     // outright. Where the URL states a width we can read, hold it to the size
     // the card needs; otherwise fall back to our own.
+    // `image`, when set, is already a URL on our own domain — the server only
+    // hands over a mirror it has on disk. It used to be the publisher's CDN
+    // link, which is how a story sourced from YouTube came to advertise
+    // `i.ytimg.com`: unreachable from mainland China, so WeChat rendered a grey
+    // placeholder for the one audience that button exists to serve.
     let usable = !image.trim().is_empty() && declared_width(&image).is_none_or(|w| w >= 600);
     let (img, own_card) = if usable {
         (image, false)
     } else if !card_slug.trim().is_empty() {
         // Generated per story. Still our own domain and our own dimensions, so
         // the width/height declarations below stay truthful.
-        (format!("{base}/og/{card_slug}.png"), true)
+        (
+            format!(
+                "{base}/og/{card_slug}.png{}",
+                if square { "?sq=1" } else { "" }
+            ),
+            true,
+        )
     } else {
         (format!("{base}/og-default.png"), true)
     };
@@ -288,13 +305,22 @@ pub fn ShareMeta(
             .then(|| {
                 view! {
                     <>
-                        <Meta property="og:image:width" content="1200" />
-                        <Meta property="og:image:height" content="630" />
+                        <Meta
+                            property="og:image:width"
+                            content=if square { "800" } else { "1200" }
+                        />
+                        <Meta
+                            property="og:image:height"
+                            content=if square { "800" } else { "630" }
+                        />
                     </>
                 }
             })}
         <Meta property="og:image:alt" content=title.clone() />
-        <Meta name="twitter:card" content="summary_large_image" />
+        <Meta
+            name="twitter:card"
+            content=if square { "summary" } else { "summary_large_image" }
+        />
         <Meta name="twitter:title" content=title />
         <Meta name="twitter:description" content=description />
         <Meta name="twitter:image" content=img.clone() />
@@ -446,13 +472,12 @@ pub fn ShareBar(title: String, url: String) -> impl IntoView {
         "https://www.linkedin.com/sharing/share-offsite/?url={}",
         urlencode(&url)
     );
-    // Rendered by an image service rather than a JS library: a QR is a static
-    // image, and shipping a generator to every reader to draw one on demand is
-    // weight for a feature most will not use.
-    let qr = format!(
-        "https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data={}",
-        urlencode(&url)
-    );
+    // Drawn here, not fetched. This used to be an <img> from api.qrserver.com,
+    // which asked a third party for an image on every page view, told them
+    // which story each reader was thinking of sharing, and — since the QR
+    // exists specifically so a desktop reader can scan the page into WeChat —
+    // failed for the one audience it was built for. See `crate::qr`.
+    let qr = crate::qr::svg(&url, 180);
 
     let copy_url = url.clone();
     let copy = move |_| {
@@ -493,7 +518,9 @@ pub fn ShareBar(title: String, url: String) -> impl IntoView {
             <details class="share-qr">
                 <summary class="share-btn">"WeChat"</summary>
                 <div class="share-qr-pop">
-                    <img src=qr alt="QR code linking to this story" width="180" height="180" />
+                    // Inline markup rather than an <img>: no second request, and
+                    // nothing to fail on a slow or filtered network.
+                    <div class="share-qr-img" inner_html=qr.unwrap_or_default()></div>
                     <p>"Scan with WeChat to open and share this story."</p>
                 </div>
             </details>

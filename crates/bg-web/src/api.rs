@@ -515,6 +515,38 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         .map(|r| (r.name.clone(), r.url.clone()))
         .unwrap_or_default();
 
+    // Our copy or our card, never a hotlink.
+    //
+    // The two differ in what they do while the mirror is cold. A *reader* is
+    // better served by the publisher's URL — the picture appears now, and if
+    // their network cannot reach that CDN they still have the whole article. A
+    // *crawler* is not: it gets one fetch, and pointing it at a host it may not
+    // be able to reach is how a shared link came to render as a grey
+    // placeholder. So the crawler is given the card we can always serve, and
+    // the mirror fills in behind for the next share.
+    let (image_url, share_image) = if image_url.is_empty() {
+        (image_url, String::new())
+    } else if crate::ogroute::mirrored(&story.slug).is_some() {
+        let ours = format!("{}/img/{}", base.trim_end_matches('/'), story.slug);
+        (ours.clone(), ours)
+    } else {
+        crate::ogroute::warm(db.clone(), story.slug.clone());
+        (image_url, String::new())
+    };
+
+    // WeChat crops previews to a square. Asking it here, from the request that
+    // is reading the page, rather than at image-fetch time: the agent that
+    // fetches the picture is often not the one that parsed the HTML.
+    let square_card = leptos_axum::extract::<axum::http::HeaderMap>()
+        .await
+        .ok()
+        .and_then(|h| {
+            h.get(axum::http::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .map(|ua| ua.contains("MicroMessenger"))
+        })
+        .unwrap_or(false);
+
     // schema.org NewsArticle. `citation` carries every source URL, which is
     // both honest and the structured-data way to say "this is synthesis over
     // other people's reporting, and here is whose".
@@ -559,6 +591,8 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         image_url,
         image_credit,
         image_credit_url,
+        share_image,
+        square_card,
         video_id: story.video_id.clone().unwrap_or_default(),
         headline,
         dek: article

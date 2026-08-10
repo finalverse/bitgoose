@@ -12,6 +12,7 @@ pub mod ogcard;
 #[cfg(feature = "ssr")]
 pub mod ogroute;
 pub mod pages;
+pub mod qr;
 pub mod ui;
 
 use leptos::prelude::*;
@@ -62,7 +63,16 @@ pub fn App() -> impl IntoView {
     view! {
         <Title text="BitGoose — The AI-era newsroom" />
         <Link rel="alternate" type_="application/rss+xml" href="/feed.xml" attr:title="BitGoose" />
+        // An SVG favicon on its own was the whole icon story here, and a great
+        // many clients cannot use one. WeChat, iOS, Android and most link
+        // unfurlers want a raster icon, and when the site does not offer one
+        // they show a generic placeholder — which is exactly the grey chain
+        // link a shared BitGoose story rendered as, next to a Reuters link
+        // showing its roundel.
         <Link rel="icon" type_="image/svg+xml" href="/favicon.svg" />
+        <Link rel="icon" type_="image/x-icon" href="/favicon.ico" sizes="any" />
+        <Link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+        <Link rel="manifest" href="/site.webmanifest" />
         // No site-wide description here on purpose: pages set their own via
         // `ShareMeta`, and emitting one at both levels left two in the document
         // — a crawler takes the first, so every shared story was described with

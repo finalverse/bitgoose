@@ -71,6 +71,19 @@ pub struct StoryPage {
     pub image_url: String,
     pub image_credit: String,
     pub image_credit_url: String,
+    /// What to advertise to crawlers as this story's picture — always a URL on
+    /// our own domain, never the publisher's CDN.
+    ///
+    /// Decided on the server because the decision is "is our copy already on
+    /// disk?", and pointing a crawler at a mirror we have not fetched yet just
+    /// moves the fetch onto its clock. Empty means "use the generated card".
+    pub share_image: String,
+    /// Whether this render should advertise the square card.
+    ///
+    /// True for WeChat, which shows link previews as a small centre-cropped
+    /// square; a 1200x630 card cropped that way is a band out of the middle of
+    /// a headline.
+    pub square_card: bool,
     /// Provider video id when the story came from a video source. Rendered as
     /// an embedded player in place of the lead image.
     pub video_id: String,

@@ -834,7 +834,8 @@ fn StoryMeta(story: StoryPage) -> impl IntoView {
             title=story.headline.clone()
             description=desc.clone()
             url=story.canonical.clone()
-            image=story.image_url.clone()
+            image=story.share_image.clone()
+            square=story.square_card
             card_slug=story.slug.clone()
             published_time=story.iso_published.clone()
             modified_time=story.iso_modified.clone()
