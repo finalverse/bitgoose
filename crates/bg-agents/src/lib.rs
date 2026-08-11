@@ -68,6 +68,23 @@ pub enum FlockError {
     Other(String),
 }
 
+impl FlockError {
+    /// Whether this is the provider being unavailable rather than an answer.
+    ///
+    /// The distinction decides what a stage may conclude from a failure. A
+    /// model that says "no" has decided something; a model that is rate limited
+    /// has decided nothing, and treating the two alike is how the Curator came
+    /// to seal thousands of items into single-source stories during the hours
+    /// a free tier spends refusing requests.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Llm(e) => e.is_retryable(),
+            Self::BudgetExhausted { .. } => true,
+            Self::Db(_) | Self::Ingest(_) | Self::Sql(_) | Self::Other(_) => false,
+        }
+    }
+}
+
 /// Tuning knobs, all environment-overridable.
 #[derive(Debug, Clone)]
 pub struct FlockConfig {

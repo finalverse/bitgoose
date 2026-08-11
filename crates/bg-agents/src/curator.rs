@@ -81,13 +81,28 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
         return Ok(0);
     }
     let system = crate::system_prompt(ctx, AgentRole::Curator).await;
-    let mut attached = 0usize;
+
+    // Hoisted out of the loop. This was one database round trip per item, and
+    // the window it returns does not change between them — except for stories
+    // opened by this very pass, which are appended below so two items about one
+    // event arriving in the same batch still find each other.
+    let mut candidates = bg_db::items::clustering_candidates(&ctx.db, WINDOW_HOURS, 300).await?;
+
+    // What the window's vocabulary is worth. Built from the candidates *and*
+    // the pending items, so a subject arriving now is measured against how
+    // often it is actually being said rather than against nothing.
+    let corpus = bg_core::samestory::Corpus::of(
+        &candidates
+            .iter()
+            .chain(pending.iter())
+            .map(|i| i.title.clone())
+            .collect::<Vec<_>>(),
+    );
+
+    let (mut attached, mut deferred) = (0usize, 0usize);
 
     for item in pending {
-        // Items Gosling judged not-news get a story so they leave the queue,
-        // but with a score that keeps them off every surface.
-        let candidates = bg_db::items::clustering_candidates(&ctx.db, WINDOW_HOURS, 300).await?;
-        let best = best_match(&item, &candidates);
+        let best = best_match(&item, &candidates, &corpus);
 
         let target: Option<StoryId> = match best {
             Some((cand, score)) if score.decisive => cand.story_id,
@@ -95,11 +110,12 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
                 // Ambiguous: ask.
                 let cand_title = cand.title.clone();
                 let item_title = item.title.clone();
+                let story_id = cand.story_id;
                 let system = system.clone();
-                let same = stage(
+                let verdict = stage(
                     ctx,
                     AgentRole::Curator,
-                    cand.story_id,
+                    story_id,
                     "adjudicate",
                     |_run| async move {
                         let prompt = format!(
@@ -112,20 +128,37 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
                                 .with_max_tokens(500);
                         let (parsed, completion) = ctx.llm.complete_json::<SameEvent>(&req).await?;
                         let note = format!(
-                            "same_event={} (simhash {}, trigram {:.2})",
-                            parsed.same_event, score.hamming, score.trigram
+                            "same_event={} (simhash {}, trigram {:.2}, salience {:.2}/{})",
+                            parsed.same_event,
+                            score.hamming,
+                            score.trigram,
+                            score.overlap.score,
+                            score.overlap.rare_hits
                         );
                         Ok(StageOutput::with(parsed.same_event, completion, note))
                     },
                 )
-                .await
-                // A failed adjudication must not merge by default — a split is
-                // the safe failure.
-                .unwrap_or(false);
-                if same {
-                    cand.story_id
-                } else {
-                    None
+                .await;
+
+                match verdict {
+                    Ok(true) => story_id,
+                    Ok(false) => None,
+                    // The provider being unavailable is not a verdict of "no".
+                    //
+                    // This used to fall through to `false`, which opened a new
+                    // story — and an item that has a story is never offered for
+                    // clustering again. So every hour the free tier spent
+                    // refusing requests permanently minted single-source
+                    // stories that could not be merged afterwards, which is a
+                    // large part of how 1,407 of 1,438 came to have one source.
+                    // Leaving it unclustered costs one deferred item and keeps
+                    // the decision available.
+                    Err(e) if e.is_transient() => {
+                        debug!(item = %item.title, "deferring: {e}");
+                        deferred += 1;
+                        continue;
+                    }
+                    Err(_) => None,
                 }
             }
             None => None,
@@ -161,23 +194,41 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
             }
         };
 
+        // Now a candidate itself, so the next item in this batch can match it.
+        let mut placed = item.clone();
+        placed.story_id = Some(story_id);
+        candidates.push(placed);
+
         rescore(ctx, story_id).await?;
         attached += 1;
     }
 
-    info!(attached, "curator pass complete");
+    info!(attached, deferred, "curator pass complete");
     Ok(attached)
 }
 
 struct MatchScore {
     hamming: u32,
     trigram: f32,
-    /// True when the lexical signals settle it with no model call.
+    /// What rare vocabulary the two headlines share. The signal that actually
+    /// identifies an event — see [`bg_core::samestory`].
+    overlap: bg_core::samestory::Overlap,
+    /// True when the deterministic signals settle it with no model call.
     decisive: bool,
 }
 
-/// Best lexical match among candidates, if any is worth considering.
-fn best_match<'a>(item: &RawItem, candidates: &'a [RawItem]) -> Option<(&'a RawItem, MatchScore)> {
+/// Best match among candidates, if any is worth considering.
+///
+/// Three signals, and they answer different questions. SimHash and trigram
+/// similarity ask *how alike is the wording*, which two newsrooms covering one
+/// event deliberately make different. Salience overlap asks *what rare things
+/// do both name*, which the event decides rather than the writer — so it is the
+/// one that carries most of the weight here.
+fn best_match<'a>(
+    item: &RawItem,
+    candidates: &'a [RawItem],
+    corpus: &bg_core::samestory::Corpus,
+) -> Option<(&'a RawItem, MatchScore)> {
     let mut best: Option<(&RawItem, MatchScore)> = None;
 
     for c in candidates {
@@ -192,28 +243,39 @@ fn best_match<'a>(item: &RawItem, candidates: &'a [RawItem]) -> Option<(&'a RawI
 
         let h = hamming(item.simhash as u64, c.simhash as u64);
         let t = trigram_similarity(&item.title, &c.title);
-        if h > SIMHASH_FAR && t < TRIGRAM_FLOOR {
+        let o = bg_core::samestory::overlap(&item.title, &c.title, corpus);
+        // Nothing in common on any of the three: not worth carrying further.
+        if h > SIMHASH_FAR && t < TRIGRAM_FLOOR && !o.worth_asking() {
             continue;
         }
 
-        // Both signals agreeing is what makes it decisive; either alone is the
-        // ambiguous band the model adjudicates.
-        let decisive = h <= SIMHASH_SAME && t >= TRIGRAM_SAME;
+        // Either route settles it. Near-identical wording still means the same
+        // story — a syndicated wire item runs verbatim in several places — and
+        // so does agreement on two rare specifics, which is what independent
+        // reporting of one event looks like.
+        let decisive = (h <= SIMHASH_SAME && t >= TRIGRAM_SAME) || o.confident();
         let score = MatchScore {
             hamming: h,
             trigram: t,
+            overlap: o,
             decisive,
         };
 
+        // Ranked on shared specifics first. Ordering by trigram alone picked
+        // the most similarly *worded* candidate, which on a page of headlines
+        // about one subject is not the same as the most likely match.
         let better = match &best {
             None => true,
-            Some((_, b)) => score.trigram > b.trigram,
+            Some((_, b)) => (score.overlap.score, score.trigram) > (b.overlap.score, b.trigram),
         };
         if better {
             best = Some((c, score));
         }
     }
-    best
+    // A candidate that neither settles it nor justifies a model call is not a
+    // match — returning it would spend a request on a pair the arithmetic has
+    // already dismissed.
+    best.filter(|(_, s)| s.decisive || s.overlap.worth_asking() || s.trigram >= TRIGRAM_FLOOR)
 }
 
 async fn item_category(ctx: &Ctx, item: &RawItem) -> Category {
@@ -402,6 +464,12 @@ mod tests {
     use bg_core::ids::{RawItemId, SourceId};
     use bg_core::text::simhash64;
 
+    /// Weights drawn from the items under test, the same way the live pass
+    /// draws them from its window.
+    fn corpus_of(items: &[RawItem]) -> bg_core::samestory::Corpus {
+        bg_core::samestory::Corpus::of(&items.iter().map(|i| i.title.clone()).collect::<Vec<_>>())
+    }
+
     fn item(source: SourceId, title: &str) -> RawItem {
         RawItem {
             id: RawItemId::new(),
@@ -433,7 +501,12 @@ mod tests {
         let b_src = SourceId::new();
         let a = item(a_src, "Solana outage halts block production for four hours");
         let b = item(b_src, "Solana outage halts block production for four hours");
-        let (_, score) = best_match(&a, std::slice::from_ref(&b)).expect("should match");
+        let (_, score) = best_match(
+            &a,
+            std::slice::from_ref(&b),
+            &corpus_of(&[a.clone(), b.clone()]),
+        )
+        .expect("should match");
         assert!(
             score.decisive,
             "identical headlines must not need a model call"
@@ -447,7 +520,12 @@ mod tests {
             SourceId::new(),
             "SEC approves three spot ether ETF applications",
         );
-        assert!(best_match(&a, std::slice::from_ref(&b)).is_none());
+        assert!(best_match(
+            &a,
+            std::slice::from_ref(&b),
+            &corpus_of(&[a.clone(), b.clone()])
+        )
+        .is_none());
     }
 
     #[test]
@@ -460,7 +538,11 @@ mod tests {
             SourceId::new(),
             "Venue halts withdrawals following seventy million dollar breach",
         );
-        match best_match(&a, std::slice::from_ref(&b)) {
+        match best_match(
+            &a,
+            std::slice::from_ref(&b),
+            &corpus_of(&[a.clone(), b.clone()]),
+        ) {
             Some((_, s)) => assert!(
                 !s.decisive,
                 "a loose paraphrase should be adjudicated, not auto-merged"
@@ -475,7 +557,12 @@ mod tests {
         let a = item(src, "Solana outage halts block production for four hours");
         let b = item(src, "Solana outage halts block production for four hours");
         assert!(
-            best_match(&a, std::slice::from_ref(&b)).is_none(),
+            best_match(
+                &a,
+                std::slice::from_ref(&b),
+                &corpus_of(&[a.clone(), b.clone()])
+            )
+            .is_none(),
             "one outlet publishing twice is not two sources"
         );
     }

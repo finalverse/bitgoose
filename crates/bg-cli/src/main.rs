@@ -127,6 +127,32 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Re-examine published single-source stories and fold together the ones
+    /// that were always one event.
+    ///
+    /// The Curator only ever sees an item once. Everything it failed to merge
+    /// while the matcher was too strict — or while the model it depended on was
+    /// rate limited — is still sitting on the site as its own story, and no
+    /// amount of fixing the live path repairs that. This is the repair.
+    ///
+    /// Deterministic: the same rare-vocabulary test the Curator now uses, at
+    /// its confident threshold, with no model in the loop. Dry by default.
+    Recluster {
+        /// How far back to look.
+        #[arg(long, default_value_t = 336)]
+        hours: i64,
+        #[arg(long, default_value_t = 1500)]
+        limit: i64,
+        /// How far apart two stories may have been first seen and still be one
+        /// event. Beyond this it is a running story, which is what a gaggle is
+        /// for — the CLARITY Act ran for a fortnight and is a dozen events, not
+        /// one.
+        #[arg(long, default_value_t = 48)]
+        apart_hours: i64,
+        /// Actually fold them. Without this, only reports.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Run the Skein over published stories: what it means, where it goes.
     ///
     /// Skips any story without enough real source text behind it. Run `enrich`
@@ -366,6 +392,119 @@ async fn main() -> Result<()> {
             println!("{done} refreshed, {failed} failed");
         }
 
+        Cmd::Recluster {
+            hours,
+            limit,
+            apart_hours,
+            apply,
+        } => {
+            let db = Db::connect(&url).await?;
+            // Before anything else: make the counter agree with the evidence.
+            // A story that has three outlets attached but says one is already
+            // wrong, and would also be picked up here as a singleton needing a
+            // merge it has already had.
+            match bg_db::stories::reconcile_source_counts(&db).await {
+                Ok(0) => {}
+                Ok(n) => println!("corrected source_count on {n} stories"),
+                Err(e) => eprintln!("could not reconcile source counts: {e}"),
+            }
+
+            let stories = bg_db::stories::singletons(&db, hours, limit).await?;
+            println!("examining {} single-source stories", stories.len());
+            let corpus = bg_core::samestory::Corpus::of(
+                &stories
+                    .iter()
+                    .map(|(_, t, _)| t.clone())
+                    .collect::<Vec<_>>(),
+            );
+
+            // Union-find, because merges are transitive: where A matches B and
+            // B matches C, the answer is one story of three sources, not two
+            // pairs. Folding pairwise in sequence would leave the second merge
+            // pointing at a story that has already been withdrawn.
+            let mut parent: Vec<usize> = (0..stories.len()).collect();
+            fn find(p: &mut [usize], mut i: usize) -> usize {
+                while p[i] != i {
+                    p[i] = p[p[i]];
+                    i = p[i];
+                }
+                i
+            }
+            let apart = apart_hours * 3600;
+            let mut pairs = 0usize;
+            for i in 0..stories.len() {
+                for j in (i + 1)..stories.len() {
+                    // Same event means same few days. Two reports on one bill a
+                    // fortnight apart are two events.
+                    if (stories[i].2 - stories[j].2).abs() > apart {
+                        continue;
+                    }
+                    let o = bg_core::samestory::overlap(&stories[i].1, &stories[j].1, &corpus);
+                    if !o.confident() {
+                        continue;
+                    }
+                    let (a, b) = (find(&mut parent, i), find(&mut parent, j));
+                    if a == b {
+                        continue;
+                    }
+                    // Against the cluster's representative, not merely against
+                    // some member of it. Chained agreement is not agreement:
+                    // the first run of this reached three unrelated finance
+                    // stories from a crypto bill, one "Wall Street" at a time.
+                    let (keep, fold) = if stories[a].2 <= stories[b].2 {
+                        (a, b)
+                    } else {
+                        (b, a)
+                    };
+                    if keep != i
+                        && keep != j
+                        && !bg_core::samestory::overlap(&stories[keep].1, &stories[fold].1, &corpus)
+                            .confident()
+                    {
+                        continue;
+                    }
+                    pairs += 1;
+                    parent[fold] = keep;
+                }
+            }
+
+            let mut groups: std::collections::HashMap<usize, Vec<usize>> = Default::default();
+            for i in 0..stories.len() {
+                let r = find(&mut parent, i);
+                groups.entry(r).or_default().push(i);
+            }
+            let groups: Vec<_> = groups.into_iter().filter(|(_, v)| v.len() > 1).collect();
+            let folded: usize = groups.iter().map(|(_, v)| v.len() - 1).sum();
+
+            println!(
+                "{pairs} confident pairs -> {} clusters covering {} stories ({folded} would be folded away)",
+                groups.len(),
+                folded + groups.len()
+            );
+            for (root, members) in groups.iter().take(if apply { 0 } else { 12 }) {
+                println!("\n  KEEP  {}", stories[*root].1);
+                for m in members.iter().filter(|m| *m != root) {
+                    println!("  fold  {}", stories[*m].1);
+                }
+            }
+
+            if !apply {
+                println!("\ndry run — nothing changed. Re-run with --apply to fold them.");
+                return Ok(());
+            }
+            let mut moved = 0u64;
+            for (root, members) in &groups {
+                for m in members.iter().filter(|m| *m != root) {
+                    moved +=
+                        bg_db::stories::merge_into(&db, stories[*m].0, stories[*root].0).await?;
+                }
+            }
+            println!(
+                "folded {folded} stories into {}, moving {moved} items",
+                groups.len()
+            );
+            println!("now run `bg run --once` so the Sentinel re-verifies the widened claims");
+        }
         Cmd::Retract { dry_run } => {
             let db = Db::connect(&url).await?;
             if dry_run {
@@ -607,6 +746,45 @@ async fn doctor(url: &str) -> Result<()> {
         println!("  triage queue: {waiting} waiting, {lapsed} lapsed past the news horizon");
     }
 
+    // Corroboration is the product. A ratio this visible is the difference
+    // between noticing that clustering has stopped working and finding out
+    // weeks later from the front page.
+    if let Ok((alone, total)) = bg_db::stories::corroboration_health(&db, 14).await {
+        if total > 0 {
+            let pct = (alone as f64 / total as f64) * 100.0;
+            let mark = if pct > 90.0 {
+                "!!"
+            } else if pct > 70.0 {
+                " ?"
+            } else {
+                " ok"
+            };
+            println!(
+                "{mark} corroboration: {alone} of {total} published stories in 14d have a single source ({pct:.0}%)"
+            );
+            if pct > 90.0 {
+                println!("     clustering is not merging; try `bg recluster --hours 336`");
+            }
+        }
+    }
+
+    // Loud, because nothing else surfaces it: these stories render as one
+    // event on the site and are not one. They are excluded from analysis but
+    // still readable, so silence here would mean nobody ever finds them.
+    match bg_db::analyses::incoherent_stories(&db).await {
+        Ok(bad) if !bad.is_empty() => {
+            println!(
+                "\n  ! {} story(ies) merge too many items to be one event:",
+                bad.len()
+            );
+            for (slug, n) in bad.iter().take(10) {
+                println!("    {n:>3} items  /story/{slug}");
+            }
+            println!("    (stub-era clustering; re-cluster or kill them)");
+        }
+        _ => {}
+    }
+
     Ok(())
 }
 
@@ -660,23 +838,6 @@ async fn stats(url: &str) -> Result<()> {
     // budget can process and the horizon or the source list needs attention.
     if let Ok((waiting, lapsed)) = bg_db::items::queue_health(&db).await {
         println!("  triage queue: {waiting} waiting, {lapsed} lapsed past the news horizon");
-    }
-
-    // Loud, because nothing else surfaces it: these stories render as one
-    // event on the site and are not one. They are excluded from analysis but
-    // still readable, so silence here would mean nobody ever finds them.
-    match bg_db::analyses::incoherent_stories(&db).await {
-        Ok(bad) if !bad.is_empty() => {
-            println!(
-                "\n  ! {} story(ies) merge too many items to be one event:",
-                bad.len()
-            );
-            for (slug, n) in bad.iter().take(10) {
-                println!("    {n:>3} items  /story/{slug}");
-            }
-            println!("    (stub-era clustering; re-cluster or kill them)");
-        }
-        _ => {}
     }
 
     println!("\n  recent stories:");

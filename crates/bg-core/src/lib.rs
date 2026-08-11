@@ -24,6 +24,7 @@ pub mod error;
 pub mod ids;
 pub mod media;
 pub mod policy;
+pub mod samestory;
 pub mod slug;
 pub mod text;
 pub mod trends;

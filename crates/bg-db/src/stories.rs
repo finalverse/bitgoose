@@ -488,3 +488,146 @@ pub async fn retract_incoherent(db: &Db, max_items: i64) -> Result<u64> {
     .await?;
     Ok(r.rows_affected())
 }
+
+/// Single-source published stories in a recent window, with their seed title.
+///
+/// The population `bg recluster` works over. Restricted to one source because
+/// a story that already has corroboration has been through the merge path and
+/// succeeded; the ones worth revisiting are the ones that never found a match.
+pub async fn singletons(db: &Db, hours: i64, limit: i64) -> Result<Vec<(StoryId, String, i64)>> {
+    let rows = sqlx::query(
+        // `first_seen_at`, not the publication time: the story that saw the
+        // event first is the one whose URL should survive a fold, whatever
+        // order the desk got round to publishing them in.
+        "SELECT s.id, s.title, extract(epoch FROM s.first_seen_at)::bigint AS ts
+           FROM stories s
+          WHERE s.status = 'published'
+            AND s.source_count <= 1
+            AND s.first_seen_at > now() - make_interval(hours => $1::int)
+          ORDER BY s.first_seen_at DESC
+          LIMIT $2",
+    )
+    .bind(hours as i32)
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok((
+                StoryId::from(r.try_get::<uuid::Uuid, _>("id")?),
+                r.try_get::<String, _>("title")?,
+                r.try_get::<i64, _>("ts")?,
+            ))
+        })
+        .collect()
+}
+
+/// Fold `from` into `into`: move its items across, then retire the husk.
+///
+/// `killed`, the same state a retraction leaves behind — the status set has no
+/// "withdrawn", and `stories_published_has_ts` requires `published_at` to be
+/// null for anything not published. Killed rather than deleted: a published URL
+/// that starts returning 404 is a broken link in somebody's timeline, and the
+/// editor note says where its reporting went.
+pub async fn merge_into(db: &Db, from: StoryId, into: StoryId) -> Result<u64> {
+    let mut tx = db.pool.begin().await?;
+    // An item already attached to the target would violate the join's primary
+    // key, so those are dropped rather than moved — the corroboration is
+    // already recorded.
+    sqlx::query(
+        "DELETE FROM story_items a
+          WHERE a.story_id = $1
+            AND EXISTS (SELECT 1 FROM story_items b
+                         WHERE b.story_id = $2 AND b.raw_item_id = a.raw_item_id)",
+    )
+    .bind(from.into_uuid())
+    .bind(into.into_uuid())
+    .execute(&mut *tx)
+    .await?;
+
+    let moved = sqlx::query(
+        "UPDATE story_items SET story_id = $2, role = 'corroborating' WHERE story_id = $1",
+    )
+    .bind(from.into_uuid())
+    .bind(into.into_uuid())
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+
+    sqlx::query("UPDATE raw_items SET story_id = $2 WHERE story_id = $1")
+        .bind(from.into_uuid())
+        .bind(into.into_uuid())
+        .execute(&mut *tx)
+        .await?;
+
+    sqlx::query(
+        "UPDATE stories
+            SET status = 'killed',
+                editor_note = 'folded into another story: same event, reported separately',
+                published_at = NULL,
+                updated_at = now()
+          WHERE id = $1",
+    )
+    .bind(from.into_uuid())
+    .execute(&mut *tx)
+    .await?;
+
+    // `source_count` is denormalised, and a fold that moves the evidence but
+    // leaves the count behind is worse than not folding: the page would then
+    // list three outlets and claim one. Recomputed from the items themselves,
+    // in the same transaction, so the two can never disagree.
+    //
+    // Newsworthiness and velocity are deliberately not touched — those are the
+    // Curator's arithmetic and the next pass will redo them.
+    sqlx::query(
+        "UPDATE stories SET source_count = (
+             SELECT count(DISTINCT r.source_id) FROM raw_items r WHERE r.story_id = $1
+         ), updated_at = now() WHERE id = $1",
+    )
+    .bind(into.into_uuid())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(moved)
+}
+
+/// Published stories, and how many of them nobody else corroborated.
+///
+/// The number that matters most on a site whose proposition is *how many
+/// independent outlets confirm this*. It sat at 1,407 of 1,438 for weeks
+/// without anything saying so, because nothing was looking.
+pub async fn corroboration_health(db: &Db, days: i64) -> Result<(i64, i64)> {
+    let row = sqlx::query(
+        "SELECT count(*) FILTER (WHERE source_count <= 1)::bigint AS alone,
+                count(*)::bigint AS total
+           FROM stories
+          WHERE status = 'published'
+            AND first_seen_at > now() - make_interval(days => $1::int)",
+    )
+    .bind(days as i32)
+    .fetch_one(&db.pool)
+    .await?;
+    Ok((row.try_get("alone")?, row.try_get("total")?))
+}
+
+/// Bring every published story's `source_count` back in line with its items.
+///
+/// The column is denormalised and therefore able to drift, and it is not a
+/// cosmetic number here — it is the corroboration claim the whole site rests
+/// on. Cheap, idempotent, and run before every recluster so a fold that
+/// predates the count being maintained cannot leave a story understating its
+/// own evidence.
+pub async fn reconcile_source_counts(db: &Db) -> Result<u64> {
+    let r = sqlx::query(
+        "UPDATE stories s
+            SET source_count = c.n, updated_at = now()
+           FROM (SELECT st.id, count(DISTINCT r.source_id)::int AS n
+                   FROM stories st JOIN raw_items r ON r.story_id = st.id
+                  GROUP BY st.id) c
+          WHERE s.id = c.id AND s.source_count IS DISTINCT FROM c.n",
+    )
+    .execute(&db.pool)
+    .await?;
+    Ok(r.rows_affected())
+}
