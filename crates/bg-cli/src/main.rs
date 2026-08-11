@@ -409,6 +409,41 @@ async fn main() -> Result<()> {
                 Err(e) => eprintln!("could not reconcile source counts: {e}"),
             }
 
+            // Folds made before `merged_into` existed left their URLs serving
+            // an empty 200. The destination is gone from the join table by
+            // then, so it is reconstructed the only way left: re-run the same
+            // matcher over the husk's title against what is still published.
+            match bg_db::stories::folds_missing_destination(&db, hours).await {
+                Ok((orphans, live)) if !orphans.is_empty() => {
+                    let corpus = bg_core::samestory::Corpus::of(
+                        &live
+                            .iter()
+                            .chain(orphans.iter())
+                            .map(|(_, t, _)| t.clone())
+                            .collect::<Vec<_>>(),
+                    );
+                    let mut fixed = 0usize;
+                    for (id, title, _) in &orphans {
+                        let best = live
+                            .iter()
+                            .map(|(lid, lt, _)| {
+                                (lid, bg_core::samestory::overlap(title, lt, &corpus))
+                            })
+                            .filter(|(_, o)| o.confident())
+                            .max_by(|a, b| a.1.score.total_cmp(&b.1.score));
+                        if let Some((target, _)) = best {
+                            bg_db::stories::set_merged_into(&db, *id, *target).await?;
+                            fixed += 1;
+                        }
+                    }
+                    if fixed > 0 {
+                        println!("restored {fixed} of {} fold redirects", orphans.len());
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("could not repair fold redirects: {e}"),
+            }
+
             let stories = bg_db::stories::singletons(&db, hours, limit).await?;
             println!("examining {} single-source stories", stories.len());
             let corpus = bg_core::samestory::Corpus::of(

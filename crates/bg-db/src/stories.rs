@@ -564,13 +564,23 @@ pub async fn merge_into(db: &Db, from: StoryId, into: StoryId) -> Result<u64> {
         "UPDATE stories
             SET status = 'killed',
                 editor_note = 'folded into another story: same event, reported separately',
+                merged_into = $2,
                 published_at = NULL,
                 updated_at = now()
           WHERE id = $1",
     )
     .bind(from.into_uuid())
+    .bind(into.into_uuid())
     .execute(&mut *tx)
     .await?;
+
+    // Anything previously folded into the husk follows it, or the redirect
+    // chain dead-ends at a killed story. One hop, always.
+    sqlx::query("UPDATE stories SET merged_into = $2 WHERE merged_into = $1")
+        .bind(from.into_uuid())
+        .bind(into.into_uuid())
+        .execute(&mut *tx)
+        .await?;
 
     // `source_count` is denormalised, and a fold that moves the evidence but
     // leaves the count behind is worse than not folding: the page would then
@@ -630,4 +640,84 @@ pub async fn reconcile_source_counts(db: &Db) -> Result<u64> {
     .execute(&db.pool)
     .await?;
     Ok(r.rows_affected())
+}
+
+/// Where a folded story's reporting now lives, as a slug.
+///
+/// `None` when the slug is unknown, still published, or killed for a reason
+/// other than a fold — a story retracted for being wrong must not redirect
+/// anywhere, least of all somewhere that looks like a correction of it.
+pub async fn folded_to(db: &Db, slug: &str) -> Result<Option<String>> {
+    let row = sqlx::query(
+        "SELECT t.slug FROM stories s
+           JOIN stories t ON t.id = s.merged_into
+          WHERE s.slug = $1 AND t.status = 'published'",
+    )
+    .bind(slug)
+    .fetch_optional(&db.pool)
+    .await?;
+    row.map(|r| r.try_get::<String, _>("slug"))
+        .transpose()
+        .map_err(Into::into)
+}
+
+/// Folds recorded before there was anywhere to record them, plus the published
+/// stories they might belong to.
+///
+/// `merge_into` moves every item off the husk, so the destination cannot be
+/// recovered from the join table afterwards — the only evidence left is the
+/// title. Returning both sides lets the caller re-run the same matcher that
+/// made the fold and reconstruct the pointer, rather than guessing.
+pub async fn folds_missing_destination(
+    db: &Db,
+    hours: i64,
+) -> Result<(Vec<(StoryId, String, i64)>, Vec<(StoryId, String, i64)>)> {
+    // Written out rather than built from a format string: sqlx will not accept
+    // a dynamic query without an explicit audit, and two literals are clearer
+    // than the closure that saved four lines.
+    let orphans = sqlx::query(
+        "SELECT id, title, extract(epoch FROM first_seen_at)::bigint AS ts
+           FROM stories
+          WHERE status = 'killed'
+            AND merged_into IS NULL
+            AND editor_note LIKE 'folded into%'
+            AND first_seen_at > now() - make_interval(hours => $1::int)
+          ORDER BY first_seen_at DESC LIMIT 3000",
+    )
+    .bind(hours as i32)
+    .fetch_all(&db.pool)
+    .await?;
+    let live = sqlx::query(
+        "SELECT id, title, extract(epoch FROM first_seen_at)::bigint AS ts
+           FROM stories
+          WHERE status = 'published'
+            AND first_seen_at > now() - make_interval(hours => $1::int)
+          ORDER BY first_seen_at DESC LIMIT 3000",
+    )
+    .bind(hours as i32)
+    .fetch_all(&db.pool)
+    .await?;
+
+    let rows = |rs: &[sqlx::postgres::PgRow]| -> Result<Vec<(StoryId, String, i64)>> {
+        rs.iter()
+            .map(|r| {
+                Ok((
+                    StoryId::from(r.try_get::<uuid::Uuid, _>("id")?),
+                    r.try_get::<String, _>("title")?,
+                    r.try_get::<i64, _>("ts")?,
+                ))
+            })
+            .collect()
+    };
+    Ok((rows(&orphans)?, rows(&live)?))
+}
+
+/// Point a folded story at its destination.
+pub async fn set_merged_into(db: &Db, from: StoryId, into: StoryId) -> Result<()> {
+    sqlx::query("UPDATE stories SET merged_into = $2, updated_at = now() WHERE id = $1")
+        .bind(from.into_uuid())
+        .bind(into.into_uuid())
+        .execute(&db.pool)
+        .await?;
+    Ok(())
 }

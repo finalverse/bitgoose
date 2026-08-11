@@ -395,7 +395,37 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
     let db = db();
     let story = match bg_db::stories::published_by_slug(db, &slug).await {
         Ok(s) => s,
-        Err(bg_db::DbError::NotFound(_)) => return Ok(None),
+        Err(bg_db::DbError::NotFound(_)) => {
+            // Not here — but it may have been folded into the story it was
+            // always part of, in which case this URL is somebody's shared link
+            // and the reporting it points at still exists. A permanent redirect
+            // sends the reader to it and tells search engines the two were one.
+            //
+            // Only folds redirect. A story retracted for being wrong must go
+            // nowhere: pointing it at another story would read as a correction
+            // of that one.
+            if let Ok(Some(to)) = bg_db::stories::folded_to(db, &slug).await {
+                // Set explicitly rather than through `leptos_axum::redirect`,
+                // which issues a 302 and only when the request advertises
+                // `text/html`. Neither suits this. A fold is permanent, so 301
+                // is what consolidates the two URLs in a search index — and a
+                // crawler that omits an Accept header would otherwise receive a
+                // Location with no status to act on.
+                if let Some(res) = use_context::<leptos_axum::ResponseOptions>() {
+                    res.set_status(axum::http::StatusCode::MOVED_PERMANENTLY);
+                    if let Ok(v) = axum::http::HeaderValue::from_str(&format!("/story/{to}")) {
+                        res.insert_header(axum::http::header::LOCATION, v);
+                    }
+                }
+            } else if let Some(res) = use_context::<leptos_axum::ResponseOptions>() {
+                // Otherwise say so properly. Every unknown URL was answering
+                // 200 with an empty shell, which is a soft 404: a search engine
+                // files it as thin content and keeps coming back, and a reader
+                // who mistypes a slug gets a blank page rather than a message.
+                res.set_status(axum::http::StatusCode::NOT_FOUND);
+            }
+            return Ok(None);
+        }
         Err(err) => return Err(e(err)),
     };
 
