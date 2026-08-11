@@ -57,6 +57,66 @@ const NOISE: &[&str] = &[
     "your", "we", "our", "it", "he", "she", "they",
 ];
 
+/// Words that name *when*, not *what*.
+///
+/// A calendar token is structural. Two stories about Nvidia in August are two
+/// stories, and the first production run folded them together because "nvidia"
+/// and "august" read as two independent agreements. Same for "Q2": it is shared
+/// by every company reporting that quarter.
+///
+/// Kept out of the *rare-hit* count rather than dropped entirely — a date is
+/// still weak corroborating evidence once something specific already matches.
+const CALENDAR: &[&str] = &[
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "oct",
+    "nov",
+    "dec",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "today",
+    "tomorrow",
+    "yesterday",
+    "week",
+    "month",
+    "quarter",
+    "year",
+    "q1",
+    "q2",
+    "q3",
+    "q4",
+    "h1",
+    "h2",
+    "2024",
+    "2025",
+    "2026",
+    "2027",
+];
+
 /// Tokens worth matching on: the things a headline *names*, plus its figures.
 ///
 /// Three kinds survive, and the reason is the same each time — they are chosen
@@ -203,12 +263,46 @@ impl Corpus {
     /// frequency, and a percentage alone would rule out the very thing being
     /// looked for.
     fn is_rare(&self, t: &str) -> bool {
+        if CALENDAR.contains(&t) {
+            return false;
+        }
         match self.df.get(t) {
             Some(d) => *d <= (self.n * RARE_SHARE).max(MIN_RARE_DOCS),
             None => true,
         }
     }
+
+    /// A token specific enough to pin down *which* event, not just who is in it.
+    ///
+    /// The distinction the first production run failed on. Its false positives
+    /// all shared the actors and nothing else — SoftBank and OpenAI appear in a
+    /// borrowing story and an earnings story; Nvidia appears in every second
+    /// headline on the site. Its true positives shared a *particular*: `BVNK`,
+    /// `24%`, `$1.8B`, `31%`.
+    ///
+    /// So a figure, or a name rare enough that this is essentially the only
+    /// thing it has been written about. Company names alone are not enough,
+    /// however well known — being well known is what makes them recur.
+    fn is_pin(&self, t: &str) -> bool {
+        if !self.is_rare(t) {
+            return false;
+        }
+        let numeric = t.chars().any(|c| c.is_ascii_digit());
+        numeric || self.df.get(t).is_none_or(|d| *d <= PIN_MAX_DOCS)
+    }
 }
+
+/// A name in more documents than this is a recurring subject, not a particular.
+const PIN_MAX_DOCS: f32 = 2.0;
+
+/// Fewest named things a headline must contain before arithmetic will claim it
+/// matches another. Below this there is nothing to be wrong about.
+///
+/// Two, not three. Three was tried and it threw away "Mastercard completes BVNK
+/// acquisition to expand stablecoin payments infrastructure", which names
+/// exactly two things and is unambiguously one event with its pair. What keeps
+/// a thin headline honest is the pin requirement, not a token count.
+const MIN_KEYS_TO_BE_SURE: usize = 2;
 
 /// A token in more of the window than this is describing the beat, not an
 /// event.
@@ -228,6 +322,20 @@ pub struct Overlap {
     pub score: f32,
     /// How many shared tokens were specific enough to mean something.
     pub rare_hits: usize,
+    /// How many of those pin down *which* event rather than just who is in it.
+    pub pins: usize,
+    /// Both headlines name a date and the dates disagree.
+    ///
+    /// Positive evidence *against*, which nothing else here provides: the rest
+    /// of the signals can only fail to find agreement.
+    pub contradicted: bool,
+    /// Named things in the thinner of the two headlines.
+    ///
+    /// Because `score` is a fraction of the lighter side, a headline with two
+    /// key tokens scores a perfect 1.0 by sharing both — and "Investors … Fed"
+    /// shares both with any other headline about investors and the Fed. Two
+    /// tokens is not evidence of an event; it is evidence of a subject area.
+    pub keys: usize,
 }
 
 impl Overlap {
@@ -239,7 +347,21 @@ impl Overlap {
     /// second, independent coincidence is what separates this from the merge
     /// that put thirteen unrelated items under a single headline.
     pub fn confident(&self) -> bool {
-        self.rare_hits >= 2 && self.score >= 0.5
+        !self.contradicted
+            && self.keys >= MIN_KEYS_TO_BE_SURE
+            && self.rare_hits >= 2
+            && self.score >= 0.5
+            && self.pins >= 1
+    }
+
+    fn none() -> Self {
+        Self {
+            score: 0.0,
+            rare_hits: 0,
+            pins: 0,
+            keys: 0,
+            contradicted: false,
+        }
     }
 
     /// Worth spending a model call on.
@@ -247,8 +369,71 @@ impl Overlap {
     /// The Trump Media pair sits here: two outlets on one event sharing only
     /// the company name. Real, but not something arithmetic should claim.
     pub fn worth_asking(&self) -> bool {
-        self.rare_hits >= 1 && self.score >= 0.28
+        !self.contradicted && self.rare_hits >= 1 && self.score >= 0.28
     }
+}
+
+/// The dates a headline names, as written.
+///
+/// Daily columns are the last category of false merge left after rarity and
+/// pins: "Mortgage and refinance interest rates today, Sunday, August 2" and
+/// the Saturday edition of the same column share almost every word they have.
+/// They are the same *series*, which is the opposite of the same event.
+///
+/// Only *explicit* dates count — a weekday, or a month beside a day number.
+/// A headline that mentions no date says nothing here and is not penalised.
+fn dates_named(seq: &[String]) -> HashSet<String> {
+    const DAYS: &[&str] = &[
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ];
+    const MONTHS: &[&str] = &[
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "sept",
+        "oct",
+        "nov",
+        "dec",
+    ];
+    let mut out = HashSet::new();
+    for (i, t) in seq.iter().enumerate() {
+        if DAYS.contains(&t.as_str()) {
+            out.insert(t.clone());
+        }
+        if MONTHS.contains(&t.as_str()) {
+            // "August 2", not bare "August" — a month alone is a period, and
+            // two stories in the same month are not thereby the same day.
+            if let Some(next) = seq.get(i + 1) {
+                if next.chars().all(|c| c.is_ascii_digit()) && next.len() <= 2 {
+                    out.insert(format!("{t} {next}"));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Compare two headlines through the vocabulary of the window they sit in.
@@ -262,28 +447,26 @@ pub fn overlap(a: &str, b: &str, corpus: &Corpus) -> Overlap {
     };
     let (ta, tb) = (keys(&sa), keys(&sb));
     if ta.is_empty() || tb.is_empty() {
-        return Overlap {
-            score: 0.0,
-            rare_hits: 0,
-        };
+        return Overlap::none();
     }
     let total = |set: &HashSet<String>| set.iter().map(|t| corpus.weight(t)).sum::<f32>();
     let floor = total(&ta).min(total(&tb));
     if floor <= 0.0 {
-        return Overlap {
-            score: 0.0,
-            rare_hits: 0,
-        };
+        return Overlap::none();
     }
 
     let mut shared_weight = 0.0;
     let mut rare_hits = 0usize;
+    let mut pins = 0usize;
     let mut rare_shared: HashSet<&String> = HashSet::new();
     for t in ta.intersection(&tb) {
         shared_weight += corpus.weight(t);
         if corpus.is_rare(t) {
             rare_hits += 1;
             rare_shared.insert(t);
+        }
+        if corpus.is_pin(t) {
+            pins += 1;
         }
     }
     // A multi-word name is one agreement, not one per word. Without this,
@@ -292,9 +475,16 @@ pub fn overlap(a: &str, b: &str, corpus: &Corpus) -> Overlap {
     // first live run of this did.
     rare_hits = rare_hits.saturating_sub(joined_in_both(&sa, &sb, &rare_shared));
 
+    // Both dated, and dated differently: the same column on two days.
+    let (da, db) = (dates_named(&sa), dates_named(&sb));
+    let contradicted = !da.is_empty() && !db.is_empty() && da.is_disjoint(&db);
+
     Overlap {
         score: (shared_weight / floor).clamp(0.0, 1.0),
         rare_hits,
+        pins,
+        keys: ta.len().min(tb.len()),
+        contradicted,
     }
 }
 
@@ -402,6 +592,154 @@ mod tests {
             &idf,
         );
         assert!(!o.confident(), "single-token coincidence merged: {o:?}");
+    }
+
+    /// The first run of `bg recluster` against production, whose sample was
+    /// about half wrong. Every one of these was folded, and every one is two
+    /// events that happen to involve the same people.
+    #[test]
+    fn shared_actors_are_not_a_shared_event() {
+        let corpus = Corpus::of(
+            &[
+                "SoftBank Uses OpenAI Stake to Borrow $10 Billion",
+                "SoftBank earnings exceed expectations, even without an OpenAI boost",
+                "3 Reasons to Buy Nvidia Stock in August",
+                "36 Analysts Share Their NVIDIA Stock Forecast Before August Earnings",
+                "AMD to report Q2 earnings as chip stocks continue to waver",
+                "Stanley Druckenmiller Holds Taiwan Semiconductor After Its Q2 Beat, Betting Chip Demand From Nvidia and AMD Keeps Growing",
+                "3 Genius Artificial Intelligence (AI) Stocks to Buy Right Now",
+                "3 Magnificent Artificial Intelligence (AI) Stocks to Buy Right Now and Hold for the Next Decade",
+                // The fixture has to carry the vocabulary the real corpus
+                // carries, or a word like "stocks" reads as rare here and
+                // common there, and the test proves nothing about production.
+                // A crypto-and-AI site publishes a great many of these.
+                "Nvidia earnings preview: what Wall Street expects",
+                "OpenAI ships a new reasoning model",
+                "SoftBank sells part of its Arm holding",
+                "2 Artificial Intelligence Stocks to Buy Before They Soar",
+                "5 Top Artificial Intelligence Stocks to Buy in 2026",
+                "Should You Buy AI Stocks Right Now? Here Is What History Says",
+                "The Best Artificial Intelligence Stocks to Buy and Hold Forever",
+                "1 Artificial Intelligence Stock to Buy Hand Over Fist Right Now",
+                "3 Top AI Stocks to Buy for the Next Decade",
+                "Why AI Stocks Keep Climbing Despite Valuation Worries",
+                "Wall Street Analysts Rate These AI Stocks a Strong Buy",
+                "Investors are rotating into financial stocks as the Fed weighs its next move",
+                "Investors may want to focus on the front end of the yield curve as Street anticipates Fed meetings",
+                // The Fed is written about constantly, and a fixture in which
+                // it looks rare would let this pair pass for the wrong reason.
+                "Fed holds rates steady for a third meeting",
+                "What the Fed decision means for mortgage rates",
+                "Fed officials split on the pace of cuts, minutes show",
+                "Investors weigh the Fed against a softening labour market",
+                "Powell says the Fed is not on a preset course",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
+        );
+        let c = |a: &str, b: &str| overlap(a, b, &corpus);
+        for (a, b) in [
+            (
+                "SoftBank Uses OpenAI Stake to Borrow $10 Billion",
+                "SoftBank earnings exceed expectations, even without an OpenAI boost",
+            ),
+            (
+                "3 Reasons to Buy Nvidia Stock in August",
+                "36 Analysts Share Their NVIDIA Stock Forecast Before August Earnings",
+            ),
+            (
+                "AMD to report Q2 earnings as chip stocks continue to waver",
+                "Stanley Druckenmiller Holds Taiwan Semiconductor After Its Q2 Beat, Betting Chip Demand From Nvidia and AMD Keeps Growing",
+            ),
+            (
+                "3 Genius Artificial Intelligence (AI) Stocks to Buy Right Now",
+                "3 Magnificent Artificial Intelligence (AI) Stocks to Buy Right Now and Hold for the Next Decade",
+            ),
+            (
+                "Investors are rotating into financial stocks as the Fed weighs its next move",
+                "Investors may want to focus on the front end of the yield curve as Street anticipates Fed meetings",
+            ),
+        ] {
+            let o = c(a, b);
+            assert!(!o.confident(), "would still fold:\n  {a}\n  {b}\n  {o:?}");
+        }
+    }
+
+    /// …while the ones from the same run that were right stay right. A rule
+    /// that fixes precision by refusing everything is not a fix.
+    #[test]
+    fn a_shared_particular_still_merges() {
+        let corpus = Corpus::of(
+            &[
+                "Mastercard completes $1.8B BVNK acquisition in stablecoin push",
+                "Mastercard completes BVNK acquisition to expand stablecoin payments infrastructure",
+                "Mastercard reports record quarterly volume",
+                "Visa expands stablecoin settlement pilot",
+                "Stripe acquires a payments startup",
+                "DEXs capture record 24% of spot crypto trading as CEX volumes sink",
+                "DEX Spot Volume Hit a Record 24% of CEX Volume in July",
+                "Crypto exchange volumes fall for a third month",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
+        );
+        for (a, b) in [
+            (
+                "Mastercard completes $1.8B BVNK acquisition in stablecoin push",
+                "Mastercard completes BVNK acquisition to expand stablecoin payments infrastructure",
+            ),
+            (
+                "DEXs capture record 24% of spot crypto trading as CEX volumes sink",
+                "DEX Spot Volume Hit a Record 24% of CEX Volume in July",
+            ),
+        ] {
+            let o = overlap(a, b, &corpus);
+            assert!(o.confident(), "lost a real merge:\n  {a}\n  {b}\n  {o:?}");
+        }
+    }
+
+    /// The same daily column on two days is a series, not an event.
+    #[test]
+    fn two_editions_of_one_column_are_two_stories() {
+        let corpus = Corpus::of(
+            &[
+                "Mortgage and refinance interest rates today, Sunday, August 2, 2026: Rates a bit lower than last week",
+                "Mortgage and refinance interest rates today, Saturday, August 1, 2026: Rates higher than Friday",
+                "Mortgage rates edge up as the ten-year yield climbs",
+                "Refinance demand falls for a fourth week",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
+        );
+        let o = overlap(
+            "Mortgage and refinance interest rates today, Sunday, August 2, 2026: Rates a bit lower than last week",
+            "Mortgage and refinance interest rates today, Saturday, August 1, 2026: Rates higher than Friday",
+            &corpus,
+        );
+        assert!(o.contradicted, "dates disagree but nothing noticed: {o:?}");
+        assert!(!o.confident());
+        // …and it is not merely refused, it is refused for the right reason:
+        // by every other measure these headlines look identical.
+        assert!(o.score > 0.5, "expected the wording to look alike: {o:?}");
+    }
+
+    #[test]
+    fn an_undated_headline_is_not_penalised() {
+        let corpus = Corpus::of(&[
+            "Mastercard completes $1.8B BVNK acquisition in stablecoin push".to_string(),
+            "Mastercard completes BVNK acquisition on Tuesday".to_string(),
+            "Visa expands stablecoin settlement".to_string(),
+        ]);
+        // One names a day, the other names none. That is not a contradiction.
+        let o = overlap(
+            "Mastercard completes $1.8B BVNK acquisition in stablecoin push",
+            "Mastercard completes BVNK acquisition on Tuesday",
+            &corpus,
+        );
+        assert!(!o.contradicted, "{o:?}");
     }
 
     #[test]
