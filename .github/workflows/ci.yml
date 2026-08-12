@@ -57,6 +57,11 @@ jobs:
         run: |
           set -o pipefail   # not on by default in Actions' bash; `tee` would eat the failure
           cargo test --workspace -- --test-threads=1 2>&1 | tee /tmp/test.log
+          # `--workspace` does not turn on bg-web's `ssr` feature, so everything
+          # gated behind it — the share cards, the image mirror, the crawler
+          # document — had never been tested here at all. Those are precisely
+          # the parts that only run in production.
+          cargo test -p bg-web --features ssr -- --test-threads=1 2>&1 | tee -a /tmp/test.log
 
       # Reading this repo's Actions logs requires a signed-in session. Check-run
       # annotations are public, so on failure the tail is re-emitted as an error

@@ -14,6 +14,10 @@ pub mod ogroute;
 pub mod pages;
 pub mod qr;
 pub mod ui;
+// Server-only: it holds a database handle and an axum layer, neither of which
+// belongs in the hydrate bundle.
+#[cfg(feature = "ssr")]
+pub mod unfurl;
 
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, HashedStylesheet, Link, MetaTags, Title};

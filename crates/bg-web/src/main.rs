@@ -54,8 +54,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(bg_api::router(db.clone()))
         // Generated share cards. Registered before the site's catch-all so
         // `/og/...` reaches the renderer rather than client-side routing.
-        .merge(bg_web::ogroute::router(db))
+        .merge(bg_web::ogroute::router(db.clone()))
         .merge(site)
+        // Link unfurlers get a small document instead of the full page.
+        //
+        // A layer rather than a route, because it has to sit in front of
+        // everything and then step aside: for any request that is not from a
+        // recognised crawler it calls straight through, so a reader's path is
+        // unchanged. Registered after `.merge(site)` so it wraps the site too —
+        // `/story/:slug` is the page it matters most for, and that is the
+        // Leptos router's.
+        .layer(axum::middleware::from_fn_with_state(
+            (db, bg_web::unfurl::UnfurlCache::default()),
+            bg_web::unfurl::layer,
+        ))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http());
 
