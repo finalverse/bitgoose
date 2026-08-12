@@ -616,12 +616,23 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
     })
     .to_string();
 
+    // A card must always say something; the page shows a dek only when one was
+    // written. Roughly a quarter of published stories have neither dek nor
+    // summary, and each of those was sharing as a headline over a blank space.
+    let share_description = bg_core::share::description(
+        article.as_ref().map(|a| a.dek.as_str()).unwrap_or(""),
+        story.summary.as_deref().unwrap_or(""),
+        &refs.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+        analysis.is_some(),
+    );
+
     Ok(Some(StoryPage {
         slug: story.slug.clone(),
         image_url,
         image_credit,
         image_credit_url,
         share_image,
+        share_description,
         square_card,
         video_id: story.video_id.clone().unwrap_or_default(),
         headline,

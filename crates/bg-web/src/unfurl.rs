@@ -310,12 +310,25 @@ async fn build(db: &bg_db::Db, path: &str, square: bool) -> Option<Card> {
         .as_ref()
         .map(|a| a.headline.clone())
         .unwrap_or_else(|| story.title.clone());
-    let description = article
-        .as_ref()
-        .map(|a| a.dek.clone())
-        .filter(|d| !d.is_empty())
-        .or_else(|| story.summary.clone())
+    // Never blank. Roughly a quarter of published stories have neither a dek
+    // nor a summary — the allowance does not stretch to summarising everything
+    // the Wire carries — and each of those was sharing as a headline over an
+    // empty space. `bg_core::share` falls back to who reported it.
+    let refs = bg_db::stories::source_refs(db, story.id)
+        .await
         .unwrap_or_default();
+    let outlets: Vec<String> = refs.iter().map(|r| r.name.clone()).collect();
+    let has_analysis = bg_db::analyses::for_story(db, story.id)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    let description = bg_core::share::description(
+        article.as_ref().map(|a| a.dek.as_str()).unwrap_or(""),
+        story.summary.as_deref().unwrap_or(""),
+        &outlets,
+        has_analysis,
+    );
 
     // Our copy of the publisher's picture if we hold one, our own card
     // otherwise — never a hotlink, for the same reasons as the full page.

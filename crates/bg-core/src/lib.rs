@@ -25,6 +25,7 @@ pub mod ids;
 pub mod media;
 pub mod policy;
 pub mod samestory;
+pub mod share;
 pub mod slug;
 pub mod text;
 pub mod trends;

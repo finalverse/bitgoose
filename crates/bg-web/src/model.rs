@@ -78,6 +78,12 @@ pub struct StoryPage {
     /// disk?", and pointing a crawler at a mirror we have not fetched yet just
     /// moves the fetch onto its clock. Empty means "use the generated card".
     pub share_image: String,
+    /// What a share card should say about this story.
+    ///
+    /// Separate from `dek` because the page shows a dek only when one was
+    /// written, while a card must always say something. Computed on the server
+    /// so the crawler document and the full page cannot drift apart.
+    pub share_description: String,
     /// Whether this render should advertise the square card.
     ///
     /// True for WeChat, which shows link previews as a small centre-cropped

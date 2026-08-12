@@ -821,11 +821,10 @@ fn StoryView(story: StoryPage) -> impl IntoView {
 /// Google News.
 #[component]
 fn StoryMeta(story: StoryPage) -> impl IntoView {
-    let desc = if story.dek.is_empty() {
-        story.headline.clone()
-    } else {
-        story.dek.clone()
-    };
+    // Decided on the server, so this and the crawler document say the same
+    // thing. It used to repeat the headline when there was no dek, which fills
+    // the slot without telling a reader anything they had not already read.
+    let desc = story.share_description.clone();
     view! {
         <Link rel="canonical" href=story.canonical.clone() />
 
