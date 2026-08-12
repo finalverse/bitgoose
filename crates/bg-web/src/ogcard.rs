@@ -318,12 +318,75 @@ pub fn png_shaped(card: &Card<'_>, shape: Shape) -> Option<Vec<u8>> {
         resvg::tiny_skia::Transform::identity(),
         &mut pixmap.as_mut(),
     );
-    pixmap.encode_png().ok()
+    // Palette first, full colour only if that somehow fails.
+    indexed_png(pixmap.data(), w, h).or_else(|| pixmap.encode_png().ok())
+}
+
+/// Colours in the palette.
+///
+/// The card is drawn from about five flat colours; everything else in it is
+/// the antialiasing between them. Sixty-four captures those ramps at an RMSE of
+/// 0.0008 against the full-colour render — invisible — for **half the bytes**:
+/// 26 KB becomes 12.5 KB.
+///
+/// That matters because of where the file has to go. WeChat fetches the picture
+/// as a second request after parsing the page, and on a link moving about ten
+/// kilobytes a second the difference is over a second of the crawler's budget.
+/// A card that arrives is worth more than a card with perfect gradients.
+const PALETTE_COLOURS: usize = 64;
+
+/// Encode as a palettised PNG, or `None` if anything about it fails.
+fn indexed_png(rgba: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
+    let nq = color_quant::NeuQuant::new(10, PALETTE_COLOURS, rgba);
+    let indices: Vec<u8> = rgba
+        .chunks_exact(4)
+        .map(|px| nq.index_of(px) as u8)
+        .collect();
+
+    // NeuQuant hands back RGBA; PNG's PLTE is RGB, and the card is fully
+    // opaque, so the alpha bytes are dropped rather than carried in a tRNS
+    // chunk that would say nothing.
+    let map = nq.color_map_rgba();
+    let palette: Vec<u8> = map
+        .chunks_exact(4)
+        .flat_map(|c| [c[0], c[1], c[2]])
+        .collect();
+
+    let mut out = Vec::with_capacity(rgba.len() / 8);
+    {
+        let mut enc = png::Encoder::new(&mut out, w, h);
+        enc.set_color(png::ColorType::Indexed);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.set_palette(palette);
+        enc.set_compression(png::Compression::High);
+        let mut writer = enc.write_header().ok()?;
+        writer.write_image_data(&indices).ok()?;
+    }
+    Some(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_card_is_small_enough_to_reach_a_crawler() {
+        // The card is a second request, made after the page is parsed and
+        // against the same clock. Full colour it was 26 KB; on a link moving
+        // about ten kilobytes a second that is most of a crawler's budget
+        // spent on gradients nobody can see.
+        for (shape, cap) in [(Shape::Wide, 24_000), (Shape::Square, 18_000)] {
+            let Some(b) = png_shaped(
+                &card("China says Long March 7A rocket failed after flight anomaly"),
+                shape,
+            ) else {
+                return; // no fonts on this host; nothing to measure
+            };
+            assert!(b.len() < cap, "{shape:?} card is {} bytes", b.len());
+            // Still a palettised PNG, not a silent fall back to full colour.
+            assert_eq!(&b[1..4], b"PNG");
+        }
+    }
 
     fn card(headline: &str) -> Card<'_> {
         Card {

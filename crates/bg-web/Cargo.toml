@@ -45,6 +45,8 @@ tracing-subscriber = { workspace = true, optional = true }
 pulldown-cmark = { workspace = true, optional = true }
 resvg = { workspace = true, optional = true }
 qrcode = { version = "0.14.1", default-features = false }
+color_quant = { version = "2.0.0", optional = true }
+png = { version = "0.18.1", optional = true }
 
 [features]
 default = []
@@ -55,6 +57,6 @@ ssr = [
     "dep:dotenvy", "dep:tracing", "dep:tracing-subscriber", "dep:pulldown-cmark",
     # Share-card rendering is server-only. An image rasteriser has no business
     # in the hydrate bundle, and bg-core's wasm32 check would not catch it here.
-    "dep:resvg",
+    "dep:resvg", "dep:color_quant", "dep:png",
     "leptos/ssr", "leptos_meta/ssr", "leptos_router/ssr",
 ]
