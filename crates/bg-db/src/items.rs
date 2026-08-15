@@ -333,6 +333,13 @@ pub async fn needing_extraction(db: &Db, limit: i64) -> Result<Vec<(RawItemId, S
           WHERE r.extracted_at IS NULL AND r.story_id IS NOT NULL
             AND r.extract_attempts < $2
             AND s.robots_ok AND s.enabled
+            -- The gate for the publisher's AI posture, in the same place as
+            -- the gate for robots.txt and for the same reason: a site that
+            -- blocks the AI crawlers by name has said what it objects to, and
+            -- it is not the fetching. Extraction exists only to feed the
+            -- Skein, so for these sources there is nothing to fetch *for*.
+            -- They stay in the Wire, ranked and linked, as they should.
+            AND s.ai_input_ok
           ORDER BY r.extract_attempts ASC,
                    (st.newsworthiness
                     * exp(-extract(epoch from (now() - st.published_at)) / 21600.0)
@@ -473,4 +480,43 @@ pub async fn purge_disallowed_text(db: &Db) -> Result<u64> {
     .execute(&db.pool)
     .await?;
     Ok(r.rows_affected())
+}
+
+/// Erase stored body text belonging to publishers who decline model input.
+///
+/// The flag stops new fetches; this deals with what is already here. BitGoose
+/// held full extracted text from nine sources — CoinDesk, the FT, CNBC, The
+/// Verge among them — that block the AI crawlers by name. That text was
+/// gathered before there was any code capable of noticing, which explains it
+/// and does not excuse keeping it.
+///
+/// The item survives: headline, link, canonical URL, its place in a cluster and
+/// its citation on the page. Only `body_raw` goes, because only `body_raw` was
+/// ever destined for a prompt. `extracted_at` is cleared so the item does not
+/// read as "we looked and found nothing", and the source gate keeps it out of
+/// the queue rather than re-fetching it forever.
+pub async fn purge_declined_text(db: &Db) -> Result<u64> {
+    let r = sqlx::query(
+        "UPDATE raw_items r
+            SET body_raw = NULL, extracted_at = NULL, extract_via = 'declined'
+           FROM sources s
+          WHERE s.id = r.source_id
+            AND NOT s.ai_input_ok
+            AND r.body_raw IS NOT NULL",
+    )
+    .execute(&db.pool)
+    .await?;
+    Ok(r.rows_affected())
+}
+
+/// How much text we are holding that its publisher has asked not be used this
+/// way. Reported by `bg doctor`, so it cannot quietly return.
+pub async fn declined_text_held(db: &Db) -> Result<i64> {
+    let row = sqlx::query(
+        "SELECT count(*)::bigint AS n FROM raw_items r JOIN sources s ON s.id = r.source_id
+          WHERE NOT s.ai_input_ok AND r.body_raw IS NOT NULL",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    Ok(row.try_get("n")?)
 }

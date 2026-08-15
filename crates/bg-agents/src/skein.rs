@@ -187,6 +187,25 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<bool> {
         return Err(FlockError::Other("story has no source items".into()));
     }
 
+    // Drop anything from a publisher who does not permit model input.
+    //
+    // The backstop to the extraction gate, and it has to exist: text ingested
+    // before a site changed its posture — or before BitGoose learned to read
+    // the posture at all — is already in the database, and the gate upstream
+    // only stops new fetches. The story keeps its citation and its link; what
+    // it loses is having that outlet's words in a prompt.
+    let denied = bg_db::sources::ai_input_denied(&ctx.db)
+        .await
+        .unwrap_or_default();
+    let items: Vec<_> = items
+        .into_iter()
+        .filter(|it| !denied.contains(&it.source_id))
+        .collect();
+    if items.is_empty() {
+        info!(story = %story, "every source declines model input; not analysed");
+        return Ok(false);
+    }
+
     // Count what we will actually put in the prompt, not what exists in the
     // row. A body we truncate to 900 words is not grounding for the part we
     // dropped, and `summary_raw` standing in for a missing body is the common

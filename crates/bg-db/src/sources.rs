@@ -18,6 +18,8 @@ fn from_row(r: &PgRow) -> Result<Source> {
         trust: r.try_get("trust")?,
         beat: enum_col_opt::<bg_core::domain::Beat>(r, "beat")?,
         robots_ok: r.try_get("robots_ok")?,
+        ai_input_ok: r.try_get("ai_input_ok")?,
+        ai_signal: r.try_get("ai_signal")?,
         poll_interval_s: r.try_get("poll_interval_s")?,
         etag: r.try_get("etag")?,
         last_modified: r.try_get("last_modified")?,
@@ -28,7 +30,8 @@ fn from_row(r: &PgRow) -> Result<Source> {
     })
 }
 
-const COLS: &str = "id, slug, name, kind, url, homepage, trust, beat, robots_ok, poll_interval_s, \
+const COLS: &str = "id, slug, name, kind, url, homepage, trust, beat, robots_ok, \
+     ai_input_ok, ai_signal, poll_interval_s, \
                     etag, last_modified, last_polled_at, last_error, enabled, created_at";
 
 /// Insert or update a source by slug. Deliberately preserves `etag`,
@@ -141,6 +144,33 @@ pub async fn record_failure(db: &Db, id: bg_core::SourceId, err: &str) -> Result
         .execute(&db.pool)
         .await?;
     Ok(())
+}
+
+/// Record what a site says about putting its text into a model.
+pub async fn set_ai_input(
+    db: &Db,
+    id: bg_core::SourceId,
+    ok: bool,
+    signal: Option<&str>,
+) -> Result<()> {
+    sqlx::query("UPDATE sources SET ai_input_ok = $2, ai_signal = $3 WHERE id = $1")
+        .bind(id.into_uuid())
+        .bind(ok)
+        .bind(signal)
+        .execute(&db.pool)
+        .await?;
+    Ok(())
+}
+
+/// Items whose source does not permit model input, so the Skein must not read
+/// them and the extractor must not store their text.
+pub async fn ai_input_denied(db: &Db) -> Result<Vec<bg_core::SourceId>> {
+    let rows = sqlx::query("SELECT id FROM sources WHERE NOT ai_input_ok")
+        .fetch_all(&db.pool)
+        .await?;
+    rows.iter()
+        .map(|r| Ok(bg_core::SourceId::from(r.try_get::<uuid::Uuid, _>("id")?)))
+        .collect()
 }
 
 pub async fn set_robots_ok(db: &Db, id: bg_core::SourceId, ok: bool) -> Result<()> {

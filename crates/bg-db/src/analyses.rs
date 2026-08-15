@@ -128,6 +128,10 @@ pub async fn needing_analysis(db: &Db, min_chars: i64, limit: i64) -> Result<Vec
                     + least(s.source_count, 6) * 3) AS rank
            FROM stories s
            JOIN raw_items r ON r.story_id = s.id
+           -- Only text the publisher permits a model to read counts toward the
+           -- grounding floor. Counting the rest would queue stories the Skein
+           -- then refuses, wasting the pass on nothing.
+           JOIN sources src ON src.id = r.source_id AND src.ai_input_ok
            LEFT JOIN analyses a ON a.story_id = s.id
           WHERE s.status = 'published' AND a.id IS NULL
           GROUP BY s.id

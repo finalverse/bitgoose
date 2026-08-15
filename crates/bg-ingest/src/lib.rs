@@ -56,12 +56,26 @@ pub async fn refresh_robots(
     };
     let mut out = Vec::with_capacity(all.len());
     for s in all {
-        let ok = robots::allows(client, agent, &s.url).await;
-        if ok != s.robots_ok {
-            tracing::info!(source = %s.slug, allowed = ok, "robots.txt verdict changed");
-            let _ = bg_db::sources::set_robots_ok(db, s.id, ok).await;
+        // One fetch, two questions: may we read it, and may a model read it.
+        // They are increasingly different answers and were previously not even
+        // being asked separately.
+        let verdict = robots::verdict(client, agent, &s.url).await;
+        if verdict.allowed != s.robots_ok {
+            tracing::info!(source = %s.slug, allowed = verdict.allowed, "robots.txt verdict changed");
+            let _ = bg_db::sources::set_robots_ok(db, s.id, verdict.allowed).await;
         }
-        out.push((s.slug, ok));
+        if verdict.ai_input != s.ai_input_ok {
+            tracing::info!(
+                source = %s.slug,
+                ai_input = verdict.ai_input,
+                signal = verdict.signal.as_deref().unwrap_or("(none stated)"),
+                "publisher's AI posture changed"
+            );
+            let _ =
+                bg_db::sources::set_ai_input(db, s.id, verdict.ai_input, verdict.signal.as_deref())
+                    .await;
+        }
+        out.push((s.slug, verdict.allowed));
     }
     out
 }

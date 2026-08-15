@@ -542,6 +542,20 @@ async fn main() -> Result<()> {
         }
         Cmd::Retract { dry_run } => {
             let db = Db::connect(&url).await?;
+            // Same principle as retracting content from a source that
+            // disallowed us: a posture we failed to notice earlier applies to
+            // what we already hold, not only to what we fetch next.
+            match bg_db::items::declined_text_held(&db).await {
+                Ok(0) => {}
+                Ok(n) if dry_run => {
+                    println!("would erase stored text from {n} items whose publisher declines model input")
+                }
+                Ok(n) => {
+                    let done = bg_db::items::purge_declined_text(&db).await?;
+                    println!("erased stored text from {done} of {n} items (publisher declines model input)");
+                }
+                Err(e) => eprintln!("could not check declined text: {e}"),
+            }
             if dry_run {
                 let (waiting, _) = bg_db::items::queue_health(&db).await.unwrap_or((0, 0));
                 println!("dry run — nothing will be changed (queue: {waiting} waiting)");
@@ -779,6 +793,17 @@ async fn doctor(url: &str) -> Result<()> {
     // either the news horizon or the source list needs attention.
     if let Ok((waiting, lapsed)) = bg_db::items::queue_health(&db).await {
         println!("  triage queue: {waiting} waiting, {lapsed} lapsed past the news horizon");
+    }
+
+    // Text held against a publisher's stated wishes. Should always be zero;
+    // if it is not, either a source changed its posture or a gate has a hole.
+    if let Ok(n) = bg_db::items::declined_text_held(&db).await {
+        if n > 0 {
+            println!(
+                "!! holding extracted text from {n} items whose publisher declines model input"
+            );
+            println!("     run `bg retract` to erase it");
+        }
     }
 
     // Corroboration is the product. A ratio this visible is the difference

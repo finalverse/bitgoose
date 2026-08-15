@@ -271,6 +271,15 @@ pub struct Source {
     pub beat: Option<Beat>,
     /// Result of the last robots.txt check. `false` means Scout skips it.
     pub robots_ok: bool,
+    /// Whether this publisher permits its text being put into a model.
+    ///
+    /// A different question from `robots_ok`, and increasingly a different
+    /// answer: sites welcome crawlers and link traffic while blocking the AI
+    /// crawlers by name. False keeps the source — polled, ranked, linked — and
+    /// keeps its body text out of the Skein.
+    pub ai_input_ok: bool,
+    /// The `Content-Signal` line as published, for the record.
+    pub ai_signal: Option<String>,
     pub poll_interval_s: i32,
     /// HTTP conditional-GET state, so we re-fetch politely.
     pub etag: Option<String>,

@@ -25,6 +25,39 @@ pub struct SeedSource {
 }
 
 pub const SOURCES: &[SeedSource] = &[
+    // Two outlets that welcome crawlers and refuse the model, which is now a
+    // distinction BitGoose can honour rather than one it has to choose between.
+    //
+    // theaiinsider.tech publishes `Content-Signal: search=yes,ai-train=no,
+    // use=reference` and blocks GPTBot, ClaudeBot, CCBot and Google-Extended by
+    // name while allowing `*`. Business Insider blocks the same crawlers. Both
+    // are read as headline-and-link-out sources: polled, ranked, cited, never
+    // extracted and never put in a prompt. `refresh_robots` sets the flag from
+    // what they actually publish, so it follows them if they change their mind.
+    SeedSource {
+        slug: "aiinsider",
+        name: "AI Insider",
+        kind: SourceKind::Rss,
+        url: "https://theaiinsider.tech/feed/",
+        homepage: "https://theaiinsider.tech",
+        trust: 65,
+        // Their robots.txt asks for `Crawl-delay: 10`; a half-hour poll is far
+        // inside that and matches how often the feed actually moves.
+        poll_interval_s: 1800,
+        beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "businessinsider",
+        name: "Business Insider",
+        kind: SourceKind::Rss,
+        // The markets desk feed. `businessinsider.com/rss` answers 200 with no
+        // items; this one carries them.
+        url: "https://markets.businessinsider.com/rss/news",
+        homepage: "https://www.businessinsider.com",
+        trust: 70,
+        poll_interval_s: 1200,
+        beat: Some(Beat::Markets),
+    },
     // The first source with no feed at all — /rss and /feed both 404, and
     // robots.txt permits the index. It is read by crawling, which is the whole
     // reason `bg-ingest::crawl` exists, and it closes an obvious gap in an AI
