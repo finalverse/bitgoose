@@ -22,6 +22,7 @@
 pub mod domain;
 pub mod error;
 pub mod ids;
+pub mod mandate;
 pub mod media;
 pub mod policy;
 pub mod samestory;

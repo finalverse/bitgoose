@@ -1587,3 +1587,49 @@ a:hover > .media-play::after,
   strong { color: var(--paper-dim); }
   .gaggle-model { font-family: var(--mono); color: var(--faint); }
 }
+
+// The spending mandate on an agent tile.
+//
+// A cost figure is the newsroom reporting on itself. A mandate is a ceiling
+// committed to before the spending happened, so the bar can be wrong in a way
+// a reader can see — which is the point of putting it on the page at all.
+.mandate {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--rule);
+
+  .mandate-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  .mandate-figure {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-2);
+  }
+
+  .mandate-bar {
+    margin-top: 0.35rem;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--rule);
+    overflow: hidden;
+  }
+
+  .mandate-fill {
+    display: block;
+    height: 100%;
+    background: var(--gold);
+    // Nothing animates on load: the bar is a fact, not a flourish.
+    transition: width 0.2s ease;
+  }
+
+  // Near the ceiling. Not an error — a mandate reaching its limit is the
+  // mechanism working — but worth seeing at a glance.
+  .mandate-tight {
+    background: var(--signal-red, #d9534f);
+  }
+}

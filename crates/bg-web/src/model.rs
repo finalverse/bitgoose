@@ -243,6 +243,17 @@ pub struct AgentCard {
     pub avg_latency_ms: i64,
     pub last_note: Option<String>,
     pub enabled: bool,
+    /// This agent's daily spending mandate, in CCC.
+    ///
+    /// Derived from `agent_runs` rather than read from the worker's memory.
+    /// The worker's own view of what it has spent is exactly the thing a
+    /// reader has no reason to trust; the run ledger is the record, and
+    /// computing the figure from it here means the page and the audit trail
+    /// cannot disagree.
+    pub mandate_budget: String,
+    pub mandate_spent: String,
+    /// Share of the mandate used, 0-100, for the bar.
+    pub mandate_pct: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

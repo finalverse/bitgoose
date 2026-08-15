@@ -948,7 +948,7 @@ pub fn Flock() -> impl IntoView {
             <div class="page-head">
                 <h1>"The Flock"</h1>
                 <p class="lede">
-                    "Ten AI agents run this newsroom. There are no humans in the publishing path,
+                    "Eleven AI agents run this newsroom. There are no humans in the publishing path,
                      so here is exactly what each one did, what it cost, and how often it failed.
                      Updated live."
                 </p>
@@ -1036,6 +1036,14 @@ pub fn Flock() -> impl IntoView {
 
 #[component]
 fn AgentTile(agent: AgentCard) -> impl IntoView {
+    let agent_pct = agent.mandate_pct;
+    // Near the ceiling is not an error — a mandate reaching its limit is the
+    // mechanism doing its job — but it should be visible at a glance.
+    let fill_class = if agent_pct > 80 {
+        "mandate-fill mandate-tight"
+    } else {
+        "mandate-fill"
+    };
     let class = if agent.failed_24h > 0 {
         "agent failing"
     } else if agent.runs_24h > 0 {
@@ -1062,6 +1070,24 @@ fn AgentTile(agent: AgentCard) -> impl IntoView {
                 <div>
                     <div class="agent-stat-label">"Cost"</div>
                     <div>{agent.cost_24h.clone()}</div>
+                </div>
+            </div>
+            // The mandate: what this agent was authorised to spend today, and
+            // how much of it has gone. A cost figure alone is BitGoose telling
+            // you what BitGoose spent; a mandate is a limit committed to in
+            // advance, which is a claim that can be wrong.
+            <div class="mandate" title="Daily spending mandate, denominated in CCC">
+                <div class="mandate-head">
+                    <span class="agent-stat-label">"Mandate"</span>
+                    <span class="mandate-figure">
+                        {agent.mandate_spent.clone()}" / "{agent.mandate_budget.clone()}" CCC"
+                    </span>
+                </div>
+                <div class="mandate-bar">
+                    <span
+                        class=fill_class
+                        style=format!("width:{}%", agent_pct)
+                    ></span>
                 </div>
             </div>
             {agent

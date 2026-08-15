@@ -711,6 +711,16 @@ pub async fn get_flock() -> Result<FlockPage, ServerFnError> {
     let recent = bg_db::agents::recent_runs(db, 30).await.map_err(e)?;
     let blocks = bg_db::violations::count_blocks_24h(db).await.unwrap_or(0);
 
+    // The same numbers the worker enforces with, computed from the same
+    // ledger. Read from the environment so the page states the mandate that is
+    // actually in force rather than a default compiled in months ago.
+    let budget_ccc: bg_core::mandate::Wei = std::env::var("BG_AGENT_BUDGET_CCC")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|c| *c >= 0.0 && c.is_finite())
+        .map(|c| (c * bg_core::mandate::CCC as f64) as u128)
+        .unwrap_or(bg_core::mandate::CCC / 10);
+
     Ok(FlockPage {
         agents: stats
             .iter()
@@ -726,6 +736,21 @@ pub async fn get_flock() -> Result<FlockPage, ServerFnError> {
                 avg_latency_ms: a.avg_latency_ms,
                 last_note: a.last_note.clone(),
                 enabled: a.enabled,
+                mandate_budget: bg_core::mandate::format_ccc(budget_ccc),
+                mandate_spent: bg_core::mandate::format_ccc(bg_core::mandate::tokens_to_ccc(
+                    a.tokens_24h.max(0) as u64,
+                    bg_core::mandate::DEFAULT_CCC_PER_MTOK,
+                )),
+                mandate_pct: if budget_ccc == 0 {
+                    100
+                } else {
+                    ((bg_core::mandate::tokens_to_ccc(
+                        a.tokens_24h.max(0) as u64,
+                        bg_core::mandate::DEFAULT_CCC_PER_MTOK,
+                    ) * 100)
+                        / budget_ccc)
+                        .min(100) as i32
+                },
             })
             .collect(),
         recent: recent.iter().map(run_line).collect(),

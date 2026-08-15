@@ -96,6 +96,14 @@ pub struct FlockConfig {
     /// Spend ceiling per run in USD. Zero disables the check.
     pub run_budget_usd: Decimal,
     pub user_agent: String,
+    /// What each agent may spend per day, in CCC-wei.
+    ///
+    /// Per agent, not shared: the point of a mandate is that a fault in one
+    /// role cannot consume the whole newsroom's allowance.
+    pub agent_budget_ccc: bg_core::mandate::Wei,
+    /// CCC charged per million model tokens — the unit of account that lets one
+    /// mandate span providers whose own prices differ by an order of magnitude.
+    pub ccc_per_mtok: bg_core::mandate::Wei,
     pub ingest_concurrency: usize,
 }
 
@@ -106,6 +114,15 @@ impl Default for FlockConfig {
             desk_max_per_run: 3,
             run_budget_usd: Decimal::from_str("2.00").unwrap(),
             user_agent: bg_ingest::http::DEFAULT_UA.to_string(),
+            // A tenth of a CCC — a hundred thousand tokens a day, each.
+            //
+            // Sized to bind rather than to reassure. The whole newsroom's
+            // allowance is about two hundred thousand tokens a day, so any
+            // single agent reaching this has taken half of everything and is
+            // almost certainly looping. A ceiling nothing can ever touch would
+            // be a number on a page, not a control.
+            agent_budget_ccc: bg_core::mandate::CCC / 10,
+            ccc_per_mtok: bg_core::mandate::DEFAULT_CCC_PER_MTOK,
             ingest_concurrency: 4,
         }
     }
@@ -122,6 +139,16 @@ impl FlockConfig {
                 .and_then(|v| Decimal::from_str(&v).ok())
                 .unwrap_or(d.run_budget_usd),
             user_agent: std::env::var("BG_USER_AGENT").unwrap_or(d.user_agent),
+            // Parsed as a decimal CCC amount — "0.1", "2.5" — because the
+            // useful settings here are fractions of a token and an integer-only
+            // knob could not express any of them.
+            agent_budget_ccc: std::env::var("BG_AGENT_BUDGET_CCC")
+                .ok()
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .filter(|c| *c >= 0.0 && c.is_finite())
+                .map(|c| (c * bg_core::mandate::CCC as f64) as u128)
+                .unwrap_or(d.agent_budget_ccc),
+            ccc_per_mtok: d.ccc_per_mtok,
             ingest_concurrency: env_parse("BG_INGEST_CONCURRENCY").unwrap_or(d.ingest_concurrency),
         }
     }
@@ -138,12 +165,103 @@ pub struct Ctx {
     pub llm: Llm,
     pub http: reqwest::Client,
     pub cfg: FlockConfig,
+    /// One bounded spending authority per agent. See [`bg_core::mandate`].
+    mandates: Mandates,
+}
+
+/// The Flock's mandates, shared across a pass.
+///
+/// In memory, and rebuilt from `agent_runs` at startup the same way the pacer's
+/// daily ledger is — a restart that forgets what has been spent is a restart
+/// that spends it again.
+#[derive(Clone, Default)]
+pub struct Mandates(
+    std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<AgentRole, bg_core::mandate::Mandate>>,
+    >,
+);
+
+impl Mandates {
+    fn seed(cfg: &FlockConfig) -> Self {
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        let map = AgentRole::ALL
+            .iter()
+            .map(|r| {
+                (
+                    *r,
+                    bg_core::mandate::Mandate::new(*r, cfg.agent_budget_ccc, now),
+                )
+            })
+            .collect();
+        Self(std::sync::Arc::new(std::sync::Mutex::new(map)))
+    }
 }
 
 impl Ctx {
     pub fn new(db: Db, llm: Llm, cfg: FlockConfig) -> Result<Self> {
         let http = bg_ingest::http::client(&cfg.user_agent)?;
-        Ok(Self { db, llm, http, cfg })
+        let mandates = Mandates::seed(&cfg);
+        Ok(Self {
+            db,
+            llm,
+            http,
+            cfg,
+            mandates,
+        })
+    }
+
+    /// The mandate covering one agent.
+    ///
+    /// Every role has one; a role without a mandate would be a role that can
+    /// spend without a ceiling, so the map is built from `AgentRole::ALL`
+    /// rather than from configuration that could omit an entry.
+    pub fn mandate(&self, role: AgentRole) -> bg_core::mandate::Mandate {
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        let mut g = self.mandates.0.lock().expect("mandate lock");
+        let m = g.entry(role).or_insert_with(|| {
+            bg_core::mandate::Mandate::new(role, self.cfg.agent_budget_ccc, now)
+        });
+        m.roll(now);
+        m.clone()
+    }
+
+    /// Record what a stage actually spent against its mandate.
+    fn settle_mandate(&self, role: AgentRole, tokens: u64) {
+        if tokens == 0 {
+            return;
+        }
+        let cost = bg_core::mandate::tokens_to_ccc(tokens, self.cfg.ccc_per_mtok);
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        if let Ok(mut g) = self.mandates.0.lock() {
+            let m = g.entry(role).or_insert_with(|| {
+                bg_core::mandate::Mandate::new(role, self.cfg.agent_budget_ccc, now)
+            });
+            m.roll(now);
+            m.settle(cost);
+        }
+    }
+
+    /// Every mandate, for `/flock`.
+    pub fn all_mandates(&self) -> Vec<bg_core::mandate::Mandate> {
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        let mut g = match self.mandates.0.lock() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        for role in AgentRole::ALL {
+            g.entry(*role).or_insert_with(|| {
+                bg_core::mandate::Mandate::new(*role, self.cfg.agent_budget_ccc, now)
+            });
+        }
+        let mut out: Vec<_> = g
+            .values_mut()
+            .map(|m| {
+                m.roll(now);
+                m.clone()
+            })
+            .collect();
+        out.sort_by_key(|m| m.agent);
+        out
     }
 
     /// As [`Ctx::new`], with the day's token spend restored from the run ledger.
@@ -195,6 +313,19 @@ impl Ctx {
     }
 }
 
+/// The task label a mandate is matched against.
+///
+/// Stages name themselves loosely — `"analyse"`, `"draft"` — so the role is
+/// prefixed here rather than relying on every call site to remember. Deriving
+/// it means a new stage cannot accidentally fall outside its own allowlist.
+fn stage_name_qualified(role: AgentRole, stage: &str) -> String {
+    if stage.starts_with(&format!("{}.", role.as_str())) {
+        stage.to_string()
+    } else {
+        format!("{}.{stage}", role.as_str())
+    }
+}
+
 /// What a stage produced.
 pub struct StageOutput<T> {
     pub value: T,
@@ -243,6 +374,40 @@ where
     // Budget is checked before the row is opened, so a refused stage is
     // recorded as `budgeted` rather than looking like a crash.
     if role.tier() != bg_core::domain::ModelTier::None {
+        // The mandate first: it is local arithmetic, it says *which* agent and
+        // *what for*, and it refuses before a request is built rather than
+        // after the money is gone. The global budget below remains the
+        // backstop — a mandate bounds one agent, the budget bounds the sum.
+        let m = ctx.mandate(role);
+        // Nothing has been spent yet, so the check is for a mandate that is
+        // already exhausted or does not cover this work at all.
+        if let Err(refusal) = m.check(
+            stage_name_qualified(role, stage_name).as_str(),
+            role.tier(),
+            1,
+        ) {
+            warn!(
+                role = %role, stage = stage_name, spent = %bg_core::mandate::format_ccc(m.spent),
+                budget = %bg_core::mandate::format_ccc(m.budget),
+                "mandate refused: {}", refusal.reason()
+            );
+            let run = agents_repo::start_run(&ctx.db, agent.id, role, story, stage_name).await?;
+            agents_repo::finish_run(
+                &ctx.db,
+                run,
+                &agents_repo::RunOutcome {
+                    status: Some(RunStatus::Budgeted),
+                    note: Some(format!("mandate: {}", refusal.reason())),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            return Err(FlockError::Other(format!(
+                "{role} mandate: {}",
+                refusal.reason()
+            )));
+        }
+
         if let Err(e) = ctx.check_budget().await {
             warn!(role = %role, stage = stage_name, "{e}");
             let run = agents_repo::start_run(&ctx.db, agent.id, role, story, stage_name).await?;
@@ -266,6 +431,13 @@ where
     match f(run).await {
         Ok(out) => {
             let c = out.completion.as_ref();
+            // Against the mandate, before the row is written: what the model
+            // actually returned, not what was estimated beforehand.
+            ctx.settle_mandate(
+                role,
+                c.map(|c| (c.prompt_tokens + c.completion_tokens) as u64)
+                    .unwrap_or(0),
+            );
             agents_repo::finish_run(
                 &ctx.db,
                 run,
