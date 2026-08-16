@@ -105,9 +105,17 @@ str_enum! {
         Crypto => "crypto",
         /// Capital markets: equities, rates, macro, earnings, funds.
         Markets => "markets",
-        /// The rest of high technology: chips, platforms, space, biotech,
-        /// energy — the frontier that is neither a model nor a token.
+        /// The rest of high technology: chips, platforms, biotech, energy —
+        /// the frontier that is neither a model nor a token.
         Tech => "tech",
+        /// Politics, conflict, diplomacy, elections. The events that set the
+        /// conditions every other desk reports inside of.
+        World => "world",
+        /// Discovery outside the model labs: space, climate, medicine, physics.
+        Science => "science",
+        /// Media, entertainment, sport — what people are actually talking
+        /// about, which is not always what a markets desk considers news.
+        Culture => "culture",
     }
 }
 
@@ -131,6 +139,24 @@ str_enum! {
         Compute => "compute",
         /// Alignment, evaluations, misuse, incidents.
         Safety => "safety",
+        /// Conflict, diplomacy, borders, international institutions.
+        World => "world",
+        /// Elections, legislatures, courts, campaigns.
+        Politics => "politics",
+        /// Medicine, public health, biotech, drugs.
+        Health => "health",
+        /// Emissions, weather, energy transition, environment.
+        Climate => "climate",
+        /// Launches, missions, astronomy, the space economy.
+        Space => "space",
+        /// Discovery outside computing — physics, biology, materials.
+        Science => "science",
+        /// Competition, leagues, athletes.
+        Sports => "sports",
+        /// Film, television, music, games as culture, celebrity.
+        Entertainment => "entertainment",
+        /// Oil, gas, grid, nuclear, renewables.
+        Energy => "energy",
     }
 }
 
@@ -152,6 +178,15 @@ impl Category {
             Self::Models => "Models",
             Self::Compute => "Compute",
             Self::Safety => "Safety",
+            Self::World => "World",
+            Self::Politics => "Politics",
+            Self::Health => "Health",
+            Self::Climate => "Climate",
+            Self::Space => "Space",
+            Self::Science => "Science",
+            Self::Sports => "Sport",
+            Self::Entertainment => "Entertainment",
+            Self::Energy => "Energy",
         }
     }
 }
@@ -199,8 +234,33 @@ impl Category {
                 Category::Business,
                 Category::Policy,
                 Category::Security,
+                Category::Energy,
                 Category::Gaming,
                 Category::Culture,
+            ],
+            Beat::World => &[
+                Category::World,
+                Category::Politics,
+                Category::Policy,
+                Category::Business,
+                Category::Energy,
+                Category::Culture,
+            ],
+            Beat::Science => &[
+                Category::Science,
+                Category::Space,
+                Category::Health,
+                Category::Climate,
+                Category::Energy,
+                Category::Research,
+                Category::Policy,
+            ],
+            Beat::Culture => &[
+                Category::Entertainment,
+                Category::Sports,
+                Category::Culture,
+                Category::Gaming,
+                Category::Business,
             ],
         }
     }
@@ -223,6 +283,15 @@ impl Category {
             Self::Models => "a model or system shipping: weights, APIs, capabilities",
             Self::Compute => "chips, datacentres, energy, hardware supply",
             Self::Safety => "alignment, evaluations, misuse, model incidents",
+            Self::World => "conflict, diplomacy, borders, international institutions",
+            Self::Politics => "elections, legislatures, campaigns, parties, government",
+            Self::Health => "medicine, disease, hospitals, drugs, biotech",
+            Self::Climate => "emissions, warming, weather, environment, decarbonisation",
+            Self::Space => "rockets, satellites, missions, astronomy, orbital industry",
+            Self::Science => "discovery outside computing: physics, biology, materials",
+            Self::Sports => "competition, leagues, athletes, fixtures, results",
+            Self::Entertainment => "film, television, music, celebrity, streaming",
+            Self::Energy => "oil, gas, the grid, nuclear, solar, wind",
         }
     }
 }
@@ -234,6 +303,9 @@ impl Beat {
             Self::Crypto => "Crypto",
             Self::Markets => "Markets",
             Self::Tech => "Tech",
+            Self::World => "World",
+            Self::Science => "Science",
+            Self::Culture => "Culture",
         }
     }
 
@@ -248,6 +320,14 @@ impl Beat {
                 Some(Beat::Ai)
             }
             Category::Defi | Category::Nft => Some(Beat::Crypto),
+            Category::World | Category::Politics => Some(Beat::World),
+            Category::Space | Category::Health | Category::Climate | Category::Science => {
+                Some(Beat::Science)
+            }
+            Category::Sports | Category::Entertainment => Some(Beat::Culture),
+            // Energy sits on Tech and Science and World depending on the story
+            // — a grid outage, a fusion result and an OPEC decision are three
+            // different desks — so it is routed per item rather than pinned.
             _ => None,
         }
     }

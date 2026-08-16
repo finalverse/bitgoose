@@ -69,6 +69,30 @@ pub fn DeskTech() -> impl IntoView {
     Front(FrontProps { beat: Some("tech") })
 }
 
+/// Politics, conflict, diplomacy.
+#[component]
+pub fn DeskWorld() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("world"),
+    })
+}
+
+/// Space, climate, medicine, physics.
+#[component]
+pub fn DeskScience() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("science"),
+    })
+}
+
+/// Media, entertainment, sport.
+#[component]
+pub fn DeskCulture() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("culture"),
+    })
+}
+
 /// The front page, blended or for one desk.
 ///
 /// One component rather than three: a desk page *is* the front page with a

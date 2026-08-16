@@ -25,6 +25,163 @@ pub struct SeedSource {
 }
 
 pub const SOURCES: &[SeedSource] = &[
+    // ---- World, Science and Culture -------------------------------------
+    //
+    // Three desks that existed in the navigation with nothing behind them, and
+    // two that were starving: Markets had one source and Tech had none, which
+    // is why both had published nothing for over a week while AI and Crypto ran
+    // hourly. A desk in the nav that never updates is worse than no desk.
+    //
+    // Chosen for breadth of subject rather than volume, and every one checked
+    // for reachability and AI posture before being added. Several publish their
+    // feed on a host that carries none of their robots rules — `feeds.bbci.co.uk`
+    // says nothing while `www.bbc.co.uk` blocks five AI crawlers — so the
+    // posture is read from `homepage`, not from `url`.
+    SeedSource {
+        slug: "npr-world",
+        name: "NPR",
+        kind: SourceKind::Rss,
+        url: "https://feeds.npr.org/1004/rss.xml",
+        homepage: "https://www.npr.org",
+        trust: 82,
+        poll_interval_s: 900,
+        beat: Some(Beat::World),
+    },
+    SeedSource {
+        slug: "bbc-world",
+        name: "BBC News",
+        kind: SourceKind::Rss,
+        url: "https://feeds.bbci.co.uk/news/world/rss.xml",
+        homepage: "https://www.bbc.co.uk",
+        trust: 85,
+        poll_interval_s: 900,
+        beat: Some(Beat::World),
+    },
+    SeedSource {
+        slug: "aljazeera",
+        name: "Al Jazeera",
+        kind: SourceKind::Rss,
+        url: "https://www.aljazeera.com/xml/rss/all.xml",
+        homepage: "https://www.aljazeera.com",
+        trust: 76,
+        poll_interval_s: 900,
+        beat: Some(Beat::World),
+    },
+    SeedSource {
+        slug: "sciencedaily",
+        name: "ScienceDaily",
+        kind: SourceKind::Rss,
+        url: "https://www.sciencedaily.com/rss/all.xml",
+        homepage: "https://www.sciencedaily.com",
+        trust: 70,
+        // Sixty items a poll; a quarter-hour cadence would re-read the same
+        // wall of research releases all day for nothing.
+        poll_interval_s: 3600,
+        beat: Some(Beat::Science),
+    },
+    SeedSource {
+        slug: "physorg",
+        name: "Phys.org",
+        kind: SourceKind::Rss,
+        url: "https://phys.org/rss-feed/",
+        homepage: "https://phys.org",
+        trust: 72,
+        poll_interval_s: 1800,
+        beat: Some(Beat::Science),
+    },
+    SeedSource {
+        slug: "nasa",
+        name: "NASA",
+        kind: SourceKind::Rss,
+        // A primary source: the agency announcing its own missions, rather
+        // than a report of the announcement.
+        url: "https://www.nasa.gov/news-release/feed/",
+        homepage: "https://www.nasa.gov",
+        trust: 90,
+        poll_interval_s: 3600,
+        beat: Some(Beat::Science),
+    },
+    SeedSource {
+        slug: "npr-health",
+        name: "NPR Health",
+        kind: SourceKind::Rss,
+        url: "https://feeds.npr.org/1128/rss.xml",
+        homepage: "https://www.npr.org",
+        trust: 80,
+        poll_interval_s: 1800,
+        beat: Some(Beat::Science),
+    },
+    SeedSource {
+        slug: "bbc-culture",
+        name: "BBC Arts",
+        kind: SourceKind::Rss,
+        url: "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+        homepage: "https://www.bbc.co.uk",
+        trust: 78,
+        poll_interval_s: 1800,
+        beat: Some(Beat::Culture),
+    },
+    SeedSource {
+        slug: "bbc-sport",
+        name: "BBC Sport",
+        kind: SourceKind::Rss,
+        url: "https://feeds.bbci.co.uk/sport/rss.xml",
+        homepage: "https://www.bbc.co.uk",
+        trust: 80,
+        poll_interval_s: 900,
+        beat: Some(Beat::Culture),
+    },
+    SeedSource {
+        slug: "npr-culture",
+        name: "NPR Culture",
+        kind: SourceKind::Rss,
+        url: "https://feeds.npr.org/1008/rss.xml",
+        homepage: "https://www.npr.org",
+        trust: 78,
+        poll_interval_s: 1800,
+        beat: Some(Beat::Culture),
+    },
+    // ---- Feeding the two desks that had starved ---------------------------
+    SeedSource {
+        slug: "arstechnica",
+        name: "Ars Technica",
+        kind: SourceKind::Rss,
+        url: "https://feeds.arstechnica.com/arstechnica/index",
+        homepage: "https://arstechnica.com",
+        trust: 84,
+        poll_interval_s: 1200,
+        beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "engadget",
+        name: "Engadget",
+        kind: SourceKind::Rss,
+        url: "https://www.engadget.com/rss.xml",
+        homepage: "https://www.engadget.com",
+        trust: 70,
+        poll_interval_s: 1200,
+        beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "marketwatch",
+        name: "MarketWatch",
+        kind: SourceKind::Rss,
+        url: "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+        homepage: "https://www.marketwatch.com",
+        trust: 78,
+        poll_interval_s: 900,
+        beat: Some(Beat::Markets),
+    },
+    SeedSource {
+        slug: "npr-business",
+        name: "NPR Business",
+        kind: SourceKind::Rss,
+        url: "https://feeds.npr.org/1006/rss.xml",
+        homepage: "https://www.npr.org",
+        trust: 80,
+        poll_interval_s: 1800,
+        beat: Some(Beat::Markets),
+    },
     // Two outlets that welcome crawlers and refuse the model, which is now a
     // distinction BitGoose can honour rather than one it has to choose between.
     //

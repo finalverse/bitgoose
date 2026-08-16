@@ -60,6 +60,18 @@ pub async fn refresh_robots(
         // They are increasingly different answers and were previously not even
         // being asked separately.
         let verdict = robots::verdict(client, agent, &s.url).await;
+        // The AI posture belongs to the publisher, and the feed is often on a
+        // different host that carries none of their rules. `feeds.bbci.co.uk`
+        // says nothing while `www.bbc.co.uk` blocks five AI crawlers, and
+        // `feeds.arstechnica.com` says nothing while `arstechnica.com` blocks
+        // four. Extraction fetches the *article*, so the article's host is the
+        // one whose wishes apply. Falls back to the feed's verdict when a
+        // source has no homepage recorded.
+        let ai = if s.homepage.is_empty() || s.homepage == s.url {
+            verdict.clone()
+        } else {
+            robots::verdict(client, agent, &s.homepage).await
+        };
         if verdict.allowed != s.robots_ok {
             tracing::info!(source = %s.slug, allowed = verdict.allowed, "robots.txt verdict changed");
             let _ = bg_db::sources::set_robots_ok(db, s.id, verdict.allowed).await;

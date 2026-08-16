@@ -51,6 +51,9 @@ pub fn Masthead() -> impl IntoView {
                     <A href="/crypto" attr:class="desk-link">"Crypto"</A>
                     <A href="/markets" attr:class="desk-link">"Markets"</A>
                     <A href="/tech" attr:class="desk-link">"Tech"</A>
+                    <A href="/world" attr:class="desk-link">"World"</A>
+                    <A href="/science" attr:class="desk-link">"Science"</A>
+                    <A href="/culture" attr:class="desk-link">"Culture"</A>
                 </nav>
                 <nav class="nav" aria-label="Sections">
                     <A href="/desk">"Desk"</A>
