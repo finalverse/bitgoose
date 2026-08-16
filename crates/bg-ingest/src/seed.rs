@@ -65,7 +65,12 @@ pub const SOURCES: &[SeedSource] = &[
         homepage: "https://www.aljazeera.com",
         trust: 76,
         poll_interval_s: 900,
-        beat: Some(Beat::World),
+        // `all.xml` is everything they publish — world, sport, business,
+        // culture — so pinning it to one desk files a football result under
+        // World, which is what it did on the first render. Routed per item,
+        // for the same reason MarketWatch is: a general feed that claims a
+        // desk bypasses the classifier entirely.
+        beat: None,
     },
     SeedSource {
         slug: "sciencedaily",
@@ -142,16 +147,11 @@ pub const SOURCES: &[SeedSource] = &[
         beat: Some(Beat::Culture),
     },
     // ---- Feeding the two desks that had starved ---------------------------
-    SeedSource {
-        slug: "arstechnica",
-        name: "Ars Technica",
-        kind: SourceKind::Rss,
-        url: "https://feeds.arstechnica.com/arstechnica/index",
-        homepage: "https://arstechnica.com",
-        trust: 84,
-        poll_interval_s: 1200,
-        beat: Some(Beat::Tech),
-    },
+    //
+    // Ars Technica and MarketWatch are deliberately *not* here: both were
+    // already on the roster with `beat: None`, routed per item on purpose, and
+    // adding them again with a pinned desk silently overrode that — the later
+    // entry wins the upsert. See the guard in the tests below.
     SeedSource {
         slug: "engadget",
         name: "Engadget",
@@ -161,16 +161,6 @@ pub const SOURCES: &[SeedSource] = &[
         trust: 70,
         poll_interval_s: 1200,
         beat: Some(Beat::Tech),
-    },
-    SeedSource {
-        slug: "marketwatch",
-        name: "MarketWatch",
-        kind: SourceKind::Rss,
-        url: "https://feeds.content.dowjones.io/public/rss/mw_topstories",
-        homepage: "https://www.marketwatch.com",
-        trust: 78,
-        poll_interval_s: 900,
-        beat: Some(Beat::Markets),
     },
     SeedSource {
         slug: "npr-business",
@@ -726,4 +716,60 @@ pub async fn seed_entities(db: &Db) -> Result<usize> {
         bg_db::entities::upsert(db, *kind, name, slug, *ticker, &aliases).await?;
     }
     Ok(rows.len())
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// Two slugs, one source. The later entry wins the upsert, so a duplicate
+    /// silently overrides the earlier one's settings and nothing complains.
+    ///
+    /// Found the hard way: Ars Technica and MarketWatch were already on the
+    /// roster routed per item, and adding them again with a pinned desk quietly
+    /// reverted to `beat: None` on every seed.
+    #[test]
+    fn no_two_sources_share_a_slug() {
+        let mut seen = HashSet::new();
+        for s in SOURCES {
+            assert!(
+                seen.insert(s.slug),
+                "duplicate slug in the roster: {}",
+                s.slug
+            );
+        }
+    }
+
+    /// Two entries polling the same feed is the same waste with a different
+    /// shape: two rows, two polls, and the items deduplicate downstream.
+    #[test]
+    fn no_two_sources_poll_the_same_url() {
+        let mut seen = HashSet::new();
+        for s in SOURCES {
+            assert!(seen.insert(s.url), "two sources poll {}", s.url);
+        }
+    }
+
+    /// Every desk in the navigation must have something behind it.
+    ///
+    /// The failure this whole change exists to fix: Markets had one source and
+    /// Tech had none, and both sat in the nav publishing nothing for over a
+    /// week. A desk with no pinned source can still be filled by the per-item
+    /// router, so the bar is deliberately low — but it is not zero.
+    #[test]
+    fn every_desk_has_at_least_one_source() {
+        for beat in [
+            Beat::Ai,
+            Beat::Crypto,
+            Beat::Markets,
+            Beat::Tech,
+            Beat::World,
+            Beat::Science,
+            Beat::Culture,
+        ] {
+            let n = SOURCES.iter().filter(|s| s.beat == Some(beat)).count();
+            assert!(n > 0, "{beat:?} has no dedicated source");
+        }
+    }
 }

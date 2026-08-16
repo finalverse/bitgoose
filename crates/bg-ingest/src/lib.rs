@@ -76,16 +76,14 @@ pub async fn refresh_robots(
             tracing::info!(source = %s.slug, allowed = verdict.allowed, "robots.txt verdict changed");
             let _ = bg_db::sources::set_robots_ok(db, s.id, verdict.allowed).await;
         }
-        if verdict.ai_input != s.ai_input_ok {
+        if ai.ai_input != s.ai_input_ok {
             tracing::info!(
                 source = %s.slug,
-                ai_input = verdict.ai_input,
-                signal = verdict.signal.as_deref().unwrap_or("(none stated)"),
+                ai_input = ai.ai_input,
+                signal = ai.signal.as_deref().unwrap_or("(none stated)"),
                 "publisher's AI posture changed"
             );
-            let _ =
-                bg_db::sources::set_ai_input(db, s.id, verdict.ai_input, verdict.signal.as_deref())
-                    .await;
+            let _ = bg_db::sources::set_ai_input(db, s.id, ai.ai_input, ai.signal.as_deref()).await;
         }
         out.push((s.slug, verdict.allowed));
     }
