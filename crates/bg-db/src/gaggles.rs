@@ -237,3 +237,38 @@ pub async fn count(db: &Db) -> Result<i64> {
         .fetch_one(&db.pool)
         .await?)
 }
+
+/// Every gaggle's id, title and slug — for the Steward to audit.
+pub async fn all_titles(db: &Db) -> Result<Vec<(uuid::Uuid, String, String)>> {
+    let rows = sqlx::query("SELECT id, title, slug FROM gaggles")
+        .fetch_all(&db.pool)
+        .await?;
+    rows.iter()
+        .map(|r| {
+            Ok((
+                r.try_get::<uuid::Uuid, _>("id")?,
+                r.try_get("title")?,
+                r.try_get("slug")?,
+            ))
+        })
+        .collect()
+}
+
+/// Remove a special topic and its story links.
+///
+/// A gaggle is BitGoose's own furniture rather than reporting, so unlike a
+/// story it can simply go: nothing was published under its URL that another
+/// site would have linked to, and the stories it collected are untouched.
+pub async fn delete(db: &Db, id: uuid::Uuid) -> Result<()> {
+    let mut tx = db.pool.begin().await?;
+    sqlx::query("DELETE FROM gaggle_stories WHERE gaggle_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM gaggles WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}

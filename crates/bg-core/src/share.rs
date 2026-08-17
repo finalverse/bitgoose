@@ -187,3 +187,96 @@ mod tests {
         assert!(longest.len() <= 200, "{} chars: {longest}", longest.len());
     }
 }
+
+/// Whether a piece of generated copy is the model declining rather than writing.
+///
+/// A small model asked to name a topic it cannot see enough of does not return
+/// an error — it writes "No story", "Hold: insufficient coverage", "CPI Coverage
+/// Unverified". Stored unchecked, those became **seven of the twelve special
+/// topics on the live front page**, each proudly labelled "5 outlets".
+///
+/// The tell is that the text describes the *act of reporting* rather than the
+/// subject: a refusal talks about coverage, availability and viability, where a
+/// headline talks about the thing that happened. Matching on that is crude and
+/// catches the whole family, which a list of exact strings would not.
+///
+/// Deliberately narrow at the front: only copy that *opens* this way is
+/// rejected. "No viable story" is a refusal; "No viable path to a Senate vote"
+/// is a headline, and the difference is what follows.
+pub fn reads_as_a_refusal(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    if t.is_empty() {
+        return true;
+    }
+    const OPENERS: &[&str] = &[
+        "no story",
+        "no viable",
+        "no significant",
+        "no clear",
+        "no coverage",
+        "no ",
+        "none ",
+        "hold",
+        "insufficient",
+        "unable to",
+        "cannot ",
+        "not enough",
+        "n/a",
+        "unknown",
+        "pending",
+        "tbd",
+        "placeholder",
+    ];
+    if OPENERS.iter().any(|p| t.starts_with(p)) {
+        return true;
+    }
+    // Or ends by admitting the gap: "Kalshi coverage pending",
+    // "CPI Coverage Unverified", "Goldman Sachs — insufficient coverage".
+    const ADMISSIONS: &[&str] = &[
+        "coverage pending",
+        "coverage unverified",
+        "insufficient coverage",
+        "not available",
+        "no data",
+        "awaiting",
+    ];
+    ADMISSIONS.iter().any(|p| t.contains(p))
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+
+    /// Every one of these was on the live front page as a "special topic".
+    #[test]
+    fn the_refusals_that_shipped_are_caught() {
+        for s in [
+            "No SEC story available",
+            "No story",
+            "No viable story",
+            "Hold",
+            "Hold: insufficient coverage",
+            "Kalshi coverage pending",
+            "CPI Coverage Unverified",
+            "",
+            "   ",
+        ] {
+            assert!(reads_as_a_refusal(s), "missed: {s:?}");
+        }
+    }
+
+    /// And real headlines survive, including ones that start with "No".
+    #[test]
+    fn real_copy_is_not_mistaken_for_a_refusal() {
+        for s in [
+            "Clarity Act Set for September Senate Vote",
+            "Tether Completes First Full Audit",
+            "Trump Media Pulls Back From Crypto",
+            "Harmony ONE Price Falls 26% After Minting Attack",
+            "Nobody expected the Fed to move this week",
+            "Nvidia earnings beat expectations",
+        ] {
+            assert!(!reads_as_a_refusal(s), "false positive: {s:?}");
+        }
+    }
+}

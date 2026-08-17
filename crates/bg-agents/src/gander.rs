@@ -304,6 +304,9 @@ pub async fn review_desk(
             .await?;
 
             let _ = claim_ids;
+            // Desk stories are shared at least as often as Wire ones, so they
+            // need their picture on disk before the first crawler arrives too.
+            mirror_lead_image(ctx, story).await;
             info!(story = %story, headline = %copy.headline, "PUBLISHED");
             Ok(Outcome::Published {
                 article: Box::new(article),
@@ -392,6 +395,7 @@ pub async fn publish_wire(ctx: &Ctx, story: StoryId, summary: &str) -> Result<Ou
     bg_db::stories::set_summary(&ctx.db, story, summary).await?;
     bg_db::stories::set_kind(&ctx.db, story, StoryKind::Wire).await?;
     bg_db::stories::set_status(&ctx.db, story, StoryStatus::Published, Some("wire")).await?;
+    mirror_lead_image(ctx, story).await;
     Ok(Outcome::Published {
         article: Box::new(
             bg_db::articles::insert_version(
@@ -411,6 +415,27 @@ pub async fn publish_wire(ctx: &Ctx, story: StoryId, summary: &str) -> Result<Ou
             .await?,
         ),
     })
+}
+
+/// Take our own copy of the story's lead image, at publish time.
+///
+/// **Timing is the whole point.** The first version fetched on the first
+/// crawler request — but a preview client caches what it was given, and WeChat
+/// caches per URL indefinitely. So the first share of every story showed the
+/// generated card, permanently, even when the publisher's photograph was one
+/// fetch away. A story shared five minutes after publication is the normal
+/// case, not the exception.
+///
+/// Failure is silent and harmless: the share card falls back to the one we
+/// draw, which is what it did before this existed.
+async fn mirror_lead_image(ctx: &Ctx, story: StoryId) {
+    let Ok(s) = bg_db::stories::by_id(&ctx.db, story).await else {
+        return;
+    };
+    let Some(url) = s.image_url.as_deref().and_then(bg_core::media::as_image) else {
+        return;
+    };
+    bg_ingest::mirror::store_lead_image(&ctx.http, &s.slug, &url).await;
 }
 
 #[cfg(test)]

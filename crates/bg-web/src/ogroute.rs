@@ -33,11 +33,15 @@
 //! it just as effectively as the page would.
 
 use crate::ogcard::{self, Card, Shape};
+// The cache, the slug guard and the byte sniffer live in `bg-ingest` so the
+// newsroom can fill the cache at publish time. The web crate only serves it.
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
 };
+pub use bg_ingest::mirror::mirrored;
+use bg_ingest::mirror::{cache_dir, safe_slug, sniff, store, store_lead_image};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -62,86 +66,11 @@ const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// and we are being used as a file host.
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
-/// Where rendered cards and mirrored images live between restarts.
+/// Fetch a story's picture in the background, for the paths that discover a
+/// gap at request time.
 ///
-/// The point of putting them on disk at all is that a restart must not send the
-/// next crawler back through an 8-second render. If the configured directory
-/// cannot be created we fall back to the temp dir rather than failing: a
-/// slower cache is still a cache, and an unwritable `/var/cache` should not
-/// take the site down.
-pub fn cache_dir() -> &'static PathBuf {
-    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let want = std::env::var("BG_CACHE_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/var/cache/bitgoose/assets"));
-        if std::fs::create_dir_all(&want).is_ok() {
-            return want;
-        }
-        let fallback = std::env::temp_dir().join("bitgoose-assets");
-        tracing::warn!(
-            path = %want.display(),
-            using = %fallback.display(),
-            "cache directory is not writable; share assets will not survive a reboot"
-        );
-        let _ = std::fs::create_dir_all(&fallback);
-        fallback
-    })
-}
-
-/// Write through a temporary file and rename.
-///
-/// A crawler reading a half-written PNG gets a corrupt image and caches the
-/// result, which outlives the race by however long its cache does. Rename is
-/// atomic within a filesystem, so a reader sees either the old file or the
-/// whole new one.
-fn store(path: &std::path::Path, bytes: &[u8]) {
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-}
-
-/// Slugs are used as filenames, so they are held to what a slug actually is.
-///
-/// Not defence in depth — the DB lookup already constrains this to slugs we
-/// published — but a path is being built from the value, and a component that
-/// builds a path should not take the caller's word for its shape.
-fn safe_slug(slug: &str) -> bool {
-    !slug.is_empty()
-        && slug.len() <= 200
-        && slug
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-pub fn router(db: bg_db::Db) -> axum::Router {
-    axum::Router::new()
-        .route("/og/{slug}", axum::routing::get(card))
-        .route("/img/{slug}", axum::routing::get(mirror))
-        .with_state((db, CardCache::default()))
-}
-
-/// Path of the mirrored publisher image for a story, if we hold one.
-///
-/// The page loader calls this to decide what to advertise: a URL that is
-/// already on disk, or the generated card. Advertising a picture we have not
-/// fetched yet would put the fetch on the crawler's clock, which is the failure
-/// this module exists to remove.
-pub fn mirrored(slug: &str) -> Option<PathBuf> {
-    if !safe_slug(slug) {
-        return None;
-    }
-    let p = cache_dir().join(format!("img-{slug}"));
-    p.is_file().then_some(p)
-}
-
-/// Fetch and store a story's publisher image, if it has one we do not hold.
-///
-/// Spawned, never awaited by a request handler. The first share of a story
-/// therefore shows our own card and later ones show the photograph, which is
-/// the right way round: a card we can draw instantly always beats a photograph
-/// that might arrive.
+/// The main filling happens at publish, in the pipeline — this is the backstop
+/// for stories published before that existed.
 pub fn warm(db: bg_db::Db, slug: String) {
     if !safe_slug(&slug) || mirrored(&slug).is_some() {
         return;
@@ -157,45 +86,20 @@ pub fn warm(db: bg_db::Db, slug: String) {
         else {
             return;
         };
-        // The same client the newsroom polls with, so a publisher sees one
-        // identifiable agent rather than an anonymous second fetcher.
         let ua = std::env::var("BG_USER_AGENT")
             .unwrap_or_else(|_| bg_ingest::http::DEFAULT_UA.to_string());
         let Ok(client) = bg_ingest::http::client(&ua) else {
             return;
         };
-        let Ok(resp) = client.get(&url).send().await else {
-            return;
-        };
-        if !resp.status().is_success() {
-            return;
-        }
-        // Trust the bytes, not the header: a `Content-Type` of `image/jpeg` on
-        // an HTML error page is common enough, and we are about to serve this
-        // to every reader of the story.
-        let Ok(bytes) = resp.bytes().await else {
-            return;
-        };
-        if bytes.len() > MAX_IMAGE_BYTES || sniff(&bytes).is_none() {
-            tracing::debug!(%url, bytes = bytes.len(), "not a usable image; keeping our own card");
-            return;
-        }
-        store(&cache_dir().join(format!("img-{slug}")), &bytes);
-        tracing::info!(%slug, bytes = bytes.len(), "mirrored the publisher's lead image");
+        store_lead_image(&client, &slug, &url).await;
     });
 }
 
-/// Content type from the leading bytes. `None` means it is not an image we
-/// recognise, and we will not serve it.
-fn sniff(b: &[u8]) -> Option<&'static str> {
-    match b {
-        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
-        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
-        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
-        _ if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" => Some("image/webp"),
-        _ if b.starts_with(b"<svg") || b.starts_with(b"<?xml") => None, // scriptable
-        _ => None,
-    }
+pub fn router(db: bg_db::Db) -> axum::Router {
+    axum::Router::new()
+        .route("/og/{slug}", axum::routing::get(card))
+        .route("/img/{slug}", axum::routing::get(mirror))
+        .with_state((db, CardCache::default()))
 }
 
 async fn mirror(

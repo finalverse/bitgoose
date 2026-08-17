@@ -220,6 +220,19 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
             if title.is_empty() || standfirst.is_empty() {
                 return Err(FlockError::Other("gaggle framing was empty".into()));
             }
+            // A small model asked to name a topic it cannot see enough of does
+            // not return an error, it writes "No story" or "Hold: insufficient
+            // coverage". Stored unchecked, seven of the twelve special topics
+            // on the live front page were exactly that, each labelled "5
+            // outlets". An empty check was not enough — the refusal is not
+            // empty, it is prose about the absence of prose.
+            if bg_core::share::reads_as_a_refusal(title)
+                || bg_core::share::reads_as_a_refusal(standfirst)
+            {
+                return Err(FlockError::Other(format!(
+                    "the model declined to frame this topic ({title:?}); not opening a gaggle"
+                )));
+            }
 
             let id = bg_db::gaggles::upsert(
                 &ctx.db,

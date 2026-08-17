@@ -187,9 +187,17 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
                         // empty state when there is genuinely nothing.
                         None if fp.wire.is_empty() => {
                             view! {
+                                // Reader-facing, not developer-facing. This
+                                // said "Run the newsroom to fill it" over the
+                                // literal text `bg run` — an instruction to
+                                // operate a CLI, shown on a public page to
+                                // someone who came to read the news. A desk
+                                // with nothing on it should say what is
+                                // happening and point somewhere useful, not
+                                // hand the reader a shell command.
                                 <Empty
-                                    message="Nothing published on this desk yet. Run the newsroom to fill it."
-                                    hint="bg run"
+                                    message="This desk is being gathered now — the newsroom polls its sources every few minutes."
+                                    hint=""
                                 />
                             }
                                 .into_any()

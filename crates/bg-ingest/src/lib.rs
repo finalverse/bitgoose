@@ -13,6 +13,7 @@ pub mod crawl;
 pub mod feeds;
 pub mod http;
 pub mod market;
+pub mod mirror;
 pub mod readable;
 pub mod relevance;
 pub mod robots;

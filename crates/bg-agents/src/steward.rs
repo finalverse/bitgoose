@@ -126,6 +126,7 @@ pub async fn run(ctx: &Ctx, apply: bool) -> Result<Vec<Finding>> {
     out.extend(check_silent_desks(ctx).await);
     out.extend(check_corroboration(ctx).await);
     out.extend(check_queue(ctx).await);
+    out.extend(check_junk_topics(ctx, apply).await);
 
     let (fixed, noted) = out.iter().partition::<Vec<_>, _>(|f| f.action.is_some());
     info!(
@@ -310,6 +311,46 @@ async fn check_queue(ctx: &Ctx) -> Vec<Finding> {
             "{waiting} items waiting and {lapsed} already aged out unread — \
              intake exceeds what the token budget can triage"
         ),
+    )]
+}
+
+/// Special topics whose framing is a model refusal rather than a topic.
+///
+/// Safe to remove without asking: a gaggle is BitGoose's own furniture, not
+/// reporting, and one titled "No story" over "5 outlets" is worse than an empty
+/// strip. The cause is fixed at the point of creation; this clears what already
+/// shipped, and keeps clearing if a new shape of refusal gets past the guard.
+async fn check_junk_topics(ctx: &Ctx, apply: bool) -> Vec<Finding> {
+    let all = match bg_db::gaggles::all_titles(&ctx.db).await {
+        Ok(v) => v,
+        Err(e) => return vec![Finding::noted("junk-topic", format!("cannot check: {e}"))],
+    };
+    let junk: Vec<_> = all
+        .into_iter()
+        .filter(|(_, title, _)| bg_core::share::reads_as_a_refusal(title))
+        .collect();
+    if junk.is_empty() {
+        return Vec::new();
+    }
+    let names: Vec<&str> = junk.iter().map(|(_, t, _)| t.as_str()).collect();
+    let detail = format!(
+        "{} special topics are model refusals, not topics: {}",
+        junk.len(),
+        names.join(", ")
+    );
+    if !apply {
+        return vec![Finding::noted("junk-topic", detail)];
+    }
+    let mut gone = 0usize;
+    for (id, _, _) in &junk {
+        if bg_db::gaggles::delete(&ctx.db, *id).await.is_ok() {
+            gone += 1;
+        }
+    }
+    vec![Finding::fixed(
+        "junk-topic",
+        detail,
+        format!("removed {gone}"),
     )]
 }
 
