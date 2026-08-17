@@ -22,21 +22,29 @@
 //! hydration bundle — none of which a crawler wants. And it all has to arrive
 //! over a link currently losing a large share of its packets.
 //!
-//! So a request from a known unfurler gets a document with the head and a short
-//! body: one or two queries, no render, no hydration, and about a twentieth of
-//! the bytes.
+//! So a request from a known unfurler gets a lean document: two or three
+//! queries, no server render, no hydration bundle, roughly a sixth of the
+//! bytes. The head is under 4 KB, which is all a crawler ever reads.
+//!
+//! ## It carries the whole story, and that is not a nicety
+//!
+//! The first version served a headline, two lines and a link out. Then a reader
+//! tapped a shared link inside WeChat and got exactly that — because **WeChat's
+//! in-app browser sends `MicroMessenger` just as its crawler does**, so a person
+//! was matched as a bot and handed a stub where the article should have been.
+//!
+//! Two independent fixes, either of which alone prevents it. [`is_navigation`]
+//! separates a person opening a page from something fetching it for a card, on
+//! fetch metadata rather than on the user-agent. And this document now contains
+//! the article, its sources and enough inline style to read on a phone — so
+//! even a misjudged request lands on something worth reading.
 //!
 //! ## This is not cloaking
 //!
-//! Same headline, same description, same picture, same canonical URL, pointing
-//! at the same story. What is removed is the article body, the navigation and
-//! the JavaScript — none of which is content a preview can show. The test is
-//! whether a reader following the link finds what the card promised, and they
-//! do; the body even carries the headline and standfirst as text, so a crawler
-//! that ignores meta tags entirely still reads the same thing.
-//!
-//! A browser is never served this. If the user-agent is not a recognised
-//! unfurler the request goes to the real page untouched.
+//! Same headline, same standfirst, same picture, same canonical URL, and now
+//! the same reporting. What is dropped is the navigation, the claim ledger and
+//! the JavaScript. A reader who follows the link finds what the card promised,
+//! which is the only test that matters.
 
 use axum::{
     body::Body,
@@ -85,11 +93,54 @@ const UNFURLERS: &[&str] = &[
 ];
 
 pub fn is_unfurler(headers: &HeaderMap) -> bool {
-    headers
+    let named = headers
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .map(|ua| ua.to_lowercase())
-        .is_some_and(|ua| UNFURLERS.iter().any(|u| ua.contains(u)))
+        .is_some_and(|ua| UNFURLERS.iter().any(|u| ua.contains(u)));
+    named && !is_navigation(headers)
+}
+
+/// Whether this is a person opening a page, rather than something fetching it
+/// to draw a card.
+///
+/// **The user-agent alone cannot answer this**, and assuming it could shipped a
+/// real regression: WeChat's in-app browser sends `MicroMessenger` in exactly
+/// the same way its crawler does, so every reader who tapped a shared BitGoose
+/// link inside WeChat was handed the crawler's stub — a headline, two lines and
+/// a link out — instead of the article. The test that was supposed to catch
+/// this checked Safari and Chrome, and missed the one case where a crawler and
+/// a reader share a token.
+///
+/// Fetch metadata settles it. A browser navigating to a page sends
+/// `Sec-Fetch-Dest: document` (or at minimum `Upgrade-Insecure-Requests`, which
+/// predates it); a preview fetcher sends neither. Where both are absent, an
+/// `Accept` header that asks for HTML *by preference* is the older signal —
+/// crawlers overwhelmingly send `*/*`.
+///
+/// Erring toward "person" throughout: serving a reader the stub is a broken
+/// page, while serving a crawler the full article only makes its preview slower.
+fn is_navigation(h: &HeaderMap) -> bool {
+    if h.get("sec-fetch-dest")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("document"))
+    {
+        return true;
+    }
+    if h.get("sec-fetch-mode")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("navigate"))
+    {
+        return true;
+    }
+    if h.contains_key("upgrade-insecure-requests") {
+        return true;
+    }
+    // No fetch metadata at all. `Accept: text/html,...` with a q-list is what a
+    // browser sends; `*/*` or an absent header is what a fetcher sends.
+    h.get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|a| a.contains("text/html") && a.contains(','))
 }
 
 /// WeChat crops a preview to a small square; everyone else renders it wide.
@@ -142,6 +193,16 @@ pub struct Card {
     pub square: bool,
     pub published: String,
     pub section: String,
+    /// The story itself, as HTML.
+    ///
+    /// Present because this document is not only read by crawlers. A person who
+    /// taps a shared link inside an app's own browser can land here, and a
+    /// headline over a "read this elsewhere" link is a broken page, not a fast
+    /// one. What is dropped is the navigation, the claim ledger and the
+    /// hydration bundle — not the reporting.
+    pub body_html: String,
+    /// Outlets behind the story, so the attribution survives too.
+    pub sources: Vec<(String, String)>,
 }
 
 /// Build the document. Kept separate from the handler so the shape of it can be
@@ -215,15 +276,58 @@ pub fn document(c: &Card) -> String {
     s.push_str("<meta property=\"article:publisher\" content=\"BitGoose\">");
     s.push_str(&format!("<link rel=\"canonical\" href=\"{url}\">"));
     s.push_str("<link rel=\"icon\" href=\"/favicon.ico\">");
+    // Enough style to be readable on a phone without fetching a stylesheet.
+    // Inline and tiny: a second request would cost more than the rules are
+    // worth, and this document exists because the network is slow.
+    s.push_str(
+        "<style>:root{color-scheme:light dark}\
+body{margin:0 auto;padding:1.25rem;max-width:38rem;font:1.05rem/1.65 -apple-system,\
+BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#14181d;background:#fff;\
+overflow-wrap:break-word}\
+h1{font-size:1.6rem;line-height:1.25;margin:0 0 .5rem}\
+.dek{font-size:1.1rem;color:#4a5560;margin:0 0 .75rem}\
+.meta{font-size:.85rem;letter-spacing:.06em;text-transform:uppercase;color:#6b7480;margin:0 0 1rem}\
+img{max-width:100%;height:auto;border-radius:6px}\
+h2{font-size:1.15rem;margin:1.5rem 0 .4rem}\
+a{color:#8a6200}\
+.srcs{margin:1.25rem 0 0;padding:.9rem 0 0;border-top:1px solid #e4e0d8;font-size:.92rem}\
+.srcs li{margin:.3rem 0}\
+footer{margin-top:1.75rem;font-size:.85rem;color:#6b7480}\
+@media(prefers-color-scheme:dark){body{color:#edeae3;background:#0b0d10}\
+.dek{color:#9aa3ad}.meta,footer{color:#838c97}.srcs{border-color:#232a31}a{color:#f5b301}}\
+</style>",
+    );
     s.push_str("</head><body>");
-    // The same words again as text, for the crawlers that read the body rather
-    // than the head — WeChat among them, historically.
-    s.push_str(&format!("<h1>{title}</h1><p>{desc}</p>"));
+    if !c.section.is_empty() {
+        s.push_str(&format!("<p class=\"meta\">{}</p>", esc(&c.section)));
+    }
+    s.push_str(&format!("<h1>{title}</h1>"));
+    if !desc.is_empty() {
+        s.push_str(&format!("<p class=\"dek\">{desc}</p>"));
+    }
     s.push_str(&format!(
         "<p><img src=\"{image}\" alt=\"{title}\" width=\"{w}\" height=\"{h}\"></p>"
     ));
+    // The story itself. Its absence is what made this page useless to the
+    // reader who tapped a shared link inside an app's own browser and got a
+    // headline over a link out.
+    if !c.body_html.is_empty() {
+        s.push_str(&c.body_html);
+    }
+    if !c.sources.is_empty() {
+        s.push_str("<h2>Sources</h2><ul class=\"srcs\">");
+        for (name, href) in &c.sources {
+            s.push_str(&format!(
+                "<li><a href=\"{}\" rel=\"nofollow noopener\">{}</a></li>",
+                esc(href),
+                esc(name)
+            ));
+        }
+        s.push_str("</ul>");
+    }
     s.push_str(&format!(
-        "<p><a href=\"{url}\">Read this story on BitGoose</a></p>"
+        "<footer><a href=\"{url}\">Open on BitGoose</a> — every claim with the \
+         outlets behind it.</footer>"
     ));
     s.push_str("</body></html>");
     s
@@ -295,6 +399,8 @@ async fn build(db: &bg_db::Db, path: &str, square: bool) -> Option<Card> {
                 square: false,
                 published: String::new(),
                 section: String::new(),
+                body_html: String::new(),
+                sources: Vec::new(),
             });
         }
         return None;
@@ -339,6 +445,17 @@ async fn build(db: &bg_db::Db, path: &str, square: bool) -> Option<Card> {
         format!("{base}/og/{slug}.png{}", if square { "?sq=1" } else { "" })
     };
 
+    // Markdown to HTML, the same conversion the full page uses, so the two
+    // cannot render the same story differently.
+    let body_html = article
+        .as_ref()
+        .map(|a| crate::api::render_body(&a.body_md))
+        .unwrap_or_default();
+    let sources: Vec<(String, String)> = refs
+        .iter()
+        .map(|r| (r.name.clone(), r.url.clone()))
+        .collect();
+
     Some(Card {
         title: clip(&title, 110),
         description: clip(&description, 200),
@@ -350,6 +467,8 @@ async fn build(db: &bg_db::Db, path: &str, square: bool) -> Option<Card> {
             .map(|t| t.to_rfc3339())
             .unwrap_or_default(),
         section: story.category.label().to_string(),
+        body_html,
+        sources,
     })
 }
 
@@ -404,6 +523,8 @@ mod tests {
             square: true,
             published: "2026-08-11T09:00:00Z".into(),
             section: "Policy".into(),
+            body_html: String::new(),
+            sources: Vec::new(),
         }
     }
 
@@ -426,10 +547,59 @@ mod tests {
 
     #[test]
     fn it_is_small_enough_to_arrive() {
-        // The whole point. The real page is 30 KB and takes 4.5 seconds over
-        // this link; crawlers give up in two.
+        // The head, which is all a crawler reads, must stay tiny — the real
+        // page is 30 KB and takes 4.5 seconds over this link, and crawlers give
+        // up in two.
         let d = document(&card());
-        assert!(d.len() < 2_500, "stub grew to {} bytes", d.len());
+        let head = d.find("</head>").expect("has a head");
+        assert!(head < 4_000, "head grew to {head} bytes");
+    }
+
+    /// The regression that sent this back for a second pass: a reader who
+    /// tapped a shared link inside WeChat's own browser was served the crawler
+    /// document, and it had no article in it.
+    #[test]
+    fn the_page_carries_the_story_not_a_stub() {
+        let mut c = card();
+        c.body_html = "<p>The commission said it would proceed regardless.</p>".into();
+        c.sources = vec![("Decrypt".into(), "https://decrypt.co/x".into())];
+        let d = document(&c);
+        assert!(d.contains("The commission said it would proceed regardless."));
+        assert!(d.contains("Decrypt"));
+        assert!(d.contains("https://decrypt.co/x"));
+    }
+
+    #[test]
+    fn a_person_in_an_in_app_browser_is_not_a_crawler() {
+        // WeChat's in-app browser and WeChat's crawler share a user-agent
+        // token. Fetch metadata is what separates them, and getting this wrong
+        // served every WeChat reader a stub.
+        let wechat = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) \
+                      AppleWebKit/605.1.15 MicroMessenger/8.0.49 NetType/WIFI";
+        let mut nav = ua(wechat);
+        nav.insert("sec-fetch-dest", "document".parse().unwrap());
+        assert!(!is_unfurler(&nav), "a WeChat reader was served the stub");
+
+        let mut older = ua(wechat);
+        older.insert("upgrade-insecure-requests", "1".parse().unwrap());
+        assert!(!is_unfurler(&older));
+
+        let mut accepts = ua(wechat);
+        accepts.insert(
+            header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                .parse()
+                .unwrap(),
+        );
+        assert!(!is_unfurler(&accepts));
+
+        // The crawler itself sends none of that.
+        let mut bot = ua(wechat);
+        bot.insert(header::ACCEPT, "*/*".parse().unwrap());
+        assert!(
+            is_unfurler(&bot),
+            "the crawler must still get the fast path"
+        );
     }
 
     #[test]

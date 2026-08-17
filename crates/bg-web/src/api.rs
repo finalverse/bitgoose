@@ -122,7 +122,7 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
 /// the primary navigation of a story page, and a reader with JavaScript off
 /// should still be able to walk from a sentence to its evidence.
 #[cfg(feature = "ssr")]
-fn render_body(md: &str) -> String {
+pub(crate) fn render_body(md: &str) -> String {
     use pulldown_cmark::{html, Options, Parser};
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
