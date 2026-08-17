@@ -274,13 +274,30 @@ pub async fn run_once(ctx: &Ctx, opts: &RunOpts) -> Result<PipelineReport> {
     // running it earlier would spend the top-tier budget on drafts that the
     // editor may still kill. Failures here never fail the pass — a story
     // without a take is the normal case, not an error.
-    if opts.max_analyses > 0 {
-        match bg_db::analyses::needing_analysis(
-            &ctx.db,
-            skein::MIN_GROUNDING_CHARS as i64,
-            opts.max_analyses,
-        )
-        .await
+    // Bounded by the day, not only by the pass.
+    //
+    // `max_analyses` caps one pass; the worker runs many, so the real ceiling
+    // was however many passes the day happened to contain. Measured, that came
+    // to 42 analyses consuming **52% of all inference** — on a newsroom that
+    // also wants to cover seven desks and was leaving 78% of its intake
+    // untriaged.
+    //
+    // Nothing is dropped, only deferred: `needing_analysis` orders by the front
+    // page's own ranking, so the day's analyses go to the stories most likely
+    // to be read rather than to whichever cleared the grounding floor first.
+    let today = bg_db::analyses::count_24h(&ctx.db).await.unwrap_or(0);
+    let room = (ctx.cfg.max_analyses_per_day - today).clamp(0, opts.max_analyses);
+    if room < opts.max_analyses {
+        info!(
+            done_today = today,
+            cap = ctx.cfg.max_analyses_per_day,
+            room,
+            "the day's analysis budget is mostly spent"
+        );
+    }
+    if room > 0 {
+        match bg_db::analyses::needing_analysis(&ctx.db, skein::MIN_GROUNDING_CHARS as i64, room)
+            .await
         {
             Ok(ids) => {
                 for id in ids {

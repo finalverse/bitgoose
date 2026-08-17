@@ -96,6 +96,17 @@ pub struct FlockConfig {
     /// Spend ceiling per run in USD. Zero disables the check.
     pub run_budget_usd: Decimal,
     pub user_agent: String,
+    /// Newsworthiness a Wire story must reach before a model writes its
+    /// summary. Below it the card publishes as headline, outlet and link.
+    pub wire_summary_floor: i16,
+    /// Most stories the Skein will analyse in a day.
+    ///
+    /// The Skein is the single largest consumer of inference — 52% of a
+    /// measured day, 42 analyses at ~3,000 tokens each — on a site that also
+    /// wants to cover seven desks. A daily cap turns "analyse everything that
+    /// clears the grounding floor" into "analyse the most newsworthy N", which
+    /// is what `needing_analysis` already orders by.
+    pub max_analyses_per_day: i64,
     /// What each agent may spend per day, in CCC-wei.
     ///
     /// Per agent, not shared: the point of a mandate is that a fault in one
@@ -121,6 +132,8 @@ impl Default for FlockConfig {
             // single agent reaching this has taken half of everything and is
             // almost certainly looping. A ceiling nothing can ever touch would
             // be a number on a page, not a control.
+            wire_summary_floor: 65,
+            max_analyses_per_day: 20,
             agent_budget_ccc: bg_core::mandate::CCC / 10,
             ccc_per_mtok: bg_core::mandate::DEFAULT_CCC_PER_MTOK,
             ingest_concurrency: 4,
@@ -142,6 +155,14 @@ impl FlockConfig {
             // Parsed as a decimal CCC amount — "0.1", "2.5" — because the
             // useful settings here are fractions of a token and an integer-only
             // knob could not express any of them.
+            wire_summary_floor: std::env::var("BG_WIRE_SUMMARY_FLOOR")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(d.wire_summary_floor),
+            max_analyses_per_day: std::env::var("BG_MAX_ANALYSES_PER_DAY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(d.max_analyses_per_day),
             agent_budget_ccc: std::env::var("BG_AGENT_BUDGET_CCC")
                 .ok()
                 .and_then(|v| v.trim().parse::<f64>().ok())

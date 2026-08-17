@@ -73,6 +73,28 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<crate::gander::Outcome> {
         return crate::gander::publish_wire(ctx, story, "").await;
     }
 
+    // Spend the writing budget where it is read.
+    //
+    // Measured over a day: Herald was 30% of the newsroom's entire token spend
+    // — 79 calls at about 920 tokens — while the daily allowance was running at
+    // 123% of its cap and 78% of ingested items were never triaged at all. Half
+    // of that was going on the routine end of the Wire, where a card is already
+    // complete without it: headline, outlet, link.
+    //
+    // The floor sits just above the median (63 over the last week), so roughly
+    // half of Wire items publish as a pointer and the better half still get
+    // written prose. Nothing is *lost* below the line: the card renders, and a
+    // share of it falls back to `bg_core::share::coverage_line`, which states
+    // who reported it from the record rather than from a model.
+    if s.newsworthiness < ctx.cfg.wire_summary_floor {
+        info!(
+            story = %story, newsworthiness = s.newsworthiness,
+            floor = ctx.cfg.wire_summary_floor,
+            "below the summary floor; publishing the pointer"
+        );
+        return crate::gander::publish_wire(ctx, story, "").await;
+    }
+
     let summary = stage(
         ctx,
         AgentRole::Herald,

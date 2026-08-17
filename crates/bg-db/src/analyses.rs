@@ -207,3 +207,18 @@ pub async fn clear(db: &Db) -> Result<u64> {
         .await?
         .rows_affected())
 }
+
+/// Analyses written in the last 24 hours.
+///
+/// The Skein is the newsroom's largest single consumer of inference — 52% of a
+/// measured day — so its cap has to be enforced against what actually happened,
+/// not against a per-pass count. A per-pass limit multiplied by however many
+/// passes the day contained, which is the same as no limit at all.
+pub async fn count_24h(db: &Db) -> Result<i64> {
+    let row = sqlx::query(
+        "SELECT count(*)::bigint AS n FROM analyses WHERE created_at > now() - interval '24 hours'",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    Ok(row.try_get("n")?)
+}
