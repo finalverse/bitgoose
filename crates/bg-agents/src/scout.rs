@@ -49,6 +49,13 @@ pub async fn enrich(ctx: &Ctx, limit: i64) -> Result<(usize, usize)> {
         {
             Ok(Some(ex)) => {
                 bg_db::items::record_extraction(&ctx.db, *id, Some(&ex.text), ex.via).await?;
+                // The page's own share image, where the feed carried none. Free
+                // — the page is already open for the text — and it is the
+                // difference between a story that looks like a news article and
+                // one that looks like a link.
+                if let Some(img) = ex.image.as_deref().filter(|u| !u.is_empty()) {
+                    let _ = bg_db::items::record_page_image(&ctx.db, *id, img).await;
+                }
                 got += 1;
             }
             Ok(None) => {

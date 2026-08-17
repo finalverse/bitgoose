@@ -75,6 +75,17 @@ pub struct Extracted {
     /// Which selector won. Recorded so a publisher whose layout changes shows up
     /// as a shift in this distribution rather than as silently thinner stories.
     pub via: &'static str,
+    /// The publisher's own lead image, from the page's `og:image`.
+    ///
+    /// **Only 44% of published stories had a picture**, because only the feeds
+    /// that bother to include one gave us anything — and a page with no picture
+    /// next to Decrypt's, which always has one, simply looks thinner.
+    ///
+    /// `og:image` is the right thing to take: it is the image the publisher
+    /// chose to represent the story when it is shared, so using it as ours is
+    /// using it for its purpose. It costs nothing extra — we already have the
+    /// page open for the text.
+    pub image: Option<String>,
 }
 
 /// Fetch `url` and extract its article text.
@@ -108,7 +119,45 @@ pub async fn fetch(
     }
 
     let body = resp.text().await?;
-    Ok(extract(&body))
+    Ok(extract(&body).map(|mut e| {
+        e.image = lead_image(&body, url);
+        e
+    }))
+}
+
+/// The publisher's own share image for this page.
+///
+/// `og:image` first, then Twitter's equivalent, then the JSON-LD `image` — the
+/// same order of preference every other unfurler uses, and for the same reason:
+/// the first is the one the publisher explicitly chose for this purpose.
+///
+/// Relative URLs are resolved against the page, because a surprising number of
+/// sites emit `/images/hero.jpg` in a tag whose entire purpose is to be read by
+/// someone else.
+pub fn lead_image(html: &str, page_url: &str) -> Option<String> {
+    let doc = Html::parse_document(html);
+    let pick = |sel: &str, attr: &str| -> Option<String> {
+        let s = Selector::parse(sel).ok()?;
+        doc.select(&s)
+            .filter_map(|e| e.value().attr(attr))
+            .map(|v| v.trim())
+            .find(|v| !v.is_empty())
+            .map(|v| v.to_string())
+    };
+    let raw = pick("meta[property=\"og:image\"]", "content")
+        .or_else(|| pick("meta[property=\"og:image:url\"]", "content"))
+        .or_else(|| pick("meta[name=\"twitter:image\"]", "content"))
+        .or_else(|| pick("meta[name=\"twitter:image:src\"]", "content"))
+        .or_else(|| pick("link[rel=\"image_src\"]", "href"))?;
+
+    let abs = if raw.starts_with("http") {
+        raw
+    } else {
+        url::Url::parse(page_url).ok()?.join(&raw).ok()?.to_string()
+    };
+    // The same guard the lead-image picker uses on feed images: tracking
+    // pixels, spacers and share sprites live in these fields too.
+    crate::canonical::canonicalize(&abs).into()
 }
 
 /// Pull the article text out of an HTML document.
@@ -124,6 +173,7 @@ pub fn extract(html: &str) -> Option<Extracted> {
             return Some(Extracted {
                 text: cap(text),
                 via: "json-ld",
+                image: None,
             });
         }
     }
@@ -140,6 +190,7 @@ pub fn extract(html: &str) -> Option<Extracted> {
             return Some(Extracted {
                 text: cap(text),
                 via: sel,
+                image: None,
             });
         }
     }
@@ -150,6 +201,7 @@ pub fn extract(html: &str) -> Option<Extracted> {
     (text.chars().count() >= MIN_CHARS).then(|| Extracted {
         text: cap(text),
         via: "all-paragraphs",
+        image: None,
     })
 }
 
@@ -348,5 +400,56 @@ mod tests {
             1,
             "duplicate paragraph stored twice"
         );
+    }
+}
+
+#[cfg(test)]
+mod lead_image_tests {
+    use super::*;
+
+    #[test]
+    fn og_image_wins_and_is_taken() {
+        let h = r#"<html><head>
+            <meta property="og:image" content="https://cdn.example.com/sec-seal.jpg">
+            <meta name="twitter:image" content="https://cdn.example.com/other.jpg">
+        </head><body></body></html>"#;
+        assert_eq!(
+            lead_image(h, "https://decrypt.co/375779/story").as_deref(),
+            Some("https://cdn.example.com/sec-seal.jpg")
+        );
+    }
+
+    #[test]
+    fn twitter_is_the_fallback() {
+        let h = r#"<html><head>
+            <meta name="twitter:image" content="https://cdn.example.com/t.jpg">
+        </head></html>"#;
+        assert_eq!(
+            lead_image(h, "https://example.com/a").as_deref(),
+            Some("https://cdn.example.com/t.jpg")
+        );
+    }
+
+    #[test]
+    fn a_relative_url_is_resolved_against_the_page() {
+        // Sites do emit these in a tag whose whole purpose is to be read by
+        // someone on another host.
+        let h = r#"<html><head><meta property="og:image" content="/img/hero.jpg"></head></html>"#;
+        assert_eq!(
+            lead_image(h, "https://example.com/news/story").as_deref(),
+            Some("https://example.com/img/hero.jpg")
+        );
+    }
+
+    #[test]
+    fn a_page_with_no_share_image_yields_nothing() {
+        let h = "<html><head><title>x</title></head><body><p>hi</p></body></html>";
+        assert_eq!(lead_image(h, "https://example.com/a"), None);
+    }
+
+    #[test]
+    fn an_empty_tag_is_not_an_image() {
+        let h = r#"<html><head><meta property="og:image" content="  "></head></html>"#;
+        assert_eq!(lead_image(h, "https://example.com/a"), None);
     }
 }

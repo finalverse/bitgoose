@@ -409,6 +409,23 @@ pub async fn record_extract_failure(db: &Db, id: RawItemId) -> Result<()> {
 /// `body` of `None` marks the attempt without changing the text — a paywall or
 /// a video page is a permanent answer, and retrying it every run would be a
 /// slow-motion hammering of a site that already told us no.
+/// Take the page's own share image, but only where the feed gave us none.
+///
+/// `COALESCE` rather than overwrite: a feed that troubled to include an image
+/// chose that one for this story, and a page's `og:image` is sometimes a
+/// section banner. The feed wins where it spoke; this fills the silence — which
+/// on this corpus was 56% of published stories having no picture at all.
+pub async fn record_page_image(db: &Db, id: RawItemId, image: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE raw_items SET image_url = COALESCE(NULLIF(image_url, \'\'), $2) WHERE id = $1",
+    )
+    .bind(id.into_uuid())
+    .bind(image)
+    .execute(&db.pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn record_extraction(
     db: &Db,
     id: RawItemId,

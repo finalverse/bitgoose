@@ -555,7 +555,22 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
     // placeholder. So the crawler is given the card we can always serve, and
     // the mirror fills in behind for the next share.
     let (image_url, share_image) = if image_url.is_empty() {
-        (image_url, String::new())
+        // No publisher picture. Show the card we already draw for sharing
+        // rather than nothing at all.
+        //
+        // 46% of the corpus is arXiv preprints and similar, which have no
+        // image by nature — so nearly half of every desk rendered as a wall of
+        // text next to sites where every story carries a photograph. The card
+        // is generated from the story's own facts (headline, desk, source
+        // count) and is already on disk for the share path, so this costs a
+        // static file read and makes the page look like a news page.
+        (
+            format!("{}/og/{}.png", base.trim_end_matches('/'), story.slug),
+            String::new(),
+        )
+        // NB: the credit is cleared below. Attributing a card BitGoose drew to
+        // the outlet that reported the story would be a false credit on the
+        // most visible part of the page.
     } else if crate::ogroute::mirrored(&story.slug).is_some() {
         let ours = format!("{}/img/{}", base.trim_end_matches('/'), story.slug);
         (ours.clone(), ours)
@@ -625,6 +640,14 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         &refs.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
         analysis.is_some(),
     );
+
+    // Ours, not theirs: no credit line under a card we generated.
+    let own_card = image_url.contains("/og/");
+    let (image_credit, image_credit_url) = if own_card {
+        (String::new(), String::new())
+    } else {
+        (image_credit, image_credit_url)
+    };
 
     Ok(Some(StoryPage {
         slug: story.slug.clone(),
