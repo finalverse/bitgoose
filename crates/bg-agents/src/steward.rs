@@ -1,0 +1,325 @@
+//! The agent that looks after the newsroom itself.
+//!
+//! Every other agent works on the news. This one works on the machine that
+//! makes it: it reads the health signals, decides which are actionable, fixes
+//! what it can safely fix, and writes down the rest.
+//!
+//! ## Why it exists
+//!
+//! Every fault found in this codebase over the last week was found by a person
+//! running `bg doctor`, reading a number, and thinking about it. Markets and
+//! Tech published nothing for eight and thirteen days. 1,407 of 1,438 stories
+//! carried a single source. 359 items held text their publishers had asked not
+//! be used that way. None of those were subtle — each was a number sitting in a
+//! health check waiting to be noticed, and nothing was doing the noticing.
+//!
+//! A newsroom that runs itself has to include the running.
+//!
+//! ## Deliberately without a model
+//!
+//! Not one call. Three reasons, in order of weight:
+//!
+//! 1. **It has to work when nothing else does.** The condition most worth
+//!    catching is the newsroom being broken, and "the inference provider is
+//!    refusing us" is one of the ways it breaks. A health check that needs the
+//!    provider is offline exactly when it matters.
+//! 2. **There is no budget for it.** Measured, the newsroom runs at 123% of its
+//!    daily token cap. Spending any of it on watching itself would come out of
+//!    reporting.
+//! 3. **These questions are arithmetic.** "Has this desk published today", "is
+//!    the queue growing", "are we holding text we said we would not" — a model
+//!    would add latency, cost and a chance of being wrong, and subtract
+//!    nothing.
+//!
+//! ## What it may and may not do
+//!
+//! It acts only where the action is **reversible and its own**: reconciling a
+//! denormalised counter, erasing text a publisher declined, disabling a source
+//! that has failed repeatedly. It never publishes, never retracts a story,
+//! never edits copy, and never touches code.
+//!
+//! Everything else it writes down. A finding it cannot act on is reported, not
+//! silently swallowed — an agent that quietly decides a problem is unfixable is
+//! worse than no agent, because it also stops anyone else looking.
+
+use crate::{Ctx, Result};
+use tracing::{info, warn};
+
+/// How long a source must be both failing and silent before it is rested.
+///
+/// Long, because the most common cause of a failed poll here is not the
+/// publisher: the host's uplink drops a large share of its packets, and eleven
+/// of fifteen polls failing at once has meant the network, not eleven dead
+/// feeds. Disabling healthy sources because the wire was bad would be the agent
+/// causing the outage it exists to catch.
+///
+/// There is no failure counter in the schema, and this is better than one
+/// anyway: it asks whether the source is *producing*, not whether the last
+/// request happened to fail.
+const BARREN_HOURS: i64 = 72;
+
+/// A desk silent for longer than this has something wrong with it.
+///
+/// Markets went eight days and Tech thirteen before anyone noticed. Two days is
+/// long enough to survive a quiet weekend on a slow desk and short enough that
+/// nobody has to spot it by eye.
+const DESK_SILENT_HOURS: i64 = 48;
+
+/// Above this share of single-source stories, clustering has stopped working.
+const SINGLE_SOURCE_ALARM: f64 = 92.0;
+
+// The thresholds encode judgements that were expensive to learn, so drifting
+// past them should stop the build rather than quietly change behaviour. Written
+// as compile-time assertions because that is what they are — a runtime test of
+// a constant tests nothing, which clippy says more briefly.
+const _: () = {
+    // Eleven of fifteen polls failed at once on a bad uplink. A source must be
+    // silent for days, not minutes, before the Steward rests it.
+    assert!(BARREN_HOURS >= 48);
+    // Markets went eight days unnoticed; two is the most that should pass.
+    assert!(DESK_SILENT_HOURS <= 48);
+};
+
+/// What the Steward found, and what it did about it.
+#[derive(Debug, Clone)]
+pub struct Finding {
+    /// Short stable key, for grouping in logs.
+    pub kind: &'static str,
+    /// What is wrong, in a sentence a person can act on.
+    pub detail: String,
+    /// What was done, or `None` when it needs a decision or a code change.
+    pub action: Option<String>,
+}
+
+impl Finding {
+    fn noted(kind: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+            action: None,
+        }
+    }
+
+    fn fixed(kind: &'static str, detail: impl Into<String>, action: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+            action: Some(action.into()),
+        }
+    }
+
+    /// Whether this needs a person: a decision, or a change to the code.
+    pub fn needs_a_human(&self) -> bool {
+        self.action.is_none()
+    }
+}
+
+/// Run a full round: check everything, fix what is safe, report the rest.
+///
+/// `apply` false makes it read-only, which is how it should be run the first
+/// time against any database it has not seen.
+pub async fn run(ctx: &Ctx, apply: bool) -> Result<Vec<Finding>> {
+    let mut out = Vec::new();
+    out.extend(check_declined_text(ctx, apply).await);
+    out.extend(check_source_counts(ctx, apply).await);
+    out.extend(check_failing_sources(ctx, apply).await);
+    out.extend(check_silent_desks(ctx).await);
+    out.extend(check_corroboration(ctx).await);
+    out.extend(check_queue(ctx).await);
+
+    let (fixed, noted) = out.iter().partition::<Vec<_>, _>(|f| f.action.is_some());
+    info!(
+        fixed = fixed.len(),
+        needs_a_human = noted.len(),
+        applied = apply,
+        "steward round complete"
+    );
+    for f in &out {
+        match &f.action {
+            Some(a) => info!(kind = f.kind, detail = %f.detail, action = %a, "steward acted"),
+            None => {
+                warn!(kind = f.kind, detail = %f.detail, "steward found something it cannot fix")
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Text held from publishers who decline model input.
+///
+/// Safe to act on without asking: erasing it is what the publisher asked for,
+/// it removes only a private working copy, and the story keeps its headline,
+/// link and citation.
+async fn check_declined_text(ctx: &Ctx, apply: bool) -> Vec<Finding> {
+    let held = match bg_db::items::declined_text_held(&ctx.db).await {
+        Ok(0) => return Vec::new(),
+        Ok(n) => n,
+        Err(e) => {
+            return vec![Finding::noted(
+                "declined-text",
+                format!("cannot check: {e}"),
+            )]
+        }
+    };
+    let detail =
+        format!("holding extracted text from {held} items whose publisher declines model input");
+    if !apply {
+        return vec![Finding::noted("declined-text", detail)];
+    }
+    match bg_db::items::purge_declined_text(&ctx.db).await {
+        Ok(n) => vec![Finding::fixed(
+            "declined-text",
+            detail,
+            format!("erased {n}"),
+        )],
+        Err(e) => vec![Finding::noted(
+            "declined-text",
+            format!("{detail}; purge failed: {e}"),
+        )],
+    }
+}
+
+/// `source_count` drifting from the evidence.
+///
+/// A page listing three outlets while claiming one source is worse than not
+/// folding at all, and the column is denormalised so it can drift.
+async fn check_source_counts(ctx: &Ctx, apply: bool) -> Vec<Finding> {
+    if !apply {
+        return Vec::new();
+    }
+    match bg_db::stories::reconcile_source_counts(&ctx.db).await {
+        Ok(0) => Vec::new(),
+        Ok(n) => vec![Finding::fixed(
+            "source-count",
+            format!("{n} stories disagreed with their own evidence"),
+            format!("recomputed {n}"),
+        )],
+        Err(e) => vec![Finding::noted(
+            "source-count",
+            format!("cannot reconcile: {e}"),
+        )],
+    }
+}
+
+/// Sources failing every poll.
+///
+/// Rested rather than deleted, and only after many consecutive failures — on
+/// this host a failed poll usually means the uplink, not the publisher.
+async fn check_failing_sources(ctx: &Ctx, apply: bool) -> Vec<Finding> {
+    let sick = match bg_db::sources::failing_and_barren(&ctx.db, BARREN_HOURS).await {
+        Ok(v) => v,
+        Err(e) => {
+            return vec![Finding::noted(
+                "source-health",
+                format!("cannot check: {e}"),
+            )]
+        }
+    };
+    let mut out = Vec::new();
+    for (_id, slug, quiet, err) in sick {
+        let detail = format!("{slug} is failing and has produced nothing for {quiet}h: {err}");
+        if !apply {
+            out.push(Finding::noted("source-health", detail));
+            continue;
+        }
+        match bg_db::sources::set_enabled(&ctx.db, &slug, false).await {
+            Ok(()) => out.push(Finding::fixed(
+                "source-health",
+                detail,
+                // `bg seed` will not undo this: the upsert leaves `enabled`
+                // alone on purpose, so an operator's decision survives a
+                // redeploy. Pointing at a command that does nothing would
+                // strand the source and confuse whoever tried.
+                format!("rested {slug}; `bg source {slug} --wake` puts it back"),
+            )),
+            Err(e) => out.push(Finding::noted("source-health", format!("{detail}; {e}"))),
+        }
+    }
+    out
+}
+
+/// A desk in the navigation that has stopped publishing.
+///
+/// Never acted on automatically. The cause is always upstream — no sources, a
+/// dead feed, a classifier sending everything elsewhere — and each has a
+/// different answer. Guessing between them is how an agent makes things worse.
+async fn check_silent_desks(ctx: &Ctx) -> Vec<Finding> {
+    let quiet = match bg_db::stories::silent_desks(&ctx.db, DESK_SILENT_HOURS).await {
+        Ok(v) => v,
+        Err(e) => return vec![Finding::noted("silent-desk", format!("cannot check: {e}"))],
+    };
+    quiet
+        .into_iter()
+        .map(|(beat, hours)| {
+            Finding::noted(
+                "silent-desk",
+                match hours {
+                    Some(h) => format!("the {beat} desk has not published for {h} hours"),
+                    None => format!("the {beat} desk has never published"),
+                },
+            )
+        })
+        .collect()
+}
+
+/// Corroboration collapsing.
+async fn check_corroboration(ctx: &Ctx) -> Vec<Finding> {
+    let (alone, total) = match bg_db::stories::corroboration_health(&ctx.db, 14).await {
+        Ok(v) => v,
+        Err(e) => {
+            return vec![Finding::noted(
+                "corroboration",
+                format!("cannot check: {e}"),
+            )]
+        }
+    };
+    if total == 0 {
+        return Vec::new();
+    }
+    let pct = (alone as f64 / total as f64) * 100.0;
+    if pct < SINGLE_SOURCE_ALARM {
+        return Vec::new();
+    }
+    // Not acted on: `bg recluster --apply` folds published stories together and
+    // retires URLs. Reversible, but it is an editorial act, and an agent should
+    // propose it rather than perform it.
+    vec![Finding::noted(
+        "corroboration",
+        format!(
+            "{alone} of {total} stories in 14d have a single source ({pct:.0}%); \
+             consider `bg recluster --hours 336`"
+        ),
+    )]
+}
+
+/// Intake outrunning what the budget can process.
+async fn check_queue(ctx: &Ctx) -> Vec<Finding> {
+    let (waiting, lapsed) = match bg_db::items::queue_health(&ctx.db).await {
+        Ok(v) => v,
+        Err(e) => return vec![Finding::noted("queue", format!("cannot check: {e}"))],
+    };
+    // A queue is only a problem when it is growing faster than it drains. The
+    // signal that it is: items ageing out of the news horizon unread, which is
+    // intake being discarded rather than deferred.
+    if lapsed < waiting.max(500) {
+        return Vec::new();
+    }
+    vec![Finding::noted(
+        "queue",
+        format!(
+            "{waiting} items waiting and {lapsed} already aged out unread — \
+             intake exceeds what the token budget can triage"
+        ),
+    )]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_finding_without_an_action_is_asking_for_help() {
+        assert!(Finding::noted("k", "d").needs_a_human());
+        assert!(!Finding::fixed("k", "d", "a").needs_a_human());
+    }
+}

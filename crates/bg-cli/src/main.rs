@@ -127,6 +127,34 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Put a source back in the rotation, or take it out.
+    ///
+    /// The Steward rests a source that is failing and producing nothing. That
+    /// has to be reversible or it is not a safe action, and `bg seed` does not
+    /// do it — the upsert deliberately leaves `enabled` alone so an operator's
+    /// decision survives a redeploy.
+    Source {
+        /// Source slug, as shown by `bg doctor`.
+        slug: String,
+        /// Put it back in the rotation.
+        #[arg(long, conflicts_with = "rest")]
+        wake: bool,
+        /// Take it out.
+        #[arg(long)]
+        rest: bool,
+    },
+    /// Look after the newsroom: check its health, fix what is safe, report
+    /// the rest.
+    ///
+    /// Uses no inference at all. The condition most worth catching is the
+    /// newsroom being broken, and one of the ways it breaks is the inference
+    /// provider refusing us — a check that needed a model would be offline
+    /// exactly when it mattered.
+    Steward {
+        /// Actually apply the safe fixes. Without this, only reports.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Re-examine published single-source stories and fold together the ones
     /// that were always one event.
     ///
@@ -256,9 +284,38 @@ async fn main() -> Result<()> {
             // dead database from being hammered every interval, and keeps the
             // journal readable enough to see what actually went wrong.
             let mut consecutive_failures = 0u32;
+            // The Steward runs on its own clock, not every pass: its checks are
+            // about days (a silent desk, a barren source) and running them each
+            // time would be noise in the log without being any earlier to
+            // notice anything.
+            let mut next_steward = std::time::Instant::now();
 
             loop {
                 let started = std::time::Instant::now();
+
+                // Before the pass, so a fault it can fix — text we should not
+                // be holding, a source failing every poll — is out of the way
+                // before the newsroom spends a budget working around it.
+                if std::time::Instant::now() >= next_steward {
+                    next_steward = std::time::Instant::now() + STEWARD_EVERY;
+                    match bg_agents::steward::run(&ctx, true).await {
+                        Ok(f) if f.is_empty() => {}
+                        Ok(f) => {
+                            let (fixed, human): (Vec<_>, Vec<_>) =
+                                f.iter().partition(|x| !x.needs_a_human());
+                            println!(
+                                "[{}] steward: {} fixed, {} need a human",
+                                chrono::Utc::now().to_rfc3339(),
+                                fixed.len(),
+                                human.len()
+                            );
+                            for x in human {
+                                println!("    ? [{}] {}", x.kind, x.detail);
+                            }
+                        }
+                        Err(e) => eprintln!("steward round failed: {e}"),
+                    }
+                }
                 let backlog = match runner::run_once(&ctx, &runner::RunOpts::default()).await {
                     Ok(r) => {
                         println!(
@@ -540,6 +597,37 @@ async fn main() -> Result<()> {
             );
             println!("now run `bg run --once` so the Sentinel re-verifies the widened claims");
         }
+        Cmd::Source { slug, wake, rest } => {
+            let db = Db::connect(&url).await?;
+            if !wake && !rest {
+                println!("say which: --wake or --rest");
+                return Ok(());
+            }
+            bg_db::sources::set_enabled(&db, &slug, wake).await?;
+            println!("{slug} is now {}", if wake { "polling" } else { "rested" });
+        }
+        Cmd::Steward { apply } => {
+            let ctx = context(&url, None).await?;
+            let findings = bg_agents::steward::run(&ctx, apply).await?;
+            if findings.is_empty() {
+                println!("nothing to report — the newsroom is healthy");
+                return Ok(());
+            }
+            for f in findings.iter().filter(|f| !f.needs_a_human()) {
+                println!(
+                    "  fixed   [{}] {} — {}",
+                    f.kind,
+                    f.detail,
+                    f.action.as_deref().unwrap_or("")
+                );
+            }
+            for f in findings.iter().filter(|f| f.needs_a_human()) {
+                println!("  needs a human  [{}] {}", f.kind, f.detail);
+            }
+            if !apply && findings.iter().any(|f| !f.needs_a_human()) {
+                println!("\n(read-only; re-run with --apply to make the safe fixes)");
+            }
+        }
         Cmd::Retract { dry_run } => {
             let db = Db::connect(&url).await?;
             // Same principle as retracting content from a source that
@@ -662,6 +750,13 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+/// How often the newsroom looks after itself.
+///
+/// Six hours. Its checks are measured in days — a desk silent for two, a source
+/// barren for three — so a tighter loop would fill the log without noticing
+/// anything sooner.
+const STEWARD_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
 
 async fn context(url: &str, provider_override: Option<String>) -> Result<Ctx> {
     if let Some(p) = provider_override {

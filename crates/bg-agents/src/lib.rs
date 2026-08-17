@@ -33,6 +33,7 @@ pub mod scout;
 pub mod scribe;
 pub mod sentinel;
 pub mod skein;
+pub mod steward;
 
 use bg_core::domain::{AgentRole, RunStatus};
 use bg_core::ids::{RunId, StoryId};

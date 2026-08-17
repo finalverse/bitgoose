@@ -226,3 +226,45 @@ pub async fn health(db: &Db) -> Result<Vec<SourceHealth>> {
         })
         .collect())
 }
+
+/// Sources that are failing *and* producing nothing.
+///
+/// There is no failure counter — `last_error` is cleared on every success, so
+/// it says only that the most recent poll failed. On this host a single failed
+/// poll is noise: the uplink drops a large share of its packets and eleven of
+/// fifteen polls failed at once on a bad afternoon with every feed healthy.
+///
+/// So failure alone is not the signal. Failing *and* having produced no item
+/// for a long stretch is: that separates a feed that is genuinely gone from one
+/// the network could not reach this minute.
+pub async fn failing_and_barren(
+    db: &Db,
+    quiet_hours: i64,
+) -> Result<Vec<(bg_core::SourceId, String, i64, String)>> {
+    let rows = sqlx::query(
+        "SELECT s.id, s.slug,
+                coalesce(round(extract(epoch FROM (now() - max(r.fetched_at)))/3600)::bigint,
+                         $1 * 10) AS quiet,
+                coalesce(left(s.last_error, 80), '') AS err
+           FROM sources s
+           LEFT JOIN raw_items r ON r.source_id = s.id
+          WHERE s.enabled AND s.last_error IS NOT NULL
+          GROUP BY s.id, s.slug, s.last_error
+         HAVING coalesce(max(r.fetched_at), 'epoch'::timestamptz)
+                < now() - make_interval(hours => $1::int)
+          ORDER BY 3 DESC",
+    )
+    .bind(quiet_hours as i32)
+    .fetch_all(&db.pool)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            Ok((
+                bg_core::SourceId::from(r.try_get::<uuid::Uuid, _>("id")?),
+                r.try_get("slug")?,
+                r.try_get("quiet")?,
+                r.try_get("err")?,
+            ))
+        })
+        .collect()
+}

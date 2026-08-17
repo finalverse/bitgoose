@@ -721,3 +721,30 @@ pub async fn set_merged_into(db: &Db, from: StoryId, into: StoryId) -> Result<()
         .await?;
     Ok(())
 }
+
+/// Desks that have not published recently, with how long they have been quiet.
+///
+/// `None` for hours means the desk has never published at all — which is what
+/// Tech looked like for the whole time it sat in the navigation.
+pub async fn silent_desks(db: &Db, hours: i64) -> Result<Vec<(String, Option<i64>)>> {
+    let rows = sqlx::query(
+        "SELECT b.beat,
+                (SELECT round(extract(epoch FROM (now() - max(s.published_at)))/3600)::bigint
+                   FROM stories s WHERE s.beat = b.beat AND s.status = 'published') AS quiet
+           FROM (SELECT unnest(ARRAY['ai','crypto','markets','tech','world','science','culture'])
+                        AS beat) b",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    let mut out = Vec::new();
+    for r in &rows {
+        let beat: String = r.try_get("beat")?;
+        let quiet: Option<i64> = r.try_get("quiet")?;
+        match quiet {
+            Some(h) if h >= hours => out.push((beat, Some(h))),
+            None => out.push((beat, None)),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
