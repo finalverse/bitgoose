@@ -138,11 +138,41 @@ pub async fn count(db: &Db) -> Result<i64> {
 }
 
 /// Items Gosling has not yet read, newest first.
+/// Items waiting to be triaged, taken fairly across the desks.
+///
+/// Newest-first sounds neutral and is not. Intake is wildly uneven — AI and
+/// Crypto bring in some 2,200 items a week between them against a few hundred
+/// for the rest — and triage can only reach about a hundred a pass, so a global
+/// ordering by recency hands every batch to whichever desk publishes most.
+///
+/// The result was not subtle: World, Science and Culture were fed, had items
+/// waiting, and had **published nothing at all**, while their pages sat in the
+/// navigation. The desks were not broken and the scheduler was not broken. The
+/// queue was simply a single line that the loudest desks stood at the front of.
+///
+/// So each desk is ranked internally by recency and the ranks are interleaved:
+/// the newest item from every desk, then the second newest from every desk, and
+/// so on. A desk with three items still gets those three looked at today; a
+/// desk with nine hundred no longer crowds it out. Within a desk, recency still
+/// decides — the fairness is between desks, not inside one.
 pub async fn untriaged(db: &Db, limit: i64) -> Result<Vec<RawItem>> {
+    let cols = COLS
+        .split(',')
+        .map(|c| format!("t.{}", c.trim()))
+        .collect::<Vec<_>>()
+        .join(", ");
     let rows = crate::sql(format!(
-        "SELECT {COLS} FROM raw_items
-          WHERE NOT triaged AND aged_out_at IS NULL
-          ORDER BY published_at DESC LIMIT $1"
+        "SELECT {cols} FROM (
+           SELECT r.*, row_number() OVER (
+                    PARTITION BY coalesce(s.beat, 'unrouted')
+                    ORDER BY r.published_at DESC
+                  ) AS desk_rank
+             FROM raw_items r
+             JOIN sources s ON s.id = r.source_id
+            WHERE NOT r.triaged AND r.aged_out_at IS NULL
+         ) t
+         ORDER BY t.desk_rank ASC, t.published_at DESC
+         LIMIT $1"
     ))
     .bind(limit)
     .fetch_all(&db.pool)
