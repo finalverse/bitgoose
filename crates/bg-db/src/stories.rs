@@ -748,3 +748,25 @@ pub async fn silent_desks(db: &Db, hours: i64) -> Result<Vec<(String, Option<i64
     }
     Ok(out)
 }
+
+/// Published stories that have a publisher image we have not copied yet.
+///
+/// Mirroring happens at publish, which does nothing for everything published
+/// before that existed — and those are most of the archive. Sharing any of them
+/// still shows the drawn card instead of the photograph, permanently, because
+/// preview clients cache per URL.
+pub async fn awaiting_image_mirror(db: &Db, limit: i64) -> Result<Vec<(String, String)>> {
+    let rows = sqlx::query(
+        "SELECT slug, image_url FROM stories
+          WHERE status = 'published'
+            AND image_url IS NOT NULL AND image_url <> ''
+          ORDER BY published_at DESC
+          LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+    rows.iter()
+        .map(|r| Ok((r.try_get("slug")?, r.try_get("image_url")?)))
+        .collect()
+}

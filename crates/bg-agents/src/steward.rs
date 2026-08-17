@@ -127,6 +127,7 @@ pub async fn run(ctx: &Ctx, apply: bool) -> Result<Vec<Finding>> {
     out.extend(check_corroboration(ctx).await);
     out.extend(check_queue(ctx).await);
     out.extend(check_junk_topics(ctx, apply).await);
+    out.extend(backfill_images(ctx, apply).await);
 
     let (fixed, noted) = out.iter().partition::<Vec<_>, _>(|f| f.action.is_some());
     info!(
@@ -351,6 +352,55 @@ async fn check_junk_topics(ctx: &Ctx, apply: bool) -> Vec<Finding> {
         "junk-topic",
         detail,
         format!("removed {gone}"),
+    )]
+}
+
+/// Copies of publisher images for stories published before we took them.
+///
+/// Mirroring happens at publish now, which does nothing for the archive — and
+/// a shared link to any older story therefore shows the card we drew rather
+/// than the photograph, permanently, because preview clients cache per URL.
+///
+/// Bounded hard per round. This is the only Steward action that touches the
+/// network, on a host whose uplink is the reason half the other findings exist;
+/// a few each pass drains the backlog over days without competing with the
+/// newsroom's own polling for the wire.
+async fn backfill_images(ctx: &Ctx, apply: bool) -> Vec<Finding> {
+    const PER_ROUND: i64 = 25;
+
+    let candidates = match bg_db::stories::awaiting_image_mirror(&ctx.db, 400).await {
+        Ok(v) => v,
+        Err(e) => return vec![Finding::noted("image-mirror", format!("cannot check: {e}"))],
+    };
+    let missing: Vec<_> = candidates
+        .into_iter()
+        .filter(|(slug, _)| bg_ingest::mirror::mirrored(slug).is_none())
+        .collect();
+    if missing.is_empty() {
+        return Vec::new();
+    }
+    let detail = format!(
+        "{} published stories have a publisher photograph we have not copied; \
+         shares of those show our drawn card instead",
+        missing.len()
+    );
+    if !apply {
+        return vec![Finding::noted("image-mirror", detail)];
+    }
+
+    let mut got = 0usize;
+    for (slug, url) in missing.iter().take(PER_ROUND as usize) {
+        let Some(url) = bg_core::media::as_image(url) else {
+            continue;
+        };
+        if bg_ingest::mirror::store_lead_image(&ctx.http, slug, &url).await {
+            got += 1;
+        }
+    }
+    vec![Finding::fixed(
+        "image-mirror",
+        detail,
+        format!("copied {got} this round"),
     )]
 }
 
