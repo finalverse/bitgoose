@@ -330,7 +330,11 @@ pub async fn failure_rates(
                (array_agg(error order by started_at desc)
                     filter (where status = 'failed' and error is not null))[1]
         from agent_runs
-        where started_at > now() - make_interval(hours => $1)
+        -- `::int` is load-bearing: make_interval has no bigint overload, and an
+        -- i64 bind arrives as bigint. Without the cast this query errors, the
+        -- caller's `if let Ok` swallows it, and the check reports nothing at
+        -- all — which is indistinguishable from "everything is fine".
+        where started_at > now() - make_interval(hours => $1::int)
         group by role
         order by count(*) desc
         "#,

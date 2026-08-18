@@ -24,14 +24,16 @@ pub async fn note(db: &Db, kind: &str, subject: &str, reason: &str) -> Result<()
     sqlx::query(
         r#"
         insert into model_declines (kind, subject, attempts, retry_after, reason)
-        values ($1, $2, 1, now() + make_interval(mins => $3), $4)
+        values ($1, $2, 1, now() + make_interval(mins => $3::int), $4)
         on conflict (kind, subject) do update set
             attempts    = model_declines.attempts + 1,
             last_seen   = now(),
             reason      = excluded.reason,
             -- Double the wait each time, up to the cap.
+            -- `::int` for the same reason as everywhere else: make_interval
+            -- takes int, and an i64 bind is bigint.
             retry_after = now() + make_interval(mins =>
-                least($5::bigint, $3::bigint * (2 ^ least(model_declines.attempts, 8))::bigint))
+                least($5::bigint, $3::bigint * (2 ^ least(model_declines.attempts, 8))::bigint)::int)
         "#,
     )
     .bind(kind)

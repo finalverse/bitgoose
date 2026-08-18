@@ -913,6 +913,40 @@ async fn doctor(url: &str) -> Result<()> {
         println!("  policy blocks in last 24h: {n}");
     }
 
+    // Per agent, not just the total. "44 failures" is a number an operator can
+    // do nothing with; "skein: 30 of 36 failed — ran out of room before it
+    // finished writing its answer" is a fix. The aggregate hid three separate
+    // faults for weeks, including one that meant the Desk had never published.
+    if let Ok(rows) = bg_db::agents::failure_rates(&db, 24).await {
+        let mut shown = false;
+        for (role, ok, failed, sample) in rows {
+            if !bg_core::trouble::is_troubled(ok, failed) {
+                continue;
+            }
+            if !shown {
+                println!("\n  agents mostly failing:");
+                shown = true;
+            }
+            let why = bg_core::trouble::explain(&sample)
+                .map(str::to_string)
+                .unwrap_or_else(|| bg_core::text::truncate_words(&sample, 16));
+            println!("    [FAIL] {role:<9} {failed} of {} calls — {why}", ok + failed);
+        }
+    }
+
+    // What the day's allowance is, and whether anything is enforcing it. A
+    // limit of 0 means the only thing standing between the newsroom and a
+    // 48-minute provider lockout is luck.
+    let daily = bg_llm::pacer::daily_limit_from_env();
+    if daily == 0 {
+        println!(
+            "\n  [warn] no daily token ceiling set (BG_LLM_TOKENS_PER_DAY) — \
+             the provider's own limit will be discovered by being refused"
+        );
+    } else {
+        println!("\n  [ok]   daily token ceiling: {daily} per tier");
+    }
+
     // The queue is the health signal that matters on a constrained tier: if
     // `waiting` climbs pass after pass, intake is outrunning the budget and
     // either the news horizon or the source list needs attention.
