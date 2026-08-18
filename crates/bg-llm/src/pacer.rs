@@ -388,12 +388,21 @@ impl Pacer {
         {
             e.1 = actual;
         }
-        // The daily ledger holds the same reservation and needs the same
-        // correction; leaving it would drift the day's total high and stop the
-        // newsroom well before the real ceiling.
-        if let Some(e) = l.day.iter_mut().rev().find(|(_, n)| *n == reservation.cost) {
-            e.1 = actual;
-        }
+        // The daily ledger is deliberately *not* corrected. It looked like the
+        // same bookkeeping, but the two windows are metered differently: the
+        // provider's daily counter charges what a request reserved, not what it
+        // used. Its own words, for a 9,072-token prompt asking for 1,000 out:
+        //
+        //   on tokens per day (TPD): Limit 200000, Used 196664, Requested 10072
+        //
+        // Refunding here is why our ledger read 118,236 on a day the provider
+        // had us at 196,664 — a 40% undercount, which is a daily ceiling that
+        // cannot be trusted to hold and so was left switched off entirely.
+        //
+        // The minute window above is corrected because it has ground truth:
+        // every response carries `x-ratelimit-remaining-tokens`, and `observe`
+        // overrides our estimate with it. The day has no such header, so the
+        // only way to be right is to model the provider's rule exactly.
     }
 }
 
@@ -635,13 +644,39 @@ mod daily_budget_tests {
     }
 
     #[tokio::test]
-    async fn settling_corrects_the_day_not_just_the_minute() {
-        // Otherwise the day drifts high on every over-reservation and the
-        // newsroom stops well short of the real ceiling.
+    async fn the_day_counts_what_was_reserved_because_the_provider_does() {
+        // This test used to assert the opposite, on the reasonable-sounding
+        // theory that counting an unused reservation would stop the newsroom
+        // short of the real ceiling. The provider does not agree:
+        //
+        //   on tokens per day (TPD): Limit 200000, Used 196664, Requested 10072
+        //
+        // where 10,072 was a 9,072-token prompt plus a 1,000-token max_tokens
+        // that the reply came nowhere near. Refunding the day is what made our
+        // ledger read 118,236 against the provider's 196,664 — and an
+        // undercount is not a conservative error here, it is a ceiling that
+        // does not hold.
         let p = Pacer::with_daily(8_000, 200_000);
         let r = p.acquire(ModelTier::Fast, 5_000, "t").await;
         p.settle(r, 800);
-        assert_eq!(p.day_usage(ModelTier::Fast).0, 800);
+        assert_eq!(
+            p.day_usage(ModelTier::Fast).0,
+            5_000,
+            "the day must count the reservation"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_minute_is_still_corrected() {
+        // The minute window keeps its refund: it has ground truth to fall back
+        // on in `x-ratelimit-remaining-tokens`, and over-counting there paces
+        // the newsroom to a crawl for no reason.
+        let p = Pacer::with_daily(8_000, 200_000);
+        let r = p.acquire(ModelTier::Mid, 5_000, "t").await;
+        p.settle(r, 800);
+        // 0.9 * 8000 = 7200 usable in the minute. With only 800 counted, a
+        // 6,000-token call still fits; had the 5,000 stuck, it would not.
+        assert_eq!(p.delay_for(ModelTier::Mid, 6_000), Duration::ZERO);
     }
 
     #[test]
