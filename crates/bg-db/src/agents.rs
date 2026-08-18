@@ -301,3 +301,39 @@ pub async fn tokens_by_tier_24h(db: &Db) -> Result<Vec<(bg_core::domain::ModelTi
     }
     Ok(out.into_iter().collect())
 }
+
+/// Per-role success and failure counts over a window, with one real error.
+///
+/// The pass summary counts what finished; this counts what did not. Those were
+/// wildly different numbers for weeks — `analysed 0` in the log while 83% of
+/// Skein's calls were being rejected — and only the second one says why.
+///
+/// Returns `(role, ok, failed, one_error)` for every role that ran.
+pub async fn failure_rates(
+    db: &Db,
+    hours: i64,
+) -> Result<Vec<(String, i64, i64, String)>> {
+    let rows: Vec<(String, i64, i64, Option<String>)> = sqlx::query_as(
+        r#"
+        select role,
+               count(*) filter (where status = 'ok')     as ok,
+               count(*) filter (where status = 'failed') as failed,
+               -- The most recent failure, which is the one worth quoting: an
+               -- agent that started failing an hour ago is not best explained
+               -- by whatever went wrong yesterday.
+               (array_agg(error order by started_at desc)
+                    filter (where status = 'failed' and error is not null))[1]
+        from agent_runs
+        where started_at > now() - make_interval(hours => $1)
+        group by role
+        order by count(*) desc
+        "#,
+    )
+    .bind(hours)
+    .fetch_all(&db.pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(r, ok, failed, e)| (r, ok, failed, e.unwrap_or_default()))
+        .collect())
+}

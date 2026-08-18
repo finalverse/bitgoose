@@ -127,6 +127,7 @@ pub async fn run(ctx: &Ctx, apply: bool) -> Result<Vec<Finding>> {
     out.extend(check_corroboration(ctx).await);
     out.extend(check_queue(ctx).await);
     out.extend(check_junk_topics(ctx, apply).await);
+    out.extend(check_call_failures(ctx).await);
     out.extend(backfill_images(ctx, apply).await);
     out.extend(check_delivery(ctx).await);
 
@@ -437,6 +438,66 @@ fn env_usize(key: &str, default: usize) -> usize {
 /// uplink the way a reader in another country does, and pretending otherwise
 /// would be the same mistake again. What it *can* state exactly is how many
 /// bytes a crawler is asked to take, which is the half that is ours.
+/// Agents whose calls to the provider are mostly failing.
+///
+/// This is the check that should have existed first, and its absence cost
+/// weeks. Every symptom was visible from outside — desks that never published,
+/// a corroboration rate stuck at 98% single-source, a queue growing faster than
+/// it drained — and every diagnosis was wrong, because the pass reported what
+/// it *completed* and never what it had been refused. Meanwhile:
+///
+/// * 1,241 of 1,503 Skein calls returned `json_validate_failed`,
+/// * every Scribe call in the table returned HTTP 413,
+/// * the Gander declined 279 of 290 framings,
+///
+/// and the log line at the end of each pass said `analysed 0`, which reads like
+/// an idle newsroom rather than a failing one.
+///
+/// Reported rather than fixed: a failure rate says something is wrong, not what
+/// to change, and the answers here were three different things — a model
+/// parameter, a reservation that could not fit, and a question worth asking
+/// less often.
+async fn check_call_failures(ctx: &Ctx) -> Vec<Finding> {
+    let rows = match bg_db::agents::failure_rates(&ctx.db, FAILURE_WINDOW_HOURS).await {
+        Ok(r) => r,
+        Err(e) => return vec![Finding::noted("call-failures", format!("could not read: {e}"))],
+    };
+    let mut out = Vec::new();
+    for (role, ok, failed, sample) in rows {
+        let total = ok + failed;
+        if total < MIN_CALLS_TO_JUDGE {
+            continue;
+        }
+        let rate = failed as f64 * 100.0 / total as f64;
+        if rate < FAILURE_ALARM {
+            continue;
+        }
+        // The provider's own words, trimmed: the difference between a 413 and a
+        // truncated JSON body is the whole diagnosis, and paraphrasing it here
+        // would throw away the only part that says what to do.
+        let why = sample.chars().take(160).collect::<String>();
+        out.push(Finding::noted(
+            "call-failures",
+            format!(
+                "{role}: {failed} of {total} model calls failed in the last \
+                 {FAILURE_WINDOW_HOURS}h ({rate:.0}%) — {why}"
+            ),
+        ));
+    }
+    out
+}
+
+/// How far back to judge an agent's failure rate.
+const FAILURE_WINDOW_HOURS: i64 = 24;
+
+/// Below this, a run of bad luck looks like a broken agent.
+const MIN_CALLS_TO_JUDGE: i64 = 8;
+
+/// Above this share of failures, something is wrong with the agent rather than
+/// with the stories it was given. Rate limiting alone can push a healthy agent
+/// past a third, so the bar is set well clear of it.
+const FAILURE_ALARM: f64 = 60.0;
+
 async fn check_delivery(ctx: &Ctx) -> Vec<Finding> {
     // What a crawler will tolerate, in bytes, at the throughput this host has
     // actually delivered. Measured, not assumed: ~7 KB/s and a two-second

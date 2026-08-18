@@ -277,10 +277,16 @@ const MIN_OUTPUT: u32 = 512;
 /// counted 118,236, and four of the seven desks went unpublished for want of
 /// the difference.
 ///
-/// The Top tier keeps `medium`, because Gander and Sentinel are making
-/// editorial judgements where the deliberation is the point. Everything else
-/// gets `low`: triage, clustering and distribution copy are classification
-/// tasks, and a classifier that deliberates is only an expensive classifier.
+/// The Top tier is left alone, because on `gpt-oss-120b` the provider's default
+/// turns out to sit *below* `medium` — same prompt, completion tokens 119 at
+/// the default against 224 at medium and 429 at high, while the answer itself
+/// grew from 400 characters to 461. Naming a level there would have doubled the
+/// cost of the Skein, the one thing on the site worth deliberating over, and
+/// called it a saving.
+///
+/// Everything else gets `low`: triage, clustering and distribution copy are
+/// classification tasks, and a classifier that deliberates is only an expensive
+/// classifier.
 ///
 /// Returns `None` for models that do not take the parameter — sending it to
 /// one that does not is a 400, so this is an allowlist rather than a blocklist.
@@ -299,7 +305,10 @@ fn reasoning_effort(model: &str, tier: ModelTier) -> Option<String> {
         .or_else(|_| std::env::var("BG_REASONING"))
         .unwrap_or_else(|_| {
             match tier {
-                ModelTier::Top => "medium",
+                // Not "medium". Measured on gpt-oss-120b, the provider's own
+                // default is *below* medium, so naming medium here would have
+                // been a 2x cost increase sold as a saving.
+                ModelTier::Top => "off",
                 _ => "low",
             }
             .to_string()
@@ -648,11 +657,10 @@ mod local_pricing_tests {
             reasoning_effort("openai/gpt-oss-120b", ModelTier::Mid).as_deref(),
             Some("low")
         );
-        // Gander and Sentinel are paid to deliberate.
-        assert_eq!(
-            reasoning_effort("openai/gpt-oss-120b", ModelTier::Top).as_deref(),
-            Some("medium")
-        );
+        // Top is left at the provider's default, which measures cheaper than
+        // medium. Asking for more thinking here would cost double and buy
+        // almost no extra answer.
+        assert_eq!(reasoning_effort("openai/gpt-oss-120b", ModelTier::Top), None);
         // Deterministic work never reaches a provider.
         assert_eq!(reasoning_effort("openai/gpt-oss-20b", ModelTier::None), None);
     }

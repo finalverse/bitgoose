@@ -162,8 +162,19 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
         return Ok(0);
     }
 
+    // Topics the Gander has already refused, still inside their backoff. One
+    // query for the pass rather than one per candidate.
+    let resting = bg_db::declines::resting(&ctx.db, bg_db::declines::GAGGLE_FRAMING)
+        .await
+        .unwrap_or_default();
+
     let mut opened = 0usize;
     for heat in hot.iter().take(max_new) {
+        if resting.contains(&heat.topic) {
+            // Refused recently and nothing has changed. Asking again would cost
+            // the same tokens as asking the first time and get the same answer.
+            continue;
+        }
         // A gaggle that already exists is refreshed without spending a call on
         // re-writing prose that has not stopped being true.
         let known = bg_db::gaggles::exists(&ctx.db, &heat.topic).await?;
@@ -229,6 +240,17 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
             if bg_core::share::reads_as_a_refusal(title)
                 || bg_core::share::reads_as_a_refusal(standfirst)
             {
+                let why = format!("framing read as a refusal: {title:?}");
+                // Write it down. Without this the topic comes back next pass,
+                // and the pass after — 279 refusals over a handful of subjects,
+                // each one paid for at the same rate as a story.
+                let _ = bg_db::declines::note(
+                    &ctx.db,
+                    bg_db::declines::GAGGLE_FRAMING,
+                    &heat.topic,
+                    &why,
+                )
+                .await;
                 return Err(FlockError::Other(format!(
                     "the model declined to frame this topic ({title:?}); not opening a gaggle"
                 )));

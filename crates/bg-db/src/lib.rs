@@ -25,6 +25,7 @@ pub mod analyses;
 pub mod articles;
 pub mod claims;
 pub mod convert;
+pub mod declines;
 pub mod entities;
 pub mod gaggles;
 pub mod items;
