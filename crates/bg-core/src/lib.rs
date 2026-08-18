@@ -30,6 +30,7 @@ pub mod share;
 pub mod slug;
 pub mod text;
 pub mod trends;
+pub mod trouble;
 
 pub use domain::*;
 pub use error::{CoreError, Result};

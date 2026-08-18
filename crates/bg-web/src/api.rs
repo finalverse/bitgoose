@@ -758,6 +758,21 @@ pub async fn get_flock() -> Result<FlockPage, ServerFnError> {
                 cost_24h: format!("${:.4}", a.cost_24h_usd),
                 avg_latency_ms: a.avg_latency_ms,
                 last_note: a.last_note.clone(),
+                // Only when it is mostly failing. An agent turned away by the
+                // rate limiter now and then is a free tier working as designed,
+                // and labelling that "trouble" would train the reader — and us
+                // — to ignore the label.
+                trouble: if bg_core::trouble::is_troubled(a.ok_24h, a.failed_24h) {
+                    a.last_error.as_deref().map(|raw| {
+                        bg_core::trouble::explain(raw)
+                            .map(str::to_string)
+                            // Unrecognised: show what the provider actually
+                            // said rather than a summary we made up.
+                            .unwrap_or_else(|| raw.chars().take(140).collect())
+                    })
+                } else {
+                    None
+                },
                 enabled: a.enabled,
                 mandate_budget: bg_core::mandate::format_ccc(budget_ccc),
                 mandate_spent: bg_core::mandate::format_ccc(bg_core::mandate::tokens_to_ccc(

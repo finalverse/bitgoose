@@ -256,6 +256,20 @@ async fn flock(State(s): State<ApiState>) -> ApiResult<Json<serde_json::Value>> 
             "avg_latency_ms": a.avg_latency_ms,
             "last_run_at": a.last_run_at,
             "last_note": a.last_note,
+            // The same reading the page shows, so an agent consuming this API
+            // and a person looking at /flock are told the same thing. Null
+            // unless the agent is mostly failing — an occasional refusal on a
+            // free tier is not trouble.
+            "trouble": bg_core::trouble::is_troubled(a.ok_24h, a.failed_24h)
+                .then(|| a.last_error.as_deref().map(|raw| {
+                    bg_core::trouble::explain(raw)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| raw.chars().take(140).collect())
+                }))
+                .flatten(),
+            // Unabridged, for a caller that wants to parse it rather than read
+            // it. The summary above is for humans and is deliberately lossy.
+            "last_error": a.last_error,
             "enabled": a.enabled,
         })).collect::<Vec<_>>(),
         "recent": recent,

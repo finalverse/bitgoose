@@ -989,6 +989,11 @@ pub struct FlockStats {
     pub tokens_24h: i64,
     pub last_run_at: Option<DateTime<Utc>>,
     pub last_note: Option<String>,
+    /// The most recent error from a *failed* run, unabridged.
+    ///
+    /// Separate from `last_note`, which comes from whichever run finished last
+    /// and is cheerful even while most of them are being refused.
+    pub last_error: Option<String>,
     pub enabled: bool,
 }
 

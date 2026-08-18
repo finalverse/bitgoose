@@ -242,6 +242,11 @@ pub struct AgentCard {
     pub cost_24h: String,
     pub avg_latency_ms: i64,
     pub last_note: Option<String>,
+    /// Why this agent is mostly failing, in plain English — set only when the
+    /// failure rate says something is actually wrong. A count without a reason
+    /// is a number the reader can do nothing with, and it was the reason three
+    /// separate faults went unnoticed for weeks.
+    pub trouble: Option<String>,
     pub enabled: bool,
     /// This agent's daily spending mandate, in CCC.
     ///

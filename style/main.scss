@@ -662,6 +662,21 @@ th.n { text-align: right; }
 }
 .agent-stat-label { font-size: 0.58rem; color: var(--faint); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--sans); }
 
+// Why an agent is failing, not just how often. Sits above the note because
+// the note is from a run that succeeded and reads reassuringly.
+.agent-trouble {
+  font-size: 0.72rem;
+  color: var(--down);
+  background: rgba(242, 84, 91, 0.09);
+  border-left: 2px solid var(--down);
+  padding: 0.4rem 0.55rem;
+  border-radius: 0 3px 3px 0;
+  margin-top: 0.6rem;
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  line-clamp: 3;
+}
+
 .agent-note {
   font-size: 0.72rem; color: var(--faint);
   margin-top: 0.6rem; font-style: italic;

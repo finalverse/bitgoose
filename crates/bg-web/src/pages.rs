@@ -1076,7 +1076,12 @@ fn AgentTile(agent: AgentCard) -> impl IntoView {
     } else {
         "mandate-fill"
     };
-    let class = if agent.failed_24h > 0 {
+    // One standard for the border and the warning text. Marking a tile red on
+    // a single failure meant Herald — 20 runs landed, 4 turned away by a free
+    // tier's rate limiter — looked exactly as alarming as Scribe, which had
+    // not completed a single call in its life. When everything is red, the
+    // page has stopped saying anything.
+    let class = if agent.trouble.is_some() {
         "agent failing"
     } else if agent.runs_24h > 0 {
         "agent active"
@@ -1122,6 +1127,10 @@ fn AgentTile(agent: AgentCard) -> impl IntoView {
                     ></span>
                 </div>
             </div>
+            {agent
+                .trouble
+                .clone()
+                .map(|t| view! { <p class="agent-trouble">"⚠ "{t}</p> })}
             {agent
                 .last_note
                 .clone()

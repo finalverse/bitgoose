@@ -168,7 +168,12 @@ pub async fn flock_stats(db: &Db) -> Result<Vec<FlockStats>> {
                 COALESCE(avg(r.latency_ms), 0)::bigint         AS avg_latency,
                 COALESCE(sum(r.prompt_tokens + r.completion_tokens), 0)::bigint AS tokens_24h,
                 max(r.started_at)                              AS last_run_at,
-                (array_remove(array_agg(r.note ORDER BY r.started_at DESC), NULL))[1] AS last_note
+                (array_remove(array_agg(r.note ORDER BY r.started_at DESC), NULL))[1] AS last_note,
+                -- The most recent *failure*, which is a different row from the
+                -- most recent note: an agent failing 83% of the time still
+                -- writes a cheerful note on the runs that land.
+                (array_agg(r.error ORDER BY r.started_at DESC)
+                     FILTER (WHERE r.status = 'failed' AND r.error IS NOT NULL))[1] AS last_error
          FROM agents a
          LEFT JOIN agent_runs r
                 ON r.agent_id = a.id AND r.started_at > now() - interval '24 hours'
@@ -191,6 +196,7 @@ pub async fn flock_stats(db: &Db) -> Result<Vec<FlockStats>> {
                 tokens_24h: r.try_get("tokens_24h")?,
                 last_run_at: r.try_get("last_run_at")?,
                 last_note: r.try_get("last_note")?,
+                last_error: r.try_get("last_error")?,
                 enabled: r.try_get("enabled")?,
             })
         })
