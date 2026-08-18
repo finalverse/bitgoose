@@ -105,7 +105,7 @@ pub fn mirrored(slug: &str) -> Option<PathBuf> {
     // and renders a blank card — strictly worse than the 14 KB card it would
     // otherwise have been given. Size is the deciding fact, whatever the reason
     // for it.
-    (meta.len() as usize <= SHARE_TARGET_BYTES.saturating_mul(2)).then_some(p)
+    (meta.len() as usize <= SHARE_TARGET_BYTES).then_some(p)
 }
 
 /// Largest publisher image worth storing. Above this it is not a lead image.
@@ -161,7 +161,20 @@ const SHARE_WIDTH: u32 = 1200;
 /// publishers' images at their own resolution therefore made previews *worse*
 /// than the card it replaced, on 80 of the first 91 copied. The median was
 /// 174 KB and the largest 810 KB.
-const SHARE_TARGET_BYTES: usize = 60_000;
+/// Measured again after the first attempt at this, because 60,000 was still a
+/// guess dressed as a limit. At the ~7 KB/s this link actually delivers:
+///
+/// ```text
+///   14 KB card    4.5s
+///   44 KB photo   6.1s
+///  120 KB photo  17.9s
+/// ```
+///
+/// Nothing here makes a two-second crawler budget, including the card — that is
+/// the unplugged ethernet and no encoder setting fixes it. What the target
+/// *can* decide is that a photograph is never meaningfully worse than the card
+/// it replaces. 45 KB puts it within a second or two of one.
+const SHARE_TARGET_BYTES: usize = 45_000;
 
 /// Re-encode a publisher's image at the size a share card actually uses.
 ///
@@ -199,14 +212,18 @@ pub fn fit_for_sharing(bytes: &[u8]) -> Vec<u8> {
         if scaled.to_rgb8().write_with_encoder(enc).is_err() {
             continue;
         }
-        if out.len() <= SHARE_TARGET_BYTES || quality == 62 {
-            // The second pass is accepted whatever it weighs: it is the
-            // smallest we make, and still far below where we started.
-            return if out.len() < bytes.len() {
-                out
-            } else {
-                bytes.to_vec()
-            };
+        if out.len() <= SHARE_TARGET_BYTES {
+            return out;
+        }
+        if quality == 62 {
+            // Last pass, and it still missed. Handed back unchanged so
+            // `mirrored` declines to advertise it and the story falls back to
+            // the card — which does arrive.
+            //
+            // The previous version accepted this pass "whatever it weighs,
+            // it is smaller than the original", and stored a 119,865-byte file
+            // that takes eighteen seconds to fetch. Smaller was never the bar.
+            return bytes.to_vec();
         }
     }
     bytes.to_vec()
@@ -217,12 +234,19 @@ mod share_size_tests {
     use super::*;
 
     fn photo(w: u32, h: u32) -> Vec<u8> {
-        // Noise, so it does not compress to nothing and the test measures
-        // something like a real photograph.
+        // Smooth gradients with a little structure — what a JPEG is built for,
+        // and what a news photograph mostly is. An earlier version of this
+        // fixture was high-frequency noise, which no encoder can squeeze under
+        // the target; the test then failed for being unrepresentative rather
+        // than for anything being wrong.
         let mut img = image::RgbImage::new(w, h);
         for (x, y, p) in img.enumerate_pixels_mut() {
-            let v = ((x * 7 + y * 13) % 256) as u8;
-            *p = image::Rgb([v, v.wrapping_mul(3), v.wrapping_add(90)]);
+            let fx = x as f32 / w as f32;
+            let fy = y as f32 / h as f32;
+            let r = (fx * 220.0) as u8;
+            let g = (fy * 200.0 + 30.0) as u8;
+            let b = (((fx + fy) * 0.5) * 180.0 + 40.0) as u8;
+            *p = image::Rgb([r, g, b]);
         }
         let mut out = Vec::new();
         let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 96);
@@ -245,10 +269,11 @@ mod share_size_tests {
         );
         let out = fit_for_sharing(&big);
         assert!(
-            out.len() < big.len(),
-            "{} bytes in, {} out",
+            out.len() <= SHARE_TARGET_BYTES,
+            "{} bytes in, {} out, target {}",
             big.len(),
-            out.len()
+            out.len(),
+            SHARE_TARGET_BYTES
         );
         let img = image::load_from_memory(&out).expect("still a valid image");
         assert!(img.width() <= SHARE_WIDTH, "width {}", img.width());
@@ -268,5 +293,42 @@ mod share_size_tests {
         // caller's size guard is the backstop.
         let junk = vec![0xAB; SHARE_TARGET_BYTES + 500];
         assert_eq!(fit_for_sharing(&junk).len(), junk.len());
+    }
+}
+
+#[cfg(test)]
+mod arrival_tests {
+    use super::*;
+
+    /// The bar is arriving, not shrinking.
+    ///
+    /// A 119,865-byte file was stored by an earlier version of
+    /// `fit_for_sharing` because it was smaller than its 400 KB original. It
+    /// takes eighteen seconds to fetch over the production link, where the card
+    /// it replaced takes four.
+    #[test]
+    fn a_result_that_misses_the_target_is_not_kept() {
+        // Photographic noise at a size no JPEG setting will squeeze under the
+        // target, so the second pass is guaranteed to miss.
+        let mut img = image::RgbImage::new(3000, 2000);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let n = (x
+                .wrapping_mul(2654435761)
+                .wrapping_add(y.wrapping_mul(40503))) as u8;
+            *p = image::Rgb([n, n.rotate_left(3), n.wrapping_mul(7)]);
+        }
+        let mut original = Vec::new();
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut original, 98);
+        img.write_with_encoder(enc).unwrap();
+
+        let out = fit_for_sharing(&original);
+        // Either it met the target, or it came back untouched for `mirrored`
+        // to reject. What it must never be is "smaller, but still too big".
+        assert!(
+            out.len() <= SHARE_TARGET_BYTES || out == original,
+            "kept a {}-byte result that misses the {}-byte target",
+            out.len(),
+            SHARE_TARGET_BYTES
+        );
     }
 }
