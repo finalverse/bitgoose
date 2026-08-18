@@ -79,6 +79,19 @@ fn prune_day(day: &mut VecDeque<(Instant, u32)>) {
 #[derive(Default)]
 struct Ledger {
     spent: VecDeque<(Instant, u32)>,
+    /// When the provider will next accept work on this tier.
+    ///
+    /// Set from the `retry_after` in a refusal, and it is the difference
+    /// between one refusal and a whole wasted pass. Measured on production: 83
+    /// rate-limit refusals in six hours, 69 of them saying "retry in 300s", and
+    /// **28 of 28 Gander runs failed** — because each stage tried
+    /// independently, slept, and was refused in turn. The provider had already
+    /// said, on the first one, that nothing would work for five minutes.
+    ///
+    /// Per tier rather than global: the tiers have separate allowances, and a
+    /// top-tier refusal says nothing about whether a cheap triage call would
+    /// go through.
+    cooldown_until: Option<Instant>,
     /// The provider's own account of what is left, and when it refills.
     ///
     /// Authoritative when present. Our own tally is an estimate built from
@@ -292,6 +305,28 @@ impl Pacer {
     }
 
     /// Record tokens spent against a model.
+    /// Note that the provider has refused this tier, and for how long.
+    ///
+    /// Called on the way out of a refusal so the rest of the pass does not
+    /// spend itself discovering the same thing.
+    pub fn cooling(&self, tier: ModelTier, retry_after: Duration) {
+        // Capped. A provider that asks for an hour is reporting an outage, and
+        // sitting out an hour of passes on its say-so would turn a bad twenty
+        // minutes into a bad morning — the next pass can find out cheaply.
+        let wait = retry_after.min(Duration::from_secs(600));
+        if let Ok(mut g) = self.ledgers.lock() {
+            g[slot(tier)].cooldown_until = Some(Instant::now() + wait);
+        }
+    }
+
+    /// How long until this tier is worth trying again, if it is cooling.
+    pub fn cooling_for(&self, tier: ModelTier) -> Option<Duration> {
+        let g = self.ledgers.lock().ok()?;
+        let until = g[slot(tier)].cooldown_until?;
+        let now = Instant::now();
+        (until > now).then(|| until - now)
+    }
+
     pub fn record(&self, tier: ModelTier, tokens: u32) {
         if !self.enabled() || tokens == 0 {
             return;
@@ -616,5 +651,49 @@ mod daily_budget_tests {
         // Only the per-minute rule applies; a small call is unaffected by the
         // huge historical total once the minute window has moved on.
         assert_eq!(p.day_usage(ModelTier::Fast).1, 0);
+    }
+}
+
+#[cfg(test)]
+mod cooldown_tests {
+    use super::*;
+
+    /// One refusal should stop the rest of the pass, not be rediscovered by
+    /// every agent in it.
+    ///
+    /// Measured on production before this existed: 83 refusals in six hours, 69
+    /// saying "retry in 300s", 28 of 28 Gander runs failed and 29 of 32
+    /// Gosling. The provider had already said on the first one that nothing
+    /// would work for five minutes.
+    #[test]
+    fn a_refusal_cools_the_whole_tier() {
+        let p = Pacer::new(8_000);
+        assert!(p.cooling_for(ModelTier::Top).is_none(), "starts clear");
+
+        p.cooling(ModelTier::Top, Duration::from_secs(300));
+        let left = p.cooling_for(ModelTier::Top).expect("now cooling");
+        assert!(left.as_secs() > 280 && left.as_secs() <= 300, "{left:?}");
+    }
+
+    #[test]
+    fn the_other_tiers_are_unaffected() {
+        // Tiers have separate allowances. A top-tier refusal says nothing about
+        // whether a cheap triage call would go through, and treating it as
+        // global would idle the newsroom on the strength of one expensive call.
+        let p = Pacer::new(8_000);
+        p.cooling(ModelTier::Top, Duration::from_secs(300));
+        assert!(p.cooling_for(ModelTier::Fast).is_none());
+        assert!(p.cooling_for(ModelTier::Mid).is_none());
+    }
+
+    #[test]
+    fn an_outage_length_wait_is_capped() {
+        // A provider asking for an hour is reporting an outage. Sitting out an
+        // hour of passes on its say-so turns a bad twenty minutes into a bad
+        // morning; the next pass can find out cheaply instead.
+        let p = Pacer::new(8_000);
+        p.cooling(ModelTier::Mid, Duration::from_secs(3_600));
+        let left = p.cooling_for(ModelTier::Mid).expect("cooling");
+        assert!(left.as_secs() <= 600, "waited {left:?} on one refusal");
     }
 }

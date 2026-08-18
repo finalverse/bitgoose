@@ -28,7 +28,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 pub type Result<T, E = LlmError> = std::result::Result<T, E>;
 
@@ -322,6 +322,25 @@ impl Llm {
 
     /// Run a request through the chain.
     pub async fn complete(&self, req: &Request) -> Result<Completion> {
+        // If the provider has already refused this tier and said how long for,
+        // do not spend a request finding out again.
+        //
+        // Measured on production: 83 refusals in six hours, 69 of them "retry
+        // in 300s", and every agent in the pass discovering it separately —
+        // 28 of 28 Gander runs failed, 29 of 32 Gosling. Failing here costs
+        // nothing and leaves the pass free to do the deterministic work
+        // (polling, mirroring, the Steward) that needs no provider at all.
+        if let Some(left) = self.pacer.cooling_for(req.tier) {
+            debug!(
+                task = %req.task, tier = ?req.tier, wait_s = left.as_secs(),
+                "tier is cooling after a refusal; not calling"
+            );
+            return Err(LlmError::RateLimited {
+                provider: "pacer",
+                retry_after: left,
+            });
+        }
+
         // Spend the minute deliberately. The retry loop below stays as a
         // backstop for when this estimate is wrong or something else is using
         // the same key, but it should now be the exception rather than the
@@ -363,6 +382,13 @@ impl Llm {
                     other => break other,
                 }
             };
+            // Whatever the provider last said about waiting, remember it for
+            // the tier rather than for this one call. Without that, the next
+            // twenty-seven stages in the pass each discover the same refusal
+            // separately, sleeping through it one at a time.
+            if let Err(LlmError::RateLimited { retry_after, .. }) = &outcome {
+                self.pacer.cooling(req.tier, *retry_after);
+            }
             match outcome {
                 Ok(c) => {
                     // Give back whatever the estimate over-reserved. The output
