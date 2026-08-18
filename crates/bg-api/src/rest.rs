@@ -2,7 +2,7 @@
 
 use crate::ApiState;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -23,6 +23,9 @@ pub fn routes() -> Router<ApiState> {
         .route("/v1/flock", get(flock))
         .route("/v1/standards", get(standards))
         .route("/openapi.json", get(openapi))
+        // Where an agent looks before it looks anywhere else.
+        .route("/llms.txt", get(llms_txt))
+        .route("/.well-known/mcp.json", get(mcp_discovery))
 }
 
 /// API error that renders as JSON rather than a bare status code.
@@ -281,23 +284,189 @@ async fn standards(State(s): State<ApiState>) -> ApiResult<Json<serde_json::Valu
     })))
 }
 
+/// The API description an agent reads before it calls anything.
+///
+/// The previous version listed eight paths and **zero schemas**, which tells a
+/// machine that the endpoints exist and nothing about what comes back. An agent
+/// then has to call each one and infer the shape from a sample — which is
+/// exactly the guessing a spec exists to remove, and it gets the optional
+/// fields wrong because the sample happened not to have them.
+///
+/// So the response shapes are declared. Written by hand rather than derived:
+/// the handlers assemble their JSON from several repositories, so there is no
+/// single struct to reflect over, and a generated spec that quietly drifted
+/// would be worse than none.
 async fn openapi() -> Json<serde_json::Value> {
+    // The two objects everything else is built from.
+    let story = json!({
+        "type": "object",
+        "required": ["slug", "title", "kind", "category", "source_count", "published_at"],
+        "properties": {
+            "slug": { "type": "string", "description": "Stable identifier and URL path" },
+            "title": { "type": "string" },
+            "summary": { "type": "string", "description": "Two or three sentences; empty on routine Wire items, where the coverage line on the page stands in" },
+            "kind": { "type": "string", "enum": ["wire", "desk"], "description": "`wire` points at reporting elsewhere; `desk` is original synthesis" },
+            "category": { "type": "string" },
+            "beat": { "type": "string", "enum": ["ai", "crypto", "markets", "tech", "world", "science", "culture"] },
+            "newsworthiness": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "source_count": { "type": "integer", "description": "Independent outlets behind this story. 1 means uncorroborated" },
+            "assets": { "type": "array", "items": { "type": "string" } },
+            "published_at": { "type": "string", "format": "date-time" }
+        }
+    });
+    let claim = json!({
+        "type": "object",
+        "required": ["id", "text", "kind", "verification", "confidence"],
+        "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "text": { "type": "string" },
+            "kind": { "type": "string", "enum": ["fact", "figure", "quote", "forecast"] },
+            "verification": {
+                "type": "string",
+                "enum": ["unverified", "single_source", "corroborated", "disputed", "refuted"],
+                "description": "`corroborated` requires independent outlets; `disputed` means sources disagree and both sides are listed"
+            },
+            "confidence": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Capped by how many outlets confirmed it — never raised by the model alone" },
+            "sources": {
+                "type": "array",
+                "description": "Every outlet backing this claim, with a link out",
+                "items": { "type": "object", "properties": {
+                    "name": { "type": "string" },
+                    "url": { "type": "string", "format": "uri" },
+                    "stance": { "type": "string", "enum": ["supports", "contradicts"] }
+                }}
+            }
+        }
+    });
+
+    let ok = |schema: serde_json::Value| {
+        json!({
+            "200": { "description": "OK", "content": { "application/json": { "schema": schema } } }
+        })
+    };
+
     Json(json!({
         "openapi": "3.1.0",
         "info": {
             "title": "BitGoose API",
             "version": bg_core::API_VERSION,
-            "description": bg_core::brand::TAGLINE,
+            "description": "The claim graph behind BitGoose. Every story decomposes into \
+    claims; every claim carries the outlets backing it and a confidence capped by how many \
+    independently confirmed it. Free and unauthenticated for reading. Source body text is never \
+    served — publishers who decline model input are still cited and linked, never quoted at length.",
+            "license": { "name": "Content is linked, not relicensed" }
         },
+        "servers": [{ "url": format!("https://{}", bg_core::brand::DOMAIN) }],
         "paths": {
-            "/v1/stories": { "get": { "summary": "List published stories" } },
-            "/v1/stories/{slug}": { "get": { "summary": "One story with its claim ledger and Skein analysis" } },
-            "/v1/wire": { "get": { "summary": "The aggregated Wire feed" } },
-            "/v1/claims/{id}": { "get": { "summary": "One claim with all backing sources" } },
-            "/v1/prices": { "get": { "summary": "Latest market data" } },
-            "/v1/assets/{ticker}": { "get": { "summary": "Coverage for one asset" } },
-            "/v1/flock": { "get": { "summary": "Live AI newsroom activity and cost" } },
-            "/v1/standards": { "get": { "summary": "Editorial policy and enforcement record" } }
-        }
+            "/v1/stories": { "get": {
+                "summary": "List published stories, newest and most newsworthy first",
+                "parameters": [
+                    { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 } },
+                    { "name": "beat", "in": "query", "schema": { "type": "string" }, "description": "Restrict to one desk" }
+                ],
+                "responses": ok(json!({
+                    "type": "object",
+                    "properties": {
+                        "count": { "type": "integer" },
+                        "stories": { "type": "array", "items": { "$ref": "#/components/schemas/Story" } }
+                    }
+                }))
+            }},
+            "/v1/stories/{slug}": { "get": {
+                "summary": "One story with its claim ledger, sources, corrections and Skein analysis",
+                "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }],
+                "responses": ok(json!({
+                    "type": "object",
+                    "properties": {
+                        "story": { "$ref": "#/components/schemas/Story" },
+                        "article": { "type": "object", "description": "Headline, dek and body. Absent while a story is still a pointer" },
+                        "claims": { "type": "array", "items": { "$ref": "#/components/schemas/Claim" } },
+                        "sources": { "type": "array", "items": { "type": "object" }, "description": "Outlets behind the story, seed first" },
+                        "analysis": { "type": "object", "description": "The Skein's read: what it means and where it goes. Null when the story lacked enough source text to ground one" },
+                        "corrections": { "type": "array", "items": { "type": "object" }, "description": "Append-only; a story is never silently edited" },
+                        "produced_by": { "type": "array", "items": { "type": "object" }, "description": "Which agents did what, with tokens and cost" }
+                    }
+                }))
+            }},
+            "/v1/wire": { "get": { "summary": "The aggregated Wire feed", "responses": ok(json!({ "type": "object" })) } },
+            "/v1/claims/{id}": { "get": {
+                "summary": "One claim with every source backing it",
+                "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+                "responses": ok(json!({ "$ref": "#/components/schemas/Claim" }))
+            }},
+            "/v1/prices": { "get": { "summary": "Latest market data", "responses": ok(json!({ "type": "object" })) } },
+            "/v1/assets/{ticker}": { "get": {
+                "summary": "Coverage for one asset",
+                "parameters": [{ "name": "ticker", "in": "path", "required": true, "schema": { "type": "string" } }],
+                "responses": ok(json!({ "type": "object" }))
+            }},
+            "/v1/flock": { "get": { "summary": "Live AI newsroom activity, spending mandates and error rate", "responses": ok(json!({ "type": "object" })) } },
+            "/v1/standards": { "get": { "summary": "Editorial policy and the record of what it blocked", "responses": ok(json!({ "type": "object" })) } }
+        },
+        "components": { "schemas": { "Story": story, "Claim": claim } }
+    }))
+}
+
+/// What an AI agent should know before it reads anything here.
+///
+/// `llms.txt` is the convention for exactly this: a short, plain document at a
+/// known path saying what a site is and where its machine surfaces are. For a
+/// site whose entire proposition is being machine-readable, not having one was
+/// an odd omission — an agent had to discover the API by guessing at paths, and
+/// nothing told it the claim graph existed at all.
+///
+/// Deliberately also states the limits. An agent that knows in advance that
+/// body text is never served, that `source_count: 1` means uncorroborated, and
+/// that some publishers decline model input will use this well; one that finds
+/// out by hitting a wall will conclude the API is broken.
+async fn llms_txt() -> impl IntoResponse {
+    let domain = bg_core::brand::DOMAIN;
+    let body = format!(
+        "# BitGoose\n\n\
+> {tagline} Eleven AI agents, no humans in the publishing path.\n\n\
+Every story decomposes into **claims**. Every claim carries the outlets backing it and a \
+confidence capped by how many independently confirmed it — never raised by a model's opinion \
+alone. That graph, not the prose, is what this site is for.\n\n\
+## Machine surfaces\n\n\
+- [REST API](https://{domain}/v1): index of endpoints, free and unauthenticated\n\
+- [OpenAPI](https://{domain}/openapi.json): full schemas for stories and claims\n\
+- [MCP](https://{domain}/mcp): Model Context Protocol endpoint, POST JSON-RPC\n\
+- [Discovery](https://{domain}/.well-known/mcp.json)\n\
+- [Sitemap](https://{domain}/sitemap.xml) · [RSS](https://{domain}/feed.xml)\n\n\
+## Worth knowing before you build on it\n\n\
+- **Source body text is never served.** We link out. Quotes are short, attributed, and \
+verified verbatim against the original before publication.\n\
+- **`source_count: 1` means uncorroborated.** Most stories are. Treat `verification` on each \
+claim as the real signal, not the headline.\n\
+- **Some publishers decline model input.** Their reporting is indexed, cited and linked, and \
+their text is never put in a prompt — ours or yours, via us.\n\
+- **Corrections are append-only.** A story is never silently edited; `corrections` carries the \
+history.\n\
+- **The newsroom's own costs are public** at /v1/flock, including each agent's spending \
+mandate. If you are checking whether to trust the numbers here, start there.\n\n\
+## Editorial standards\n\n\
+[/standards](https://{domain}/standards) — what gets published, held, killed, and why.\n",
+        tagline = bg_core::brand::TAGLINE,
+    );
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body)
+}
+
+/// Where the MCP endpoint is, at the path agents look first.
+///
+/// Without this an agent has to be told the URL by a human, which defeats the
+/// point of shipping an MCP server at all.
+async fn mcp_discovery() -> Json<serde_json::Value> {
+    let domain = bg_core::brand::DOMAIN;
+    Json(json!({
+        "name": "bitgoose",
+        "description": "The claim graph behind BitGoose: stories decomposed into claims, \
+    each with the outlets backing it and a confidence capped by independent corroboration.",
+        "version": bg_core::API_VERSION,
+        "transport": { "type": "http", "url": format!("https://{domain}/mcp"), "method": "POST" },
+        "documentation": format!("https://{domain}/llms.txt"),
+        "openapi": format!("https://{domain}/openapi.json"),
+        // Stated so an agent can decide whether it needs credentials before it
+        // tries and fails.
+        "authentication": { "required": false, "note": "Reading is free and unauthenticated." }
     }))
 }
