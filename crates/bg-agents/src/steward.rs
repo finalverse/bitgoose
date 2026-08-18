@@ -374,7 +374,10 @@ async fn backfill_images(ctx: &Ctx, apply: bool) -> Vec<Finding> {
     };
     let missing: Vec<_> = candidates
         .into_iter()
-        .filter(|(slug, _)| bg_ingest::mirror::mirrored(slug).is_none())
+        // `held`, not `mirrored`: the latter is size-gated, so a picture we
+        // fetched and could not compress would read as missing and be fetched
+        // again every round for ever.
+        .filter(|(slug, _)| !bg_ingest::mirror::held(slug))
         .collect();
     if missing.is_empty() {
         return Vec::new();

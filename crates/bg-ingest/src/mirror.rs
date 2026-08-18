@@ -108,6 +108,22 @@ pub fn mirrored(slug: &str) -> Option<PathBuf> {
     (meta.len() as usize <= SHARE_TARGET_BYTES).then_some(p)
 }
 
+/// Whether we have already fetched this story's picture, servable or not.
+///
+/// Distinct from [`mirrored`] on purpose, and the distinction is load-bearing:
+///
+/// * `mirrored` asks *may we advertise this*, and is size-gated.
+/// * `held` asks *have we already done the work*, and is not.
+///
+/// Without the second, an image that cannot be compressed under the target —
+/// 24 of the first 104 — reads as missing forever, so the backfill re-fetches
+/// it every round, on the link that is the reason the target exists, for a
+/// result it will reject again. One question answering for two produced a
+/// permanent retry loop against publishers.
+pub fn held(slug: &str) -> bool {
+    safe_slug(slug) && cache_dir().join(format!("img-{slug}")).is_file()
+}
+
 /// Largest publisher image worth storing. Above this it is not a lead image.
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -330,5 +346,33 @@ mod arrival_tests {
             out.len(),
             SHARE_TARGET_BYTES
         );
+    }
+}
+
+#[cfg(test)]
+mod held_tests {
+    use super::*;
+
+    /// The two questions must not collapse into one.
+    ///
+    /// A picture too large to advertise is still a picture we fetched. Asking
+    /// `mirrored` in place of `held` made the backfill re-download 24 files
+    /// every round, permanently, over the link the size limit exists because of.
+    #[test]
+    fn a_file_too_large_to_serve_is_still_a_file_we_have() {
+        let slug = "held-test-oversized-story-slug";
+        let path = cache_dir().join(format!("img-{slug}"));
+        store(&path, &vec![0u8; SHARE_TARGET_BYTES + 5_000]);
+
+        assert!(held(slug), "we fetched it, so we hold it");
+        assert!(mirrored(slug).is_none(), "but it must not be advertised");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn something_never_fetched_is_neither() {
+        assert!(!held("held-test-a-slug-we-have-never-seen"));
+        assert!(mirrored("held-test-a-slug-we-have-never-seen").is_none());
     }
 }
