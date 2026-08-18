@@ -128,6 +128,7 @@ pub async fn run(ctx: &Ctx, apply: bool) -> Result<Vec<Finding>> {
     out.extend(check_queue(ctx).await);
     out.extend(check_junk_topics(ctx, apply).await);
     out.extend(backfill_images(ctx, apply).await);
+    out.extend(check_delivery(ctx).await);
 
     let (fixed, noted) = out.iter().partition::<Vec<_>, _>(|f| f.action.is_some());
     info!(
@@ -404,6 +405,110 @@ async fn backfill_images(ctx: &Ctx, apply: bool) -> Vec<Finding> {
         "image-mirror",
         detail,
         format!("copied {got} this round"),
+    )]
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(default)
+}
+
+/// What a share of a story actually weighs, fetched over the public URL.
+///
+/// **The check that was missing.** Six versions of the share-card work shipped
+/// with the code doing exactly what it said and the outcome still wrong: a
+/// photograph that reached `og:image` and took 28 seconds to fetch; a 60 KB
+/// target set without measuring the 7 KB/s link; a 120 KB file stored under a
+/// 60 KB target; two encoder passes that compressed nothing over 150 KB. Every
+/// one was found by fetching the artefact and weighing it, and none by reading
+/// the code or by any test written beforehand.
+///
+/// Nothing inside the database can catch that class. A row cannot tell you a
+/// file is too heavy for the wire it has to cross. So this one goes and looks.
+///
+/// It measures rather than judges the network: the host cannot see its own
+/// uplink the way a reader in another country does, and pretending otherwise
+/// would be the same mistake again. What it *can* state exactly is how many
+/// bytes a crawler is asked to take, which is the half that is ours.
+async fn check_delivery(ctx: &Ctx) -> Vec<Finding> {
+    // What a crawler will tolerate, in bytes, at the throughput this host has
+    // actually delivered. Measured, not assumed: ~7 KB/s and a two-second
+    // budget is 14 KB, which is roughly what the drawn card weighs — so the
+    // card is the reference, and nothing we advertise should be far above it.
+    // Overridable, and not only for tests: the right budget is a property of
+    // the link a reader is on, and this host's is not the one it will always
+    // have. A check whose thresholds cannot be moved is a check that will be
+    // wrong the day the cable is plugged in.
+    let doc_budget: usize = env_usize("BG_DELIVERY_DOC_BUDGET", 8_000);
+    let image_budget: usize = env_usize("BG_DELIVERY_IMAGE_BUDGET", 45_000);
+    const SAMPLE: i64 = 4;
+
+    let base = std::env::var("BG_PUBLIC_BASE_URL")
+        .unwrap_or_else(|_| format!("https://{}", bg_core::brand::DOMAIN));
+    let base = base.trim_end_matches('/');
+
+    let recent = match bg_db::stories::top_published(&ctx.db, SAMPLE).await {
+        Ok(v) if !v.is_empty() => v,
+        _ => return Vec::new(),
+    };
+
+    // Ask as WeChat's crawler does, so the measurement is of the document a
+    // crawler is actually served rather than of the reader's page.
+    let ua = "Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 MicroMessenger/8.0.49";
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .user_agent(ua)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return vec![Finding::noted("delivery", format!("no client: {e}"))],
+    };
+
+    let mut heavy: Vec<String> = Vec::new();
+    for st in &recent {
+        let url = format!("{base}/story/{}", st.slug);
+        let Ok(resp) = client.get(&url).header("Accept", "*/*").send().await else {
+            continue;
+        };
+        let Ok(body) = resp.text().await else {
+            continue;
+        };
+        if body.len() > doc_budget {
+            heavy.push(format!("{} document {} bytes", st.slug, body.len()));
+        }
+        // And the picture it points a crawler at — the part that went wrong
+        // five times running.
+        let Some(img) = body
+            .split("og:image\" content=\"")
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+        else {
+            continue;
+        };
+        if let Ok(r) = client.get(img).send().await {
+            let n = r.bytes().await.map(|b| b.len()).unwrap_or(0);
+            if n > image_budget {
+                heavy.push(format!("{} share image {n} bytes", st.slug));
+            }
+        }
+    }
+
+    if heavy.is_empty() {
+        return Vec::new();
+    }
+    // Reported, never acted on. The remedy depends on why — an encoder that
+    // gave up, a document that grew, a publisher serving something enormous —
+    // and guessing between them is how an agent makes things worse.
+    vec![Finding::noted(
+        "delivery",
+        format!(
+            "{} of the top {SAMPLE} stories are heavier than a crawler will wait for \
+             (limits {doc_budget}B document, {image_budget}B image): {}",
+            heavy.len(),
+            heavy.join("; ")
+        ),
     )]
 }
 
