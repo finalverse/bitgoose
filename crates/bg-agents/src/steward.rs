@@ -367,7 +367,12 @@ async fn check_junk_topics(ctx: &Ctx, apply: bool) -> Vec<Finding> {
 /// a few each pass drains the backlog over days without competing with the
 /// newsroom's own polling for the wire.
 async fn backfill_images(ctx: &Ctx, apply: bool) -> Vec<Finding> {
-    const PER_ROUND: i64 = 25;
+    // Twenty-five was chosen when this was the only network check and the
+    // round was not bounded. On a 7 KB/s link, twenty-five fetches plus the
+    // delivery probe outlasted the pass interval and stalled the newsroom for
+    // seventeen minutes. Eight drains the backlog over a few days and leaves
+    // room inside the round's timeout for everything else.
+    const PER_ROUND: i64 = 8;
 
     let candidates = match bg_db::stories::awaiting_image_mirror(&ctx.db, 400).await {
         Ok(v) => v,
@@ -443,7 +448,9 @@ async fn check_delivery(ctx: &Ctx) -> Vec<Finding> {
     // wrong the day the cable is plugged in.
     let doc_budget: usize = env_usize("BG_DELIVERY_DOC_BUDGET", 8_000);
     let image_budget: usize = env_usize("BG_DELIVERY_IMAGE_BUDGET", 45_000);
-    const SAMPLE: i64 = 4;
+    // Two stories, so the probe is eight fetches at most rather than sixteen.
+    // It is a spot check on what a crawler is handed, not a survey.
+    const SAMPLE: i64 = 2;
 
     let base = std::env::var("BG_PUBLIC_BASE_URL")
         .unwrap_or_else(|_| format!("https://{}", bg_core::brand::DOMAIN));
@@ -458,7 +465,8 @@ async fn check_delivery(ctx: &Ctx) -> Vec<Finding> {
     // crawler is actually served rather than of the reader's page.
     let ua = "Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 MicroMessenger/8.0.49";
     let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(45))
+        // Per request, so one unreachable asset cannot consume the round.
+        .timeout(std::time::Duration::from_secs(20))
         .user_agent(ua)
         .build()
     {

@@ -293,29 +293,6 @@ async fn main() -> Result<()> {
             loop {
                 let started = std::time::Instant::now();
 
-                // Before the pass, so a fault it can fix — text we should not
-                // be holding, a source failing every poll — is out of the way
-                // before the newsroom spends a budget working around it.
-                if std::time::Instant::now() >= next_steward {
-                    next_steward = std::time::Instant::now() + STEWARD_EVERY;
-                    match bg_agents::steward::run(&ctx, true).await {
-                        Ok(f) if f.is_empty() => {}
-                        Ok(f) => {
-                            let (fixed, human): (Vec<_>, Vec<_>) =
-                                f.iter().partition(|x| !x.needs_a_human());
-                            println!(
-                                "[{}] steward: {} fixed, {} need a human",
-                                chrono::Utc::now().to_rfc3339(),
-                                fixed.len(),
-                                human.len()
-                            );
-                            for x in human {
-                                println!("    ? [{}] {}", x.kind, x.detail);
-                            }
-                        }
-                        Err(e) => eprintln!("steward round failed: {e}"),
-                    }
-                }
                 let backlog = match runner::run_once(&ctx, &runner::RunOpts::default()).await {
                     Ok(r) => {
                         println!(
@@ -334,6 +311,52 @@ async fn main() -> Result<()> {
                         false
                     }
                 };
+
+                // *After* the pass, detached, and on a clock of its own.
+                //
+                // It used to run inline before the pass, on the reasoning that
+                // clearing a fault first is tidier. Then it grew two checks
+                // that touch the network — the image backfill and the delivery
+                // probe — and on a host doing about 7 KB/s those take longer
+                // than the pass interval. Production went **seventeen minutes
+                // publishing nothing**, worker healthy, log silent, stuck in
+                // its first round.
+                //
+                // Nothing the Steward does is urgent to the minute. The
+                // newsroom's own work is, so the Steward is spawned and the
+                // loop never waits on it. The timeout is the backstop: a round
+                // that cannot finish in five minutes has met something worse
+                // than slow, and a second copy piling up behind it would be
+                // the same bug again.
+                if std::time::Instant::now() >= next_steward {
+                    next_steward = std::time::Instant::now() + STEWARD_EVERY;
+                    let sctx = ctx.clone();
+                    tokio::spawn(async move {
+                        let round = bg_agents::steward::run(&sctx, true);
+                        match tokio::time::timeout(STEWARD_MAX_ROUND, round).await {
+                            Ok(Ok(f)) if f.is_empty() => {}
+                            Ok(Ok(f)) => {
+                                let (fixed, human): (Vec<_>, Vec<_>) =
+                                    f.iter().partition(|x| !x.needs_a_human());
+                                println!(
+                                    "[{}] steward: {} fixed, {} need a human",
+                                    chrono::Utc::now().to_rfc3339(),
+                                    fixed.len(),
+                                    human.len()
+                                );
+                                for x in human {
+                                    println!("    ? [{}] {}", x.kind, x.detail);
+                                }
+                            }
+                            Ok(Err(e)) => eprintln!("steward round failed: {e}"),
+                            Err(_) => eprintln!(
+                                "steward round exceeded {}s and was abandoned; \
+                                 the next one starts clean",
+                                STEWARD_MAX_ROUND.as_secs()
+                            ),
+                        }
+                    });
+                }
 
                 let wait = if consecutive_failures > 0 {
                     // 2x, 4x, 8x … capped at an hour.
@@ -757,6 +780,13 @@ async fn main() -> Result<()> {
 /// barren for three — so a tighter loop would fill the log without noticing
 /// anything sooner.
 const STEWARD_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+
+/// Longest a round may take before it is abandoned.
+///
+/// Its network-touching checks are bounded per item, not in total, and on a bad
+/// link the total is what matters. Five minutes is longer than a healthy round
+/// needs and short enough that a stuck one cannot overlap the next.
+const STEWARD_MAX_ROUND: std::time::Duration = std::time::Duration::from_secs(300);
 
 async fn context(url: &str, provider_override: Option<String>) -> Result<Ctx> {
     if let Some(p) = provider_override {
