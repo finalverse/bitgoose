@@ -313,7 +313,7 @@ impl Pacer {
         // Capped. A provider that asks for an hour is reporting an outage, and
         // sitting out an hour of passes on its say-so would turn a bad twenty
         // minutes into a bad morning — the next pass can find out cheaply.
-        let wait = retry_after.min(Duration::from_secs(600));
+        let wait = retry_after.min(Duration::from_secs(3600));
         if let Ok(mut g) = self.ledgers.lock() {
             g[slot(tier)].cooldown_until = Some(Instant::now() + wait);
         }
@@ -687,13 +687,27 @@ mod cooldown_tests {
     }
 
     #[test]
-    fn an_outage_length_wait_is_capped() {
-        // A provider asking for an hour is reporting an outage. Sitting out an
-        // hour of passes on its say-so turns a bad twenty minutes into a bad
-        // morning; the next pass can find out cheaply instead.
+    fn a_long_wait_is_obeyed_up_to_an_hour() {
+        // This cap was ten minutes, on the theory that a provider asking for
+        // longer is reporting an outage and the next pass should find out
+        // cheaply. The daily quota is not an outage, and it is not a guess:
+        //
+        //   on tokens per day (TPD): Limit 200000, Used 196664,
+        //   Requested 10072. Please try again in 48m29.952s.
+        //
+        // The provider computed that from its own counter. Probing at ten
+        // minutes cannot succeed — it can only spend one of the thousand daily
+        // requests to be told the same thing, five more times.
         let p = Pacer::new(8_000);
-        p.cooling(ModelTier::Mid, Duration::from_secs(3_600));
+        p.cooling(ModelTier::Mid, Duration::from_secs(48 * 60 + 30));
         let left = p.cooling_for(ModelTier::Mid).expect("cooling");
-        assert!(left.as_secs() <= 600, "waited {left:?} on one refusal");
+        assert!(left.as_secs() > 2_800, "gave up too early: {left:?}");
+
+        // An hour is still the ceiling: past that the wait is more likely to be
+        // a broken clock than a quota, and a pass costs little to try.
+        let p = Pacer::new(8_000);
+        p.cooling(ModelTier::Mid, Duration::from_secs(86_400));
+        let left = p.cooling_for(ModelTier::Mid).expect("cooling");
+        assert!(left.as_secs() <= 3_600, "waited {left:?} on one refusal");
     }
 }

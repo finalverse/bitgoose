@@ -26,14 +26,24 @@ pub struct OpenAiProvider {
 /// Providers that omit Retry-After often still say the wait in prose. Reading
 /// it beats guessing: waiting too little burns another attempt against the same
 /// budget, and waiting too long stalls the pass.
+///
+/// The wait carries the same `2m52.8s` shape as the reset headers, so it is
+/// read with the same parser. Doing it by hand here was a real outage: taking
+/// digits until the first non-digit turned the daily limit's
+/// `try again in 48m29.952s` into **48 seconds**, so the newsroom spent a
+/// 48-minute lockout asking once a minute and being refused every time.
 fn parse_retry_hint(body: &str) -> Option<f64> {
     let i = body.find("try again in")? + "try again in".len();
     let rest = body[i..].trim_start();
-    let num: String = rest
+    // Up to the end of the duration: digits, a decimal point, and the unit
+    // letters `m` and `s`. Stops at the space before "Need more tokens?".
+    let span: String = rest
         .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == 'm' || *c == 's')
         .collect();
-    num.parse().ok()
+    // ...but not the full stop that ends the sentence: `48m29.952s.` is not a
+    // duration, and `parse_reset` is right to reject it.
+    parse_reset(span.trim_end_matches('.')).map(|d| d.as_secs_f64())
 }
 
 fn header_u32(h: &reqwest::header::HeaderMap, name: &str) -> Option<u32> {
@@ -208,6 +218,114 @@ struct Usage {
     completion_tokens: u32,
 }
 
+/// Trim a reservation so the request can physically be admitted.
+///
+/// The provider charges its rate limit for **what you reserve**, not what you
+/// use: a 1,080-token prompt asking for 8,000 output is billed as 9,080 against
+/// an 8,000-per-minute window, and comes back
+///
+///   HTTP 413: Request too large … Limit 8000, Requested 9080
+///
+/// every time, forever. Scribe asked for 8,000 and so the Desk — the original
+/// reporting the whole site is for — had never once published. No amount of
+/// waiting fixes that; the request cannot fit, so it must be made smaller.
+///
+/// Leaves a margin because the four-chars-per-token estimate is approximate and
+/// erring low here costs the whole call. Never trims below [`MIN_OUTPUT`]: a
+/// reply squeezed into a hundred tokens is a truncation, which for a structured
+/// response fails validation and wastes the call just as completely.
+fn fits_the_window(system: &str, user: &str, asked: u32) -> u32 {
+    let window = std::env::var("BG_TPM_WINDOW")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(DEFAULT_TPM_WINDOW);
+    let prompt = (system.len() + user.len()) as u32 / 4;
+    let room = window
+        .saturating_sub(prompt)
+        .saturating_sub(RESERVATION_MARGIN);
+    asked.min(room.max(MIN_OUTPUT))
+}
+
+/// The per-minute token window a single request has to fit inside.
+///
+/// Groq's free tier. Overridable because it is a property of the account, not
+/// of the code, and a paid tier moves it.
+const DEFAULT_TPM_WINDOW: u32 = 8_000;
+
+/// Slack for the estimate being wrong in the expensive direction.
+const RESERVATION_MARGIN: u32 = 400;
+
+/// Below this a structured reply truncates, which fails validation anyway.
+const MIN_OUTPUT: u32 = 512;
+
+/// How hard a reasoning model should think before answering.
+///
+/// `gpt-oss`, o-series and the Qwen "thinking" models emit a private chain of
+/// thought that is billed as **output tokens** and then discarded. Measured on
+/// the live key with a four-headline triage prompt:
+///
+/// | | total tokens | reasoning emitted |
+/// |---|---|---|
+/// | provider default | 393 | 1,094 chars |
+/// | `low` | 184 | 148 chars |
+///
+/// Same prompt, same usable answer, **53% of the tokens** — and on
+/// completion-heavy work like a twenty-item triage batch the gap is wider,
+/// because the reasoning grows with the number of items and the answer does
+/// not. Left at the default this quietly ate most of a 200,000-token daily
+/// allowance: the provider recorded 196,664 used on a day our own ledger
+/// counted 118,236, and four of the seven desks went unpublished for want of
+/// the difference.
+///
+/// The Top tier keeps `medium`, because Gander and Sentinel are making
+/// editorial judgements where the deliberation is the point. Everything else
+/// gets `low`: triage, clustering and distribution copy are classification
+/// tasks, and a classifier that deliberates is only an expensive classifier.
+///
+/// Returns `None` for models that do not take the parameter — sending it to
+/// one that does not is a 400, so this is an allowlist rather than a blocklist.
+fn reasoning_effort(model: &str, tier: ModelTier) -> Option<String> {
+    if !takes_reasoning_effort(model) {
+        return None;
+    }
+    let per_tier = match tier {
+        ModelTier::Fast => "BG_REASONING_FAST",
+        ModelTier::Mid => "BG_REASONING_MID",
+        ModelTier::Top => "BG_REASONING_TOP",
+        // Deterministic work never reaches a provider.
+        ModelTier::None => return None,
+    };
+    let chosen = std::env::var(per_tier)
+        .or_else(|_| std::env::var("BG_REASONING"))
+        .unwrap_or_else(|_| {
+            match tier {
+                ModelTier::Top => "medium",
+                _ => "low",
+            }
+            .to_string()
+        });
+    let chosen = chosen.trim().to_lowercase();
+    // An explicit escape hatch: `off` restores the provider's own default,
+    // which is what to reach for if a tier starts answering badly.
+    if chosen.is_empty() || chosen == "off" || chosen == "default" {
+        return None;
+    }
+    Some(chosen)
+}
+
+/// Models known to accept `reasoning_effort`.
+fn takes_reasoning_effort(model: &str) -> bool {
+    let lowered = model.to_lowercase();
+    let m = lowered.rsplit('/').next().unwrap_or(&lowered);
+    m.starts_with("gpt-oss")
+        || m.starts_with("o1")
+        || m.starts_with("o3")
+        || m.starts_with("o4")
+        || m.starts_with("gpt-5")
+        || m.contains("thinking")
+        || m.starts_with("qwen3")
+}
+
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     fn name(&self) -> &'static str {
@@ -222,15 +340,21 @@ impl LlmProvider for OpenAiProvider {
         let spec = self.spec_for(req.tier);
         let model = self.resolved_model(req.tier);
 
+        let max_tokens = fits_the_window(&req.system, &req.user, req.max_tokens);
+
         let mut body = json!({
             "model": model,
-            "max_tokens": req.max_tokens,
+            "max_tokens": max_tokens,
             "temperature": req.temperature,
             "messages": [
                 { "role": "system", "content": req.system },
                 { "role": "user", "content": req.user },
             ],
         });
+
+        if let Some(effort) = reasoning_effort(&model, req.tier) {
+            body["reasoning_effort"] = json!(effort);
+        }
 
         if let Some(schema) = &req.json_schema {
             body["response_format"] = json!({
@@ -261,7 +385,13 @@ impl LlmProvider for OpenAiProvider {
             let secs = header
                 .or_else(|| parse_retry_hint(&body))
                 .unwrap_or(20.0)
-                .clamp(1.0, 300.0);
+                // Up to an hour, not five minutes. The per-minute limit asks
+                // for tens of seconds, but the *daily* one asks for the rest of
+                // the day — "Limit 200000, Used 196664 … try again in 48m29s".
+                // Clamping that to 300s did not shorten the wait, it just meant
+                // we spent the next 48 minutes asking every five and being told
+                // the same thing.
+                .clamp(1.0, 3600.0);
             return Err(LlmError::RateLimited {
                 provider: "openai",
                 retry_after: std::time::Duration::from_secs_f64(secs),
@@ -319,7 +449,7 @@ impl LlmProvider for OpenAiProvider {
             return Err(LlmError::BadJson {
                 detail: format!(
                     "hit max_tokens ({}); structured output truncated",
-                    req.max_tokens
+                    max_tokens
                 ),
                 raw: text.chars().take(200).collect(),
             });
@@ -446,10 +576,131 @@ mod local_pricing_tests {
         assert_eq!(parse_retry_hint(body), Some(38.6025));
 
         assert_eq!(parse_retry_hint("try again in 7s"), Some(7.0));
+
+        // The daily limit, which is where this went wrong: read as 48 seconds,
+        // the newsroom hammered a 48-minute lockout once a minute for an hour.
+        let tpd = r#"{"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 196664, Requested 10072. Please try again in 48m29.952s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing","type":"tokens"}}"#;
+        assert_eq!(parse_retry_hint(tpd), Some(48.0 * 60.0 + 29.952));
+
+        // Whole minutes, no seconds part.
+        assert_eq!(parse_retry_hint("try again in 2m"), Some(120.0));
+        assert_eq!(parse_retry_hint("try again in 577ms"), Some(0.577));
         // Nothing to read: the caller falls back to its own default.
         assert_eq!(parse_retry_hint("slow down"), None);
         assert_eq!(parse_retry_hint(""), None);
         assert_eq!(parse_retry_hint("try again in soon"), None);
+    }
+
+    #[test]
+    fn a_reservation_can_never_exceed_the_window() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the guard above makes this the only thread touching this.
+        unsafe { std::env::remove_var("BG_TPM_WINDOW") }
+
+        // Scribe's real request: ~1,080 tokens of prompt asking for 8,000 out.
+        // Requested 9,080 against a window of 8,000 — a permanent HTTP 413, and
+        // the reason the Desk had never published.
+        let prompt = "x".repeat(1_080 * 4);
+        let got = fits_the_window("", &prompt, 8_000);
+        assert!(
+            got + 1_080 <= DEFAULT_TPM_WINDOW,
+            "still too large: {got} + 1080 > {DEFAULT_TPM_WINDOW}"
+        );
+
+        // A reservation that already fits is left alone — this must not become
+        // a quiet across-the-board truncation of every agent's output.
+        assert_eq!(fits_the_window("", "short", 2_000), 2_000);
+    }
+
+    #[test]
+    fn a_prompt_that_fills_the_window_still_gets_room_to_answer() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the guard above makes this the only thread touching this.
+        unsafe { std::env::remove_var("BG_TPM_WINDOW") }
+
+        // Nothing sensible can be reserved here, but handing back 0 would ask
+        // the model for an empty completion rather than fail honestly.
+        let huge = "x".repeat(40_000 * 4);
+        assert_eq!(fits_the_window("", &huge, 3_000), MIN_OUTPUT);
+    }
+
+    #[test]
+    fn reasoning_models_are_told_not_to_ruminate() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the guard above makes this the only thread touching these.
+        unsafe {
+            for k in [
+                "BG_REASONING",
+                "BG_REASONING_FAST",
+                "BG_REASONING_MID",
+                "BG_REASONING_TOP",
+            ] {
+                std::env::remove_var(k);
+            }
+        }
+
+        // Classification tiers think as little as the model allows.
+        assert_eq!(
+            reasoning_effort("openai/gpt-oss-20b", ModelTier::Fast).as_deref(),
+            Some("low")
+        );
+        assert_eq!(
+            reasoning_effort("openai/gpt-oss-120b", ModelTier::Mid).as_deref(),
+            Some("low")
+        );
+        // Gander and Sentinel are paid to deliberate.
+        assert_eq!(
+            reasoning_effort("openai/gpt-oss-120b", ModelTier::Top).as_deref(),
+            Some("medium")
+        );
+        // Deterministic work never reaches a provider.
+        assert_eq!(reasoning_effort("openai/gpt-oss-20b", ModelTier::None), None);
+    }
+
+    #[test]
+    fn models_that_would_reject_the_parameter_never_see_it() {
+        // Sending `reasoning_effort` to a model that does not take it is a 400,
+        // so an unknown model must be assumed not to take it.
+        for m in [
+            "llama-3.3-70b-versatile",
+            "mixtral-8x7b",
+            "claude-sonnet-5",
+            "gpt-4o-mini",
+        ] {
+            assert!(!takes_reasoning_effort(m), "{m} would 400");
+        }
+        for m in [
+            "openai/gpt-oss-20b",
+            "gpt-oss-120b",
+            "o3-mini",
+            "qwen3-32b",
+            "some/model-thinking",
+        ] {
+            assert!(takes_reasoning_effort(m), "{m} accepts it");
+        }
+    }
+
+    #[test]
+    fn a_tier_can_be_given_its_deliberation_back() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: the guard above makes this the only thread touching these.
+        unsafe {
+            std::env::set_var("BG_REASONING_FAST", "off");
+            std::env::set_var("BG_REASONING_MID", "HIGH");
+        }
+        // `off` means send nothing and let the provider decide — the knob to
+        // reach for if a tier starts answering badly.
+        assert_eq!(reasoning_effort("openai/gpt-oss-20b", ModelTier::Fast), None);
+        assert_eq!(
+            reasoning_effort("openai/gpt-oss-120b", ModelTier::Mid).as_deref(),
+            Some("high"),
+            "the value is normalised, not passed through verbatim"
+        );
+        // SAFETY: as above.
+        unsafe {
+            std::env::remove_var("BG_REASONING_FAST");
+            std::env::remove_var("BG_REASONING_MID");
+        }
     }
 
     #[test]

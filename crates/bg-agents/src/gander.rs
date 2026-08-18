@@ -248,7 +248,10 @@ pub async fn review_desk(
 
             let req = Request::new("gander.review", ModelTier::Top, system, prompt)
                 .with_schema(schema())
-                .with_max_tokens(1_500);
+                // Measured over a week of runs: p95 590 output tokens, max 590. The
+                // extra 900 was never used and was charged anyway — the daily
+                // allowance counts what you reserve.
+                .with_max_tokens(800);
             let (d, completion) = ctx.llm.complete_json::<Decision>(&req).await?;
             let note = format!(
                 "{}: {}",

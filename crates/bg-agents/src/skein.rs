@@ -255,7 +255,13 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<bool> {
 
             let req = Request::new("skein.analyse", ModelTier::Top, system, prompt)
                 .with_schema(schema(items.len()))
-                .with_max_tokens(2_000);
+                // 1,241 of 1,503 Skein calls failed with `json_validate_failed`, the
+                // `failed_generation` cut off mid-word. It was not a prompting
+                // problem: reasoning tokens come out of this same budget, so the
+                // model spent it thinking and truncated before closing the JSON.
+                // With `reasoning_effort: low` the budget is the answer's again,
+                // and this leaves room above the p95 of the calls that did land.
+                .with_max_tokens(2_600);
             let (read, completion) = ctx.llm.complete_json::<Read>(&req).await?;
 
             let significance = read.significance.trim();

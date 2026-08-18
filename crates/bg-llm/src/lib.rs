@@ -388,6 +388,18 @@ impl Llm {
             // separately, sleeping through it one at a time.
             if let Err(LlmError::RateLimited { retry_after, .. }) = &outcome {
                 self.pacer.cooling(req.tier, *retry_after);
+                // A wait measured in minutes is the daily allowance, not a busy
+                // minute — the newsroom is about to go quiet on this tier and
+                // should say so out loud rather than at debug level. Silence
+                // that nobody can see is how "the worker is running fine" and
+                // "nothing has published since Tuesday" coexist.
+                if retry_after.as_secs() >= 120 {
+                    warn!(
+                        tier = ?req.tier,
+                        wait_min = retry_after.as_secs() / 60,
+                        "provider allowance exhausted; this tier is parked until it resets"
+                    );
+                }
             }
             match outcome {
                 Ok(c) => {
