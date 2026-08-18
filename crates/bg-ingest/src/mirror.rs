@@ -213,11 +213,18 @@ pub fn fit_for_sharing(bytes: &[u8]) -> Vec<u8> {
     } else {
         img
     };
-    // Two passes rather than one: most photographs land inside the target at a
-    // quality that keeps them looking like photographs, and only the stubborn
-    // ones pay for a second, harder squeeze. Guessing one aggressive quality
-    // for everything would make the common case look worse than it needs to.
-    for (quality, width) in [(74u8, SHARE_WIDTH), (62, 800)] {
+    // A ladder, not two guesses.
+    //
+    // Two passes were tried and measured against a real rejected photograph:
+    // 1200x800 at q74 gave 151,743 bytes and 800x533 at q62 gave 64,466 — both
+    // over, so the original came back untouched and **97 of 206 copies were
+    // full size**. There was no error; the passes were simply not aggressive
+    // enough, which a fixed pair of settings cannot know.
+    //
+    // So it steps down until it fits. The floor is 560px, which is still five
+    // times WeChat's rendered thumbnail — beyond that the picture would be
+    // getting worse for no one's benefit.
+    for (width, quality) in [(SHARE_WIDTH, 74u8), (900, 66), (700, 58), (560, 50)] {
         let scaled = if img.width() > width {
             img.resize(width, u32::MAX, image::imageops::FilterType::CatmullRom)
         } else {
@@ -231,17 +238,11 @@ pub fn fit_for_sharing(bytes: &[u8]) -> Vec<u8> {
         if out.len() <= SHARE_TARGET_BYTES {
             return out;
         }
-        if quality == 62 {
-            // Last pass, and it still missed. Handed back unchanged so
-            // `mirrored` declines to advertise it and the story falls back to
-            // the card — which does arrive.
-            //
-            // The previous version accepted this pass "whatever it weighs,
-            // it is smaller than the original", and stored a 119,865-byte file
-            // that takes eighteen seconds to fetch. Smaller was never the bar.
-            return bytes.to_vec();
-        }
     }
+    // Even at the floor it will not fit — a very large or very noisy image.
+    // Handed back unchanged so `mirrored` declines to advertise it and the
+    // story falls back to the card, which does arrive. Smaller was never the
+    // bar; arriving is.
     bytes.to_vec()
 }
 
@@ -293,6 +294,26 @@ mod share_size_tests {
         );
         let img = image::load_from_memory(&out).expect("still a valid image");
         assert!(img.width() <= SHARE_WIDTH, "width {}", img.width());
+    }
+
+    /// A photograph at the size publishers actually serve.
+    ///
+    /// The two-pass version measured 151,743 then 64,466 bytes on a real
+    /// 1500x1000 news photograph and gave up, leaving it full size. The ladder
+    /// gets the same picture to about 31 KB.
+    #[test]
+    fn a_typical_press_photograph_reaches_the_target() {
+        let big = photo(1500, 1000);
+        let out = fit_for_sharing(&big);
+        assert!(
+            out.len() <= SHARE_TARGET_BYTES,
+            "{} bytes, target {}",
+            out.len(),
+            SHARE_TARGET_BYTES
+        );
+        let img = image::load_from_memory(&out).expect("still a valid image");
+        // Not squeezed past usefulness: WeChat renders this near 110px.
+        assert!(img.width() >= 560, "shrunk to {}px", img.width());
     }
 
     #[test]
