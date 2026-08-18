@@ -93,7 +93,19 @@ pub fn mirrored(slug: &str) -> Option<PathBuf> {
         return None;
     }
     let p = cache_dir().join(format!("img-{slug}"));
-    p.is_file().then_some(p)
+    let meta = std::fs::metadata(&p).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    // Never advertise a picture that cannot arrive.
+    //
+    // The backstop to `fit_for_sharing`, and it earns its place: copies made
+    // before that existed are full size, and an image we cannot re-encode is
+    // stored as it came. A crawler offered 810 KB over this link gets nothing
+    // and renders a blank card — strictly worse than the 14 KB card it would
+    // otherwise have been given. Size is the deciding fact, whatever the reason
+    // for it.
+    (meta.len() as usize <= SHARE_TARGET_BYTES.saturating_mul(2)).then_some(p)
 }
 
 /// Largest publisher image worth storing. Above this it is not a lead image.
@@ -123,7 +135,138 @@ pub async fn store_lead_image(client: &reqwest::Client, slug: &str, url: &str) -
         debug!(%url, bytes = bytes.len(), "not a usable image; keeping our own card");
         return false;
     }
-    store(&cache_dir().join(format!("img-{slug}")), &bytes);
-    info!(%slug, bytes = bytes.len(), "mirrored the publisher's lead image");
+    let out = fit_for_sharing(&bytes);
+    let stored = out.len();
+    store(&cache_dir().join(format!("img-{slug}")), &out);
+    info!(
+        %slug,
+        from = bytes.len(),
+        to = stored,
+        "mirrored the publisher's lead image"
+    );
     true
+}
+
+/// Widest a share image ever needs to be.
+///
+/// Every platform crops from around 1200x630, and WeChat renders its thumbnail
+/// at roughly a hundred pixels. Anything larger is bytes nobody sees.
+const SHARE_WIDTH: u32 = 1200;
+
+/// What a share image must fit inside to actually arrive.
+///
+/// Not an aesthetic limit — a transport one. Measured against production: a
+/// 146 KB photograph took **28 seconds** to fetch and timed out at every budget
+/// under ten, while the 14 KB card we draw arrived every time. Mirroring
+/// publishers' images at their own resolution therefore made previews *worse*
+/// than the card it replaced, on 80 of the first 91 copied. The median was
+/// 174 KB and the largest 810 KB.
+const SHARE_TARGET_BYTES: usize = 60_000;
+
+/// Re-encode a publisher's image at the size a share card actually uses.
+///
+/// Returns the original untouched if it is already small enough, or if it
+/// cannot be decoded — a picture we cannot re-encode is still better than none,
+/// and the caller's size guard is the backstop.
+pub fn fit_for_sharing(bytes: &[u8]) -> Vec<u8> {
+    if bytes.len() <= SHARE_TARGET_BYTES {
+        return bytes.to_vec();
+    }
+    let Ok(img) = image::load_from_memory(bytes) else {
+        return bytes.to_vec();
+    };
+    let img = if img.width() > SHARE_WIDTH {
+        img.resize(
+            SHARE_WIDTH,
+            u32::MAX,
+            image::imageops::FilterType::CatmullRom,
+        )
+    } else {
+        img
+    };
+    // Two passes rather than one: most photographs land inside the target at a
+    // quality that keeps them looking like photographs, and only the stubborn
+    // ones pay for a second, harder squeeze. Guessing one aggressive quality
+    // for everything would make the common case look worse than it needs to.
+    for (quality, width) in [(74u8, SHARE_WIDTH), (62, 800)] {
+        let scaled = if img.width() > width {
+            img.resize(width, u32::MAX, image::imageops::FilterType::CatmullRom)
+        } else {
+            img.clone()
+        };
+        let mut out = Vec::with_capacity(SHARE_TARGET_BYTES);
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
+        if scaled.to_rgb8().write_with_encoder(enc).is_err() {
+            continue;
+        }
+        if out.len() <= SHARE_TARGET_BYTES || quality == 62 {
+            // The second pass is accepted whatever it weighs: it is the
+            // smallest we make, and still far below where we started.
+            return if out.len() < bytes.len() {
+                out
+            } else {
+                bytes.to_vec()
+            };
+        }
+    }
+    bytes.to_vec()
+}
+
+#[cfg(test)]
+mod share_size_tests {
+    use super::*;
+
+    fn photo(w: u32, h: u32) -> Vec<u8> {
+        // Noise, so it does not compress to nothing and the test measures
+        // something like a real photograph.
+        let mut img = image::RgbImage::new(w, h);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let v = ((x * 7 + y * 13) % 256) as u8;
+            *p = image::Rgb([v, v.wrapping_mul(3), v.wrapping_add(90)]);
+        }
+        let mut out = Vec::new();
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 96);
+        image::DynamicImage::ImageRgb8(img)
+            .to_rgb8()
+            .write_with_encoder(enc)
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn a_publishers_full_size_photograph_is_cut_down() {
+        // The regression this exists to prevent: a 146 KB image took 28
+        // seconds over the production link and timed out at every crawler
+        // budget under ten.
+        let big = photo(2400, 1350);
+        assert!(
+            big.len() > SHARE_TARGET_BYTES,
+            "fixture is too small to test"
+        );
+        let out = fit_for_sharing(&big);
+        assert!(
+            out.len() < big.len(),
+            "{} bytes in, {} out",
+            big.len(),
+            out.len()
+        );
+        let img = image::load_from_memory(&out).expect("still a valid image");
+        assert!(img.width() <= SHARE_WIDTH, "width {}", img.width());
+    }
+
+    #[test]
+    fn something_already_small_is_left_alone() {
+        let small = photo(400, 300);
+        if small.len() <= SHARE_TARGET_BYTES {
+            assert_eq!(fit_for_sharing(&small), small, "re-encoded needlessly");
+        }
+    }
+
+    #[test]
+    fn undecodable_bytes_pass_through_rather_than_vanish() {
+        // A picture we cannot re-encode is still better than none, and the
+        // caller's size guard is the backstop.
+        let junk = vec![0xAB; SHARE_TARGET_BYTES + 500];
+        assert_eq!(fit_for_sharing(&junk).len(), junk.len());
+    }
 }

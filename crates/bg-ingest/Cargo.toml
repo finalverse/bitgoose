@@ -22,6 +22,7 @@ thiserror.workspace = true
 tracing.workspace = true
 futures.workspace = true
 rust_decimal.workspace = true
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
 [dev-dependencies]
 sqlx.workspace = true
