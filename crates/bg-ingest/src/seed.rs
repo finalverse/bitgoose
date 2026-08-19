@@ -25,6 +25,131 @@ pub struct SeedSource {
 }
 
 pub const SOURCES: &[SeedSource] = &[
+    // ---- Aggregators: what is actually hot right now ---------------------
+    //
+    // Every source above is one publisher's judgement of what matters. None of
+    // them answers the question a newsroom asks first — *what is the story
+    // today* — and the gap showed: Bitcoin rose 7.9% in a day while the front
+    // page led on "Logit-Guided Neural Routing for Billion-Scale Vector
+    // Search", because an arXiv firehose out-published the wires and nothing
+    // in the pipeline knew the difference between volume and heat.
+    //
+    // Google News ranks by how many independent outlets are covering a story
+    // and how fast that number is moving, which is the same signal the Curator
+    // computes downstream and is worth having at intake as well. A topic feed
+    // that suddenly repeats across ten publishers is the Flyway's input.
+    //
+    // These are RSS endpoints published for exactly this use. Items are
+    // headline, link and timestamp — the link-out goes to the original
+    // publisher, who keeps the traffic, and the ≤25-word quote and attribution
+    // rules in `bg-core::policy` apply to these as to everything else.
+    //
+    // `beat: None` on the search feeds: a query for "bitcoin ETF" can surface a
+    // markets story, a policy story or a technology story, and pinning the
+    // whole feed to one desk is how Al Jazeera's `all.xml` once put a football
+    // result at the top of World.
+    SeedSource {
+        slug: "gnews-top",
+        name: "Google News",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 300,
+        beat: None,
+    },
+    SeedSource {
+        slug: "gnews-world",
+        name: "Google News · World",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 300,
+        beat: Some(Beat::World),
+    },
+    SeedSource {
+        slug: "gnews-business",
+        name: "Google News · Business",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 300,
+        beat: Some(Beat::Markets),
+    },
+    SeedSource {
+        slug: "gnews-tech",
+        name: "Google News · Technology",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 300,
+        beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "gnews-science",
+        name: "Google News · Science",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 600,
+        beat: Some(Beat::Science),
+    },
+    SeedSource {
+        slug: "gnews-health",
+        name: "Google News · Health",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 600,
+        beat: Some(Beat::Science),
+    },
+    SeedSource {
+        slug: "gnews-entertainment",
+        name: "Google News · Entertainment",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 68,
+        poll_interval_s: 600,
+        beat: Some(Beat::Culture),
+    },
+    // The two beats the other CDAX properties consume, so they are polled at
+    // wire speed and queried rather than taken from a section editor's page.
+    SeedSource {
+        slug: "gnews-crypto",
+        name: "Google News · Crypto",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=crypto+OR+bitcoin+OR+ethereum+OR+stablecoin+when:1d&hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 180,
+        beat: None,
+    },
+    SeedSource {
+        slug: "gnews-ai",
+        name: "Google News · AI",
+        kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=%22artificial+intelligence%22+OR+OpenAI+OR+Anthropic+OR+%22machine+learning%22+when:1d&hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com",
+        trust: 70,
+        poll_interval_s: 180,
+        beat: None,
+    },
+    SeedSource {
+        slug: "yahoo-news",
+        name: "Yahoo News",
+        kind: SourceKind::Rss,
+        url: "https://news.yahoo.com/rss/",
+        homepage: "https://news.yahoo.com",
+        trust: 66,
+        poll_interval_s: 300,
+        beat: None,
+    },
     // ---- World, Science and Culture -------------------------------------
     //
     // Three desks that existed in the navigation with nothing behind them, and

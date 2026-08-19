@@ -55,6 +55,28 @@ pub fn daily_limit_from_env() -> u32 {
         .unwrap_or(0)
 }
 
+/// The daily ceiling for each tier, in `slot` order: Fast, Mid, Top.
+///
+/// `BG_LLM_TOKENS_PER_DAY` sets all three; `BG_LLM_TOKENS_PER_DAY_FAST`,
+/// `_MID` and `_TOP` override one. The split matters because the allowance is
+/// per model: with Fast on `gpt-oss-20b` and Mid and Top sharing
+/// `gpt-oss-120b`, the safe settings are `FAST` up to the full 200,000 and
+/// `MID` + `TOP` summing to no more than it.
+pub fn daily_limits_from_env() -> [u32; 3] {
+    let base = daily_limit_from_env();
+    let one = |name: &str| -> u32 {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(base)
+    };
+    [
+        one("BG_LLM_TOKENS_PER_DAY_FAST"),
+        one("BG_LLM_TOKENS_PER_DAY_MID"),
+        one("BG_LLM_TOKENS_PER_DAY_TOP"),
+    ]
+}
+
 /// Fraction of the stated limit we actually plan to use.
 ///
 /// Estimates are rough and the provider's accounting is not ours, so aiming at
@@ -126,7 +148,14 @@ struct Ledger {
 /// from the provider and both back off.
 pub struct Pacer {
     limit: u32,
-    daily_limit: u32,
+    /// Per tier, because the provider's daily allowance is per **model** and
+    /// the tiers do not map onto models one-to-one. Fast runs `gpt-oss-20b`
+    /// with its own 200,000; Mid and Top both run `gpt-oss-120b` and share
+    /// one. A single number therefore has to be sized for the shared pair —
+    /// at most half — and that half is then also imposed on Fast, which owns
+    /// its allowance outright. Fast is the triage tier, so the cost of getting
+    /// this wrong is paid by the queue.
+    daily_limit: [u32; 3],
     ledgers: Mutex<[Ledger; 3]>,
 }
 
@@ -140,10 +169,14 @@ fn slot(tier: ModelTier) -> usize {
 
 impl Pacer {
     pub fn new(limit: u32) -> Self {
-        Self::with_daily(limit, daily_limit_from_env())
+        Self::with_daily_per_tier(limit, daily_limits_from_env())
     }
 
     pub fn with_daily(limit: u32, daily_limit: u32) -> Self {
+        Self::with_daily_per_tier(limit, [daily_limit; 3])
+    }
+
+    pub fn with_daily_per_tier(limit: u32, daily_limit: [u32; 3]) -> Self {
         Self {
             limit,
             daily_limit,
@@ -156,7 +189,10 @@ impl Pacer {
         let mut ledgers = self.ledgers.lock().unwrap_or_else(|e| e.into_inner());
         let l = &mut ledgers[slot(tier)];
         prune_day(&mut l.day);
-        (l.day.iter().map(|(_, n)| n).sum(), self.daily_limit)
+        (
+            l.day.iter().map(|(_, n)| n).sum(),
+            self.daily_limit[slot(tier)],
+        )
     }
 
     pub fn enabled(&self) -> bool {
@@ -202,13 +238,14 @@ impl Pacer {
         // The daily ceiling. Nothing announces this one in advance, so if we
         // do not count it ourselves the first sign is a 429 asking for a
         // thirteen-minute wait — repeatedly, for the rest of the day.
-        if self.daily_limit > 0 {
+        let daily_limit = self.daily_limit[slot(tier)];
+        if daily_limit > 0 {
             prune_day(&mut l.day);
             let day_used: u32 = l.day.iter().map(|(_, n)| n).sum();
-            if day_used + cost > self.daily_limit {
+            if day_used + cost > daily_limit {
                 warn!(
                     day_used,
-                    limit = self.daily_limit,
+                    limit = daily_limit,
                     cost,
                     "daily token allowance spent; holding until it rolls over"
                 );
@@ -677,6 +714,23 @@ mod daily_budget_tests {
         // 0.9 * 8000 = 7200 usable in the minute. With only 800 counted, a
         // 6,000-token call still fits; had the 5,000 stuck, it would not.
         assert_eq!(p.delay_for(ModelTier::Mid, 6_000), Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn each_tier_gets_its_own_daily_ceiling() {
+        // Fast owns gpt-oss-20b's 200,000 outright; Mid and Top share
+        // gpt-oss-120b's. Forcing one number on all three means sizing for the
+        // shared pair and then starving triage with the same figure.
+        let p = Pacer::with_daily_per_tier(8_000, [180_000, 90_000, 90_000]);
+        assert_eq!(p.day_usage(ModelTier::Fast).1, 180_000);
+        assert_eq!(p.day_usage(ModelTier::Mid).1, 90_000);
+        assert_eq!(p.day_usage(ModelTier::Top).1, 90_000);
+
+        // Mid at its ceiling must not hold Fast back — that would reintroduce
+        // exactly the coupling this exists to remove.
+        p.record(ModelTier::Mid, 90_000);
+        assert!(p.delay_for(ModelTier::Mid, 1_000) > Duration::ZERO);
+        assert_eq!(p.delay_for(ModelTier::Fast, 1_000), Duration::ZERO);
     }
 
     #[test]

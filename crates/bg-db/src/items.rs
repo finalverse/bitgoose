@@ -153,8 +153,23 @@ pub async fn count(db: &Db) -> Result<i64> {
 /// So each desk is ranked internally by recency and the ranks are interleaved:
 /// the newest item from every desk, then the second newest from every desk, and
 /// so on. A desk with three items still gets those three looked at today; a
-/// desk with nine hundred no longer crowds it out. Within a desk, recency still
-/// decides — the fairness is between desks, not inside one.
+/// desk with nine hundred no longer crowds it out.
+///
+/// **That was not enough, because the same thing happens inside a desk.** The
+/// AI queue held 3,163 arXiv preprints against 136 items from Decrypt, so
+/// arXiv won every AI slot on recency and the front page filled with
+/// "Logit-Guided Neural Routing for Billion-Scale Vector Search" while Bitcoin
+/// rose 7.9% in a day and the newsroom said nothing about it. One firehose
+/// silences a desk exactly as effectively as one desk silences another.
+///
+/// So the interleave is now by **source** as well: the newest item from every
+/// source, then the second newest from every source. Ties break toward the desk
+/// that has had the fewest items so far, which keeps the original between-desk
+/// fairness intact. Within one source, recency still decides.
+///
+/// Note this is fairness in *attention*, not in publication — every item still
+/// has to earn its way past triage. It only guarantees that a quiet source gets
+/// looked at, which is the difference between a wire service and a scraper.
 pub async fn untriaged(db: &Db, limit: i64) -> Result<Vec<RawItem>> {
     let cols = COLS
         .split(',')
@@ -163,7 +178,12 @@ pub async fn untriaged(db: &Db, limit: i64) -> Result<Vec<RawItem>> {
         .join(", ");
     let rows = crate::sql(format!(
         "SELECT {cols} FROM (
-           SELECT r.*, row_number() OVER (
+           SELECT r.*,
+                  row_number() OVER (
+                    PARTITION BY r.source_id
+                    ORDER BY r.published_at DESC
+                  ) AS src_rank,
+                  row_number() OVER (
                     PARTITION BY coalesce(s.beat, 'unrouted')
                     ORDER BY r.published_at DESC
                   ) AS desk_rank
@@ -171,7 +191,7 @@ pub async fn untriaged(db: &Db, limit: i64) -> Result<Vec<RawItem>> {
              JOIN sources s ON s.id = r.source_id
             WHERE NOT r.triaged AND r.aged_out_at IS NULL
          ) t
-         ORDER BY t.desk_rank ASC, t.published_at DESC
+         ORDER BY t.src_rank ASC, t.desk_rank ASC, t.published_at DESC
          LIMIT $1"
     ))
     .bind(limit)
