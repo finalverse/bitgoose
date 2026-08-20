@@ -229,14 +229,81 @@ const MAX_RATE_LIMIT_WAIT: std::time::Duration = std::time::Duration::from_secs(
 #[derive(Clone)]
 pub struct Llm {
     chain: Vec<Arc<dyn LlmProvider>>,
+    /// A chain that overrides [`Self::chain`] for one tier, in `slot` order:
+    /// Fast, Mid, Top.
+    ///
+    /// The tiers do not want the same thing. Triage, distribution copy and
+    /// clustering are high-volume classification where a 7B model on the box
+    /// is not merely adequate but *better positioned*: measured on this host,
+    /// 80 tokens a second, 40 headlines classified in 8.9 seconds, valid JSON
+    /// every time, and — the part that matters — no daily allowance to run out
+    /// of. Analysis and editorial judgement still want the best model
+    /// available, and there are few enough of those calls to afford it.
+    ///
+    /// Without this the choice was all-or-nothing: keep the good model and let
+    /// triage starve behind a 200,000-token ceiling, or move everything local
+    /// and make the Skein — the one thing on the site worth reading — worse.
+    per_tier: [Option<Vec<Arc<dyn LlmProvider>>>; 3],
     /// Keeps us inside a per-minute token allowance by waiting *before* a call
     /// rather than absorbing the rejection after it. See [`pacer`].
     pacer: Arc<pacer::Pacer>,
 }
 
+/// Turn provider names into a chain, skipping any that cannot be configured.
+///
+/// A missing key drops that provider with a warning rather than failing
+/// startup: a deployment running on one provider should not die because a
+/// second one is half-configured.
+fn build_chain(names: &[String]) -> Vec<Arc<dyn LlmProvider>> {
+    let mut chain: Vec<Arc<dyn LlmProvider>> = Vec::new();
+    for n in names {
+        match n.as_str() {
+            "anthropic" => match anthropic::AnthropicProvider::from_env() {
+                Ok(p) => chain.push(Arc::new(p)),
+                Err(e) => warn!(provider = "anthropic", error = %e, "skipping provider"),
+            },
+            "openai" | "openai_compat" => match openai::OpenAiProvider::from_env() {
+                Ok(p) => chain.push(Arc::new(p)),
+                Err(e) => warn!(provider = "openai", error = %e, "skipping provider"),
+            },
+            // Addressed by BG_OLLAMA_URL, not OPENAI_BASE_URL — the point is to
+            // run beside the hosted provider, not in place of it.
+            "ollama" | "local" => match openai::OpenAiProvider::ollama_from_env() {
+                Ok(p) => chain.push(Arc::new(p)),
+                Err(e) => warn!(provider = "ollama", error = %e, "skipping provider"),
+            },
+            // Same wire format, different endpoint and key name.
+            "xai" | "grok" => match openai::OpenAiProvider::from_env_named(true) {
+                Ok(p) => chain.push(Arc::new(p)),
+                Err(e) => warn!(provider = "xai", error = %e, "skipping provider"),
+            },
+            "stub" => chain.push(Arc::new(stub::StubProvider)),
+            other => warn!(provider = %other, "unknown provider, ignoring"),
+        }
+    }
+    chain
+}
+
 impl Llm {
     pub fn new(chain: Vec<Arc<dyn LlmProvider>>) -> Self {
         Self::with_pace(chain, pacer::limit_from_env())
+    }
+
+    /// Route one tier to its own chain. Empty leaves the tier on the default.
+    pub fn with_tier_chain(mut self, tier: ModelTier, chain: Vec<Arc<dyn LlmProvider>>) -> Self {
+        if !chain.is_empty() {
+            if let Some(s) = self.per_tier.get_mut(pacer::slot(tier)) {
+                *s = Some(chain);
+            }
+        }
+        self
+    }
+
+    /// The providers to try for this tier, longest-standing first.
+    fn chain_for(&self, tier: ModelTier) -> &[Arc<dyn LlmProvider>] {
+        self.per_tier[pacer::slot(tier)]
+            .as_deref()
+            .unwrap_or(&self.chain)
     }
 
     /// `tokens_per_min` of 0 disables pacing — the right setting for a paid
@@ -251,6 +318,7 @@ impl Llm {
         }
         Self {
             chain,
+            per_tier: [None, None, None],
             pacer: Arc::new(pacer::Pacer::new(tokens_per_min)),
         }
     }
@@ -273,22 +341,7 @@ impl Llm {
         );
         names.dedup();
 
-        let mut chain: Vec<Arc<dyn LlmProvider>> = Vec::new();
-        for n in &names {
-            match n.as_str() {
-                "anthropic" => match anthropic::AnthropicProvider::from_env() {
-                    Ok(p) => chain.push(Arc::new(p)),
-                    Err(e) => warn!(provider = "anthropic", error = %e, "skipping provider"),
-                },
-                "openai" | "openai_compat" | "ollama" => match openai::OpenAiProvider::from_env() {
-                    Ok(p) => chain.push(Arc::new(p)),
-                    Err(e) => warn!(provider = "openai", error = %e, "skipping provider"),
-                },
-                "stub" => chain.push(Arc::new(stub::StubProvider)),
-                other => warn!(provider = %other, "unknown provider, ignoring"),
-            }
-        }
-
+        let mut chain = build_chain(&names);
         if chain.is_empty() {
             warn!("no LLM provider could be configured; falling back to the offline stub");
             chain.push(Arc::new(stub::StubProvider));
@@ -297,7 +350,38 @@ impl Llm {
             chain = %chain.iter().map(|p| p.name()).collect::<Vec<_>>().join(" -> "),
             "LLM chain ready"
         );
-        Self::with_pace(chain, pacer::limit_from_env())
+
+        let mut llm = Self::with_pace(chain, pacer::limit_from_env());
+
+        // Per-tier routing, so the volume work and the judgement work can sit
+        // on different machines. `BG_LLM_PROVIDER_FAST=ollama` puts triage,
+        // clustering and distribution copy on the GPU in the rack — where
+        // there is no daily allowance to exhaust — and leaves the Skein and
+        // the Gander on the hosted model, whose entire budget is then spent on
+        // the work that is actually worth a good model.
+        for (tier, key) in [
+            (ModelTier::Fast, "BG_LLM_PROVIDER_FAST"),
+            (ModelTier::Mid, "BG_LLM_PROVIDER_MID"),
+            (ModelTier::Top, "BG_LLM_PROVIDER_TOP"),
+        ] {
+            let Some(spec) = std::env::var(key).ok().filter(|v| !v.trim().is_empty()) else {
+                continue;
+            };
+            let tier_names: Vec<String> =
+                spec.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            let tier_chain = build_chain(&tier_names);
+            if tier_chain.is_empty() {
+                warn!(tier = ?tier, %spec, "tier override configured nothing; leaving on the default chain");
+                continue;
+            }
+            info!(
+                tier = ?tier,
+                chain = %tier_chain.iter().map(|p| p.name()).collect::<Vec<_>>().join(" -> "),
+                "tier routed to its own provider"
+            );
+            llm = llm.with_tier_chain(tier, tier_chain);
+        }
+        llm
     }
 
     pub fn primary(&self) -> &dyn LlmProvider {
@@ -353,7 +437,7 @@ impl Llm {
         };
 
         let mut last: Option<LlmError> = None;
-        for p in &self.chain {
+        for p in self.chain_for(req.tier) {
             // Rate limits are waited out on the same provider rather than
             // failed over. A free tier's per-minute token budget is a normal
             // operating condition, not an outage, and the response says exactly
@@ -587,5 +671,45 @@ mod rate_limit_policy {
             too_long > MAX_RATE_LIMIT_WAIT,
             "an hour-long quota reset is an outage, not something to sleep through"
         );
+    }
+}
+
+#[cfg(test)]
+mod tier_routing_tests {
+    use super::*;
+
+    /// The whole point of the split: the volume tier can move to a machine
+    /// with no daily allowance while the judgement tiers stay on the best
+    /// model available. If the override leaked across tiers, triage moving
+    /// local would quietly take the Skein with it.
+    #[test]
+    fn only_the_routed_tier_changes_provider() {
+        let default_chain: Vec<Arc<dyn LlmProvider>> = vec![Arc::new(stub::StubProvider)];
+        let local: Vec<Arc<dyn LlmProvider>> = vec![
+            Arc::new(stub::StubProvider),
+            Arc::new(stub::StubProvider),
+        ];
+        let llm = Llm::new(default_chain).with_tier_chain(ModelTier::Fast, local);
+
+        assert_eq!(llm.chain_for(ModelTier::Fast).len(), 2, "Fast is routed");
+        assert_eq!(llm.chain_for(ModelTier::Mid).len(), 1, "Mid is untouched");
+        assert_eq!(llm.chain_for(ModelTier::Top).len(), 1, "Top is untouched");
+    }
+
+    #[test]
+    fn an_empty_override_leaves_the_tier_alone() {
+        // A misconfigured override must not silently strand a tier with no
+        // provider at all — it falls back to the chain that already works.
+        let llm = Llm::new(vec![Arc::new(stub::StubProvider) as Arc<dyn LlmProvider>])
+            .with_tier_chain(ModelTier::Top, vec![]);
+        assert_eq!(llm.chain_for(ModelTier::Top).len(), 1);
+    }
+
+    /// `None` shares the Fast slot, so a deterministic stage must not be
+    /// routed somewhere unexpected by a Fast override.
+    #[test]
+    fn the_no_model_tier_resolves_to_a_real_chain() {
+        let llm = Llm::new(vec![Arc::new(stub::StubProvider) as Arc<dyn LlmProvider>]);
+        assert_eq!(llm.chain_for(ModelTier::None).len(), 1);
     }
 }

@@ -159,7 +159,12 @@ pub struct Pacer {
     ledgers: Mutex<[Ledger; 3]>,
 }
 
-fn slot(tier: ModelTier) -> usize {
+/// Which of the three per-tier slots a tier occupies.
+///
+/// `pub(crate)` because the provider chain is indexed the same way: one tier,
+/// one slot, everywhere. Two different mappings would be a bug that only shows
+/// up as the wrong model answering.
+pub(crate) fn slot(tier: ModelTier) -> usize {
     match tier {
         ModelTier::Fast | ModelTier::None => 0,
         ModelTier::Mid => 1,

@@ -105,20 +105,85 @@ fn env_price(key: &str) -> Option<f64> {
         .filter(|v| v.is_finite() && *v >= 0.0)
 }
 
+/// Per-tier model names from the environment, in `slot` order.
+fn model_overrides() -> [Option<String>; 3] {
+    let one = |k: &str| std::env::var(k).ok().filter(|s| !s.trim().is_empty());
+    [
+        one("BG_MODEL_FAST"),
+        one("BG_MODEL_MID"),
+        one("BG_MODEL_TOP"),
+    ]
+}
+
+/// x.ai speaks the OpenAI wire format, so it needs no provider of its own —
+/// only a base URL and a key under a different name.
+pub const XAI_BASE_URL: &str = "https://api.x.ai/v1";
+
 impl OpenAiProvider {
     pub fn from_env() -> Result<Self> {
+        Self::from_env_named(false)
+    }
+
+    /// A local Ollama, addressed by `BG_OLLAMA_URL`.
+    ///
+    /// Deliberately not `OPENAI_BASE_URL`: that points at the hosted provider,
+    /// and the whole value of this is running *alongside* it rather than
+    /// instead of it. Ollama ignores the key but wants the header.
+    pub fn ollama_from_env() -> Result<Self> {
+        let base_url = std::env::var("BG_OLLAMA_URL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "http://127.0.0.1:11434/v1".into())
+            .trim_end_matches('/')
+            .to_string();
+        Ok(Self {
+            is_local: true,
+            api_key: "local".into(),
+            base_url,
+            http: http_client(),
+            overrides: model_overrides(),
+        })
+    }
+
+    /// `xai` selects x.ai's endpoint and its key, so switching provider is one
+    /// word in the config rather than three variables that have to agree.
+    ///
+    /// Both still win if set explicitly: an operator pointing `OPENAI_BASE_URL`
+    /// at a proxy in front of x.ai should not have it silently overridden.
+    pub fn from_env_named(xai: bool) -> Result<Self> {
+        let default_base = if xai {
+            XAI_BASE_URL
+        } else {
+            "https://api.openai.com/v1"
+        };
         let base_url = std::env::var("OPENAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.openai.com/v1".into())
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| default_base.to_string())
             .trim_end_matches('/')
             .to_string();
         // Local servers ignore the key but the header must still be present;
         // defaulting keeps an Ollama setup from needing a meaningless value.
-        let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+        //
+        // `XAI_API_KEY` is read as a fallback whenever the endpoint is x.ai,
+        // however it was selected — the key arrives from x.ai's console under
+        // that name, and making someone re-export it as OPENAI_API_KEY is a
+        // step that gets skipped and then debugged.
+        let api_key = std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| {
+                (xai || base_url.contains("x.ai"))
+                    .then(|| std::env::var("XAI_API_KEY").ok())
+                    .flatten()
+            })
+            .unwrap_or_default();
         let is_local = base_url.contains("localhost") || base_url.contains("127.0.0.1");
         if api_key.trim().is_empty() && !is_local {
             return Err(LlmError::NotConfigured {
                 provider: "openai",
-                reason: "OPENAI_API_KEY is unset and OPENAI_BASE_URL is not local".into(),
+                reason: "no OPENAI_API_KEY or XAI_API_KEY, and the endpoint is not local"
+                    .into(),
             });
         }
         Ok(Self {
@@ -130,13 +195,7 @@ impl OpenAiProvider {
             },
             base_url,
             http: http_client(),
-            overrides: [
-                std::env::var("BG_MODEL_FAST")
-                    .ok()
-                    .filter(|s| !s.is_empty()),
-                std::env::var("BG_MODEL_MID").ok().filter(|s| !s.is_empty()),
-                std::env::var("BG_MODEL_TOP").ok().filter(|s| !s.is_empty()),
-            ],
+            overrides: model_overrides(),
         })
     }
 

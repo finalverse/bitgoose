@@ -100,7 +100,7 @@ pub async fn by_slug(db: &Db, slug: &str) -> Result<Source> {
 pub async fn due_for_poll(db: &Db, limit: i64) -> Result<Vec<Source>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM sources
-         WHERE enabled AND robots_ok
+         WHERE enabled AND (robots_ok OR robots_override)
            AND (last_polled_at IS NULL
                 OR last_polled_at < now() - make_interval(secs => poll_interval_s))
          ORDER BY last_polled_at ASC NULLS FIRST
@@ -173,6 +173,24 @@ pub async fn ai_input_denied(db: &Db) -> Result<Vec<bg_core::SourceId>> {
         .collect()
 }
 
+/// Authorise, or withdraw authorisation for, polling a source whose robots.txt
+/// says no.
+///
+/// Per source and never a default. The robots gate is what the copyright
+/// posture rests on for the publishers whose text we extract; this exists for
+/// endpoints like Google News RSS, which serve headlines and links to anyone
+/// who asks and disallow everything in robots.txt. Returns whether a row
+/// matched, so a typo in a slug is an error rather than a silent no-op.
+pub async fn set_robots_override(db: &Db, slug: &str, on: bool) -> Result<bool> {
+    let n = sqlx::query("UPDATE sources SET robots_override = $2 WHERE slug = $1")
+        .bind(slug)
+        .bind(on)
+        .execute(&db.pool)
+        .await?
+        .rows_affected();
+    Ok(n > 0)
+}
+
 pub async fn set_robots_ok(db: &Db, id: bg_core::SourceId, ok: bool) -> Result<()> {
     sqlx::query("UPDATE sources SET robots_ok = $2 WHERE id = $1")
         .bind(id.into_uuid())
@@ -197,6 +215,8 @@ pub struct SourceHealth {
     pub name: String,
     pub enabled: bool,
     pub robots_ok: bool,
+    /// Operator has authorised polling despite `robots_ok` being false.
+    pub robots_override: bool,
     pub items: i64,
     pub last_polled_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
@@ -204,7 +224,8 @@ pub struct SourceHealth {
 
 pub async fn health(db: &Db) -> Result<Vec<SourceHealth>> {
     let rows = sqlx::query(
-        "SELECT s.slug, s.name, s.enabled, s.robots_ok, s.last_polled_at, s.last_error,
+        "SELECT s.slug, s.name, s.enabled, s.robots_ok, s.robots_override,
+                s.last_polled_at, s.last_error,
                 count(r.id) AS items
          FROM sources s
          LEFT JOIN raw_items r ON r.source_id = s.id
@@ -220,6 +241,7 @@ pub async fn health(db: &Db) -> Result<Vec<SourceHealth>> {
             name: r.get("name"),
             enabled: r.get("enabled"),
             robots_ok: r.get("robots_ok"),
+            robots_override: r.get("robots_override"),
             items: r.get("items"),
             last_polled_at: r.get("last_polled_at"),
             last_error: r.get("last_error"),

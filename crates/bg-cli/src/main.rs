@@ -142,6 +142,18 @@ enum Cmd {
         /// Take it out.
         #[arg(long)]
         rest: bool,
+        /// Poll it even though its robots.txt disallows us.
+        ///
+        /// Recorded against the one source, never applied globally: the robots
+        /// gate is what the copyright posture rests on for publishers whose
+        /// text we extract, and this is for endpoints like Google News RSS
+        /// that serve headlines and links to anyone and disallow everything.
+        /// The quote ceiling, attribution and link-out still apply.
+        #[arg(long, conflicts_with = "obey_robots")]
+        allow_robots: bool,
+        /// Withdraw that authorisation.
+        #[arg(long)]
+        obey_robots: bool,
     },
     /// Look after the newsroom: check its health, fix what is safe, report
     /// the rest.
@@ -620,10 +632,32 @@ async fn main() -> Result<()> {
             );
             println!("now run `bg run --once` so the Sentinel re-verifies the widened claims");
         }
-        Cmd::Source { slug, wake, rest } => {
+        Cmd::Source {
+            slug,
+            wake,
+            rest,
+            allow_robots,
+            obey_robots,
+        } => {
             let db = Db::connect(&url).await?;
+            if allow_robots || obey_robots {
+                let on = allow_robots;
+                if !bg_db::sources::set_robots_override(&db, &slug, on).await? {
+                    println!("no source with slug {slug}");
+                    return Ok(());
+                }
+                println!(
+                    "{slug}: {}",
+                    if on {
+                        "polling despite robots.txt (operator override, recorded per source)"
+                    } else {
+                        "obeying robots.txt again"
+                    }
+                );
+                return Ok(());
+            }
             if !wake && !rest {
-                println!("say which: --wake or --rest");
+                println!("say which: --wake, --rest, --allow-robots or --obey-robots");
                 return Ok(());
             }
             bg_db::sources::set_enabled(&db, &slug, wake).await?;
@@ -847,11 +881,15 @@ async fn doctor(url: &str) -> Result<()> {
         println!("    none — run: bg seed");
     }
     for s in &health {
-        let mark = match (&s.last_error, s.enabled, s.robots_ok) {
-            (_, false, _) => "[off ]",
-            (_, _, false) => "[robo]",
-            (Some(_), _, _) => "[FAIL]",
-            (None, _, _) => "[ok  ]",
+        // `over` is deliberately not shown as `ok`: it means we are polling a
+        // source that asked us not to, which the operator chose and should
+        // keep seeing.
+        let mark = match (&s.last_error, s.enabled, s.robots_ok, s.robots_override) {
+            (_, false, _, _) => "[off ]",
+            (_, _, false, true) => "[over]",
+            (_, _, false, false) => "[robo]",
+            (Some(_), _, _, _) => "[FAIL]",
+            (None, _, _, _) => "[ok  ]",
         };
         println!(
             "    {mark} {:<18} {:>5} items   {}",
