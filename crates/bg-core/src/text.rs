@@ -397,3 +397,97 @@ mod lang_tests {
         assert_eq!(normalize_lang("12"), "und");
     }
 }
+
+/// Split an aggregator headline into the headline and the outlet that wrote it.
+///
+/// Google News appends the publisher to every title — "SEC Proposes Regulation
+/// Crypto Assets - SEC.gov" — and repeats it in a `<source>` element. Left
+/// alone, two things go wrong, and the second one matters: the headline reads
+/// with a stray suffix, and the story is attributed to *Google News* rather
+/// than to the outlet that reported it. On a site whose entire claim is that
+/// you can see who stands behind a fact, crediting the aggregator is not a
+/// cosmetic error.
+///
+/// Only safe on feeds known to use this format, which is why it takes the
+/// separator on faith rather than guessing: applied to ordinary headlines it
+/// would happily amputate "Bitcoin Surges - Here's Why". Callers gate it on the
+/// source being an aggregator.
+///
+/// Returns the headline and, when one is present, the outlet.
+pub fn split_aggregator_title(title: &str) -> (&str, Option<&str>) {
+    let t = title.trim();
+    // Last separator, not the first: "Trump, Musk - and the Fed - Reuters".
+    let Some(cut) = t.rfind(" - ") else {
+        return (t, None);
+    };
+    let (head, tail) = t.split_at(cut);
+    let outlet = tail[3..].trim();
+    let head = head.trim();
+
+    // A publisher name is short and is not a sentence. Anything else is more
+    // likely part of the headline, and keeping it whole is the safer failure.
+    let plausible = !outlet.is_empty()
+        && outlet.chars().count() <= 40
+        && outlet.split_whitespace().count() <= 6
+        && !outlet.ends_with('.')
+        && !outlet.ends_with('?')
+        && !outlet.ends_with('!');
+    if !plausible || head.is_empty() {
+        return (t, None);
+    }
+    (head, Some(outlet))
+}
+
+#[cfg(test)]
+mod aggregator_title_tests {
+    use super::*;
+
+    /// Real titles taken from the live Google News feeds.
+    #[test]
+    fn the_outlet_is_lifted_out_of_the_headline() {
+        for (raw, head, outlet) in [
+            (
+                "SEC Proposes Regulation Crypto Assets - SEC.gov",
+                "SEC Proposes Regulation Crypto Assets",
+                "SEC.gov",
+            ),
+            (
+                "Trump joins leaders of crypto companies in push for industry-backed bill - The Washington Post",
+                "Trump joins leaders of crypto companies in push for industry-backed bill",
+                "The Washington Post",
+            ),
+            (
+                "Firms Appeal After Exclusion From Fees Award in Anthropic Case - Bloomberg Law News",
+                "Firms Appeal After Exclusion From Fees Award in Anthropic Case",
+                "Bloomberg Law News",
+            ),
+        ] {
+            assert_eq!(split_aggregator_title(raw), (head, Some(outlet)), "{raw}");
+        }
+    }
+
+    #[test]
+    fn a_headline_with_no_outlet_is_left_alone() {
+        let t = "Bitcoin Approaches $70,000";
+        assert_eq!(split_aggregator_title(t), (t, None));
+    }
+
+    #[test]
+    fn a_dash_inside_the_headline_is_not_mistaken_for_an_outlet() {
+        // The tail has to look like a masthead. A clause does not.
+        for t in [
+            "Why the Fed held - and what happens if inflation does not cool by December.",
+            "Ethereum's next upgrade - everything the developers said would slip has slipped again",
+        ] {
+            assert_eq!(split_aggregator_title(t), (t, None), "{t}");
+        }
+    }
+
+    #[test]
+    fn the_last_separator_wins() {
+        assert_eq!(
+            split_aggregator_title("Trump, Musk - and the Fed - Reuters"),
+            ("Trump, Musk - and the Fed", Some("Reuters"))
+        );
+    }
+}

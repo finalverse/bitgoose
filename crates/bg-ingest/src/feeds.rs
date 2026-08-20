@@ -50,6 +50,15 @@ impl PollReport {
 ///
 /// Errors are captured into the report rather than propagated: one dead feed
 /// must not abort a sweep across the other eight.
+/// Feeds that syndicate other outlets' headlines rather than their own.
+///
+/// Matched by slug rather than by sniffing the title, because the "Headline -
+/// Outlet" split is only safe where the format is guaranteed. Guessing it on a
+/// publisher's own feed would amputate any headline containing a dash.
+fn is_aggregator(slug: &str) -> bool {
+    slug.starts_with("gnews")
+}
+
 pub async fn poll_source(db: &Db, client: &reqwest::Client, src: &Source) -> PollReport {
     let mut rep = PollReport {
         source_slug: src.slug.clone(),
@@ -212,12 +221,29 @@ async fn poll_inner(
             .filter(|b| b.len() > 200)
             .or_else(|| summary.clone().filter(|s| s.len() > 200));
 
-        let authors: Vec<String> = entry
+        let mut authors: Vec<String> = entry
             .authors
             .iter()
             .map(|a| a.name.clone())
             .filter(|n| !n.is_empty())
             .collect();
+
+        // An aggregator's title carries the outlet on the end of it. Lift it
+        // off, and credit the outlet rather than the aggregator: a story
+        // reported by Bloomberg Law News and found through Google News was not
+        // written by Google News, and on a site built to show who stands behind
+        // a fact that distinction is the product.
+        let title = if is_aggregator(&src.slug) {
+            let (head, outlet) = bg_core::text::split_aggregator_title(&title);
+            if let Some(o) = outlet {
+                if !authors.iter().any(|a| a == o) {
+                    authors.push(o.to_string());
+                }
+            }
+            head.to_string()
+        } else {
+            title
+        };
 
         let image = entry
             .media
