@@ -204,6 +204,17 @@ pub trait LlmProvider: Send + Sync {
 
     /// Cheap reachability check for `bg doctor`.
     async fn health(&self) -> Result<()>;
+
+    /// Whether this provider runs on our own hardware.
+    ///
+    /// A local model has no allowance to protect, so pacing it is pure loss:
+    /// with `BG_LLM_TOKENS_PER_MIN=8000` and a triage batch estimated at 5,000
+    /// tokens, a GPU measured at 270 headlines a minute would have been held to
+    /// about 28 — a tenfold throttle enforced on behalf of a provider that was
+    /// not being called.
+    fn is_local(&self) -> bool {
+        false
+    }
 }
 
 /// A provider chain with failover.
@@ -297,6 +308,15 @@ impl Llm {
             }
         }
         self
+    }
+
+    /// Whether every provider this tier would use runs on our own hardware.
+    ///
+    /// All of them, not the first: a tier that falls back to a hosted provider
+    /// still needs the budget respected when it gets there.
+    fn tier_is_local(&self, tier: ModelTier) -> bool {
+        let c = self.chain_for(tier);
+        !c.is_empty() && c.iter().all(|p| p.is_local())
     }
 
     /// The providers to try for this tier, longest-standing first.
@@ -429,7 +449,7 @@ impl Llm {
         // backstop for when this estimate is wrong or something else is using
         // the same key, but it should now be the exception rather than the
         // mechanism by which we discover the limit.
-        let reservation = if self.pacer.enabled() {
+        let reservation = if self.pacer.enabled() && !self.tier_is_local(req.tier) {
             let cost = pacer::estimate_tokens(&req.system, &req.user, req.max_tokens);
             Some(self.pacer.acquire(req.tier, cost, &req.task).await)
         } else {
@@ -711,5 +731,56 @@ mod tier_routing_tests {
     fn the_no_model_tier_resolves_to_a_real_chain() {
         let llm = Llm::new(vec![Arc::new(stub::StubProvider) as Arc<dyn LlmProvider>]);
         assert_eq!(llm.chain_for(ModelTier::None).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod local_pacing_tests {
+    use super::*;
+
+    struct Local;
+    #[async_trait]
+    impl LlmProvider for Local {
+        fn name(&self) -> &'static str {
+            "local"
+        }
+        fn spec(&self, _t: ModelTier) -> ModelSpec {
+            stub::StubProvider.spec(_t)
+        }
+        async fn complete(&self, _r: &Request) -> Result<Completion> {
+            unreachable!("not called in this test")
+        }
+        async fn health(&self) -> Result<()> {
+            Ok(())
+        }
+        fn is_local(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn a_locally_served_tier_is_not_paced() {
+        // The GPU has no allowance to protect. Pacing it to a hosted
+        // provider's per-minute budget throttled 270 headlines a minute down
+        // to about 28, on behalf of an API that was not being called.
+        let llm = Llm::new(vec![Arc::new(stub::StubProvider) as Arc<dyn LlmProvider>])
+            .with_tier_chain(ModelTier::Fast, vec![Arc::new(Local)]);
+        assert!(llm.tier_is_local(ModelTier::Fast));
+        assert!(
+            !llm.tier_is_local(ModelTier::Top),
+            "the hosted tiers must still be paced"
+        );
+    }
+
+    #[test]
+    fn a_tier_that_falls_back_to_a_hosted_provider_is_still_paced() {
+        // All of them local, not just the first: the fallback spends a real
+        // allowance and the budget has to be respected when it is reached.
+        let llm = Llm::new(vec![Arc::new(stub::StubProvider) as Arc<dyn LlmProvider>])
+            .with_tier_chain(
+                ModelTier::Fast,
+                vec![Arc::new(Local), Arc::new(stub::StubProvider)],
+            );
+        assert!(!llm.tier_is_local(ModelTier::Fast));
     }
 }

@@ -400,6 +400,10 @@ impl LlmProvider for OpenAiProvider {
         "openai"
     }
 
+    fn is_local(&self) -> bool {
+        self.is_local
+    }
+
     fn spec(&self, tier: ModelTier) -> ModelSpec {
         self.spec_for(tier)
     }
