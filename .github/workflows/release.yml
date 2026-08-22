@@ -103,6 +103,11 @@ jobs:
           cp target/release/hash.txt bundle/bin/
           cp -r target/site        bundle/site
           cp -r migrations         bundle/migrations
+          # Unit files ship with the build so the installer can keep the
+          # running units in step with the repo. Without this a systemd change
+          # is committed, deployed, and quietly has no effect.
+          mkdir -p bundle/deploy
+          cp deploy/*.service       bundle/deploy/
           git rev-parse HEAD > bundle/REVISION
           date -u +%Y-%m-%dT%H:%M:%SZ > bundle/BUILT_AT
           strip bundle/bin/bg-web bundle/bin/bg || true

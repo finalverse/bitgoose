@@ -142,6 +142,24 @@ run_as_app "$RELEASE/bin/bg" migrate
 run_as_app "$RELEASE/bin/bg" seed
 
 # -- activate ---------------------------------------------------------------
+# Unit files travel with the bundle. They used to be installed once by
+# provision.sh and never again, so a change committed to the repo silently
+# never reached the host: ReadWritePaths was fixed, deployed, and had no
+# effect, because the running unit was the one written months earlier. Only
+# reload when something actually changed, so a deploy does not restart the
+# world for nothing.
+units_changed=0
+for u in bitgoose-worker bitgoose-web; do
+  src="$RELEASE/deploy/$u.service"
+  [ -f "$src" ] || continue
+  if ! cmp -s "$src" "/etc/systemd/system/$u.service"; then
+    install -m 0644 "$src" "/etc/systemd/system/$u.service"
+    units_changed=1
+    echo "    unit updated: $u"
+  fi
+done
+[ "$units_changed" = 1 ] && systemctl daemon-reload
+
 log "activating"
 ln -sfn "$RELEASE" "$APP_HOME/current.new"
 mv -Tf "$APP_HOME/current.new" "$APP_HOME/current"

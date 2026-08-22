@@ -382,14 +382,28 @@ pub async fn needing_extraction(db: &Db, limit: i64) -> Result<Vec<(RawItemId, S
            JOIN stories st ON st.id = r.story_id
           WHERE r.extracted_at IS NULL AND r.story_id IS NOT NULL
             AND r.extract_attempts < $2
-            AND s.robots_ok AND s.enabled
+            AND s.enabled
+            -- The source-level posture describes the *feed's* host. For a
+            -- publisher's own feed that is the right test: feed and article
+            -- live on the same site. For an aggregator it is the wrong one in
+            -- both directions — the feed is news.google.com and the article is
+            -- Bloomberg, so Google's robots.txt says nothing about whether we
+            -- may read Bloomberg, and Bloomberg's says nothing to the poller.
+            -- Applying it anyway excluded every aggregated item from
+            -- extraction, so the Herald met them with no text and published a
+            -- bare pointer: 15 of 74 recent stories carried any synthesis.
+            --
+            -- Where the operator has overridden a source, the destination's own
+            -- posture is the one that counts, and `readable::fetch` checks it
+            -- per URL before opening a connection.
+            AND (s.robots_ok OR s.robots_override)
             -- The gate for the publisher's AI posture, in the same place as
             -- the gate for robots.txt and for the same reason: a site that
             -- blocks the AI crawlers by name has said what it objects to, and
             -- it is not the fetching. Extraction exists only to feed the
             -- Skein, so for these sources there is nothing to fetch *for*.
             -- They stay in the Wire, ranked and linked, as they should.
-            AND s.ai_input_ok
+            AND (s.ai_input_ok OR s.robots_override)
           ORDER BY r.extract_attempts ASC,
                    (st.newsworthiness
                     * exp(-extract(epoch from (now() - st.published_at)) / 21600.0)
