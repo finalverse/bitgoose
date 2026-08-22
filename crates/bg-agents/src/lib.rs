@@ -248,8 +248,20 @@ impl Ctx {
     }
 
     /// Record what a stage actually spent against its mandate.
+    ///
+    /// Tokens served by our own hardware are not spending. A mandate is a
+    /// commitment about *buying* inference — it exists so an agent cannot run
+    /// up an unbounded bill on someone's API — and charging it for a GPU we
+    /// already own turns a spending control into a throughput limit on free
+    /// compute.
+    ///
+    /// This was not theoretical. With triage moved to the local model, Gosling
+    /// reached 0.1016 CCC against a 0.1000 budget and then refused every
+    /// triage call for the rest of the window. The newsroom went quiet for
+    /// fifteen hours with 5,128 items queued and a GPU sitting at 0%,
+    /// rationing compute that costs nothing.
     fn settle_mandate(&self, role: AgentRole, tokens: u64) {
-        if tokens == 0 {
+        if tokens == 0 || self.llm.tier_is_local(role.tier()) {
             return;
         }
         let cost = bg_core::mandate::tokens_to_ccc(tokens, self.cfg.ccc_per_mtok);
@@ -402,32 +414,37 @@ where
         // backstop — a mandate bounds one agent, the budget bounds the sum.
         let m = ctx.mandate(role);
         // Nothing has been spent yet, so the check is for a mandate that is
-        // already exhausted or does not cover this work at all.
-        if let Err(refusal) = m.check(
-            stage_name_qualified(role, stage_name).as_str(),
-            role.tier(),
-            1,
-        ) {
-            warn!(
-                role = %role, stage = stage_name, spent = %bg_core::mandate::format_ccc(m.spent),
-                budget = %bg_core::mandate::format_ccc(m.budget),
-                "mandate refused: {}", refusal.reason()
-            );
-            let run = agents_repo::start_run(&ctx.db, agent.id, role, story, stage_name).await?;
-            agents_repo::finish_run(
-                &ctx.db,
-                run,
-                &agents_repo::RunOutcome {
-                    status: Some(RunStatus::Budgeted),
-                    note: Some(format!("mandate: {}", refusal.reason())),
-                    ..Default::default()
-                },
-            )
-            .await?;
-            return Err(FlockError::Other(format!(
-                "{role} mandate: {}",
-                refusal.reason()
-            )));
+        // already exhausted or does not cover this work at all. Skipped
+        // entirely for a tier we serve ourselves: see `settle_mandate` — there
+        // is no bill to bound, and enforcing one stopped the newsroom dead.
+        if !ctx.llm.tier_is_local(role.tier()) {
+            if let Err(refusal) = m.check(
+                stage_name_qualified(role, stage_name).as_str(),
+                role.tier(),
+                1,
+            ) {
+                warn!(
+                    role = %role, stage = stage_name, spent = %bg_core::mandate::format_ccc(m.spent),
+                    budget = %bg_core::mandate::format_ccc(m.budget),
+                    "mandate refused: {}", refusal.reason()
+                );
+                let run =
+                    agents_repo::start_run(&ctx.db, agent.id, role, story, stage_name).await?;
+                agents_repo::finish_run(
+                    &ctx.db,
+                    run,
+                    &agents_repo::RunOutcome {
+                        status: Some(RunStatus::Budgeted),
+                        note: Some(format!("mandate: {}", refusal.reason())),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+                return Err(FlockError::Other(format!(
+                    "{role} mandate: {}",
+                    refusal.reason()
+                )));
+            }
         }
 
         if let Err(e) = ctx.check_budget().await {

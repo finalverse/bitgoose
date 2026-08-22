@@ -314,7 +314,7 @@ impl Llm {
     ///
     /// All of them, not the first: a tier that falls back to a hosted provider
     /// still needs the budget respected when it gets there.
-    fn tier_is_local(&self, tier: ModelTier) -> bool {
+    pub fn tier_is_local(&self, tier: ModelTier) -> bool {
         let c = self.chain_for(tier);
         !c.is_empty() && c.iter().all(|p| p.is_local())
     }

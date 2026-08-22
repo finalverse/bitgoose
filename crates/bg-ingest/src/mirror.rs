@@ -48,7 +48,20 @@ pub fn cache_dir() -> &'static PathBuf {
 /// whole new one.
 pub fn store(path: &std::path::Path, bytes: &[u8]) {
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, path).is_err() {
+    // Best-effort by design — a share asset is a nicety and must never fail a
+    // publish — but *silently* best-effort was a four-day outage nobody could
+    // see. The installer created this directory as root while the worker runs
+    // as `bg`, so every write returned EACCES, every mirror was dropped on the
+    // floor, and 2,013 published stories shared as a generated card while the
+    // code that chose between them looked correct.
+    //
+    // So: still non-fatal, now audible.
+    if let Err(e) = std::fs::write(&tmp, bytes) {
+        tracing::warn!(path = %path.display(), error = %e, "could not write share asset");
+        return;
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        tracing::warn!(path = %path.display(), error = %e, "could not commit share asset");
         let _ = std::fs::remove_file(&tmp);
     }
 }

@@ -27,6 +27,14 @@ log() { printf '\n\033[1;33m==> %s\033[0m\n' "$1"; }
 
 APP_GROUP="$(id -gn "$APP_USER")"
 mkdir -p "$CACHE" "$APP_HOME/releases"
+# The asset cache holds mirrored publisher photos, written by the worker at
+# publish time. The worker runs as $APP_USER, and this directory is created by
+# an installer running as root — so without an explicit chown every mirror
+# write fails silently (store() is best-effort by design) and every share card
+# falls back to a generated one. That is exactly what happened: 2,013 published
+# stories with a photo, none mirrored, for four days.
+mkdir -p "$CACHE/assets"
+chown -R "$APP_USER":"$APP_GROUP" "$CACHE"
 
 if [ "$TAG" = "latest" ]; then
   BASE="https://github.com/$REPO/releases/latest/download"

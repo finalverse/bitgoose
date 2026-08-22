@@ -373,7 +373,12 @@ async fn backfill_images(ctx: &Ctx, apply: bool) -> Vec<Finding> {
     // delivery probe outlasted the pass interval and stalled the newsroom for
     // seventeen minutes. Eight drains the backlog over a few days and leaves
     // room inside the round's timeout for everything else.
-    const PER_ROUND: i64 = 8;
+    // Eight was sized for a 7 KB/s uplink, where each fetch was a real risk to
+    // the pass. The link now measures 20 MB/s, and at eight a round the backlog
+    // of 2,013 published stories with an unmirrored photo would take a fortnight
+    // — during which every one of them shares as a generated card instead of
+    // the picture the publisher ran.
+    const PER_ROUND: i64 = 60;
 
     let candidates = match bg_db::stories::awaiting_image_mirror(&ctx.db, 400).await {
         Ok(v) => v,
@@ -460,7 +465,12 @@ fn env_usize(key: &str, default: usize) -> usize {
 async fn check_call_failures(ctx: &Ctx) -> Vec<Finding> {
     let rows = match bg_db::agents::failure_rates(&ctx.db, FAILURE_WINDOW_HOURS).await {
         Ok(r) => r,
-        Err(e) => return vec![Finding::noted("call-failures", format!("could not read: {e}"))],
+        Err(e) => {
+            return vec![Finding::noted(
+                "call-failures",
+                format!("could not read: {e}"),
+            )]
+        }
     };
     let mut out = Vec::new();
     for (role, ok, failed, sample) in rows {
