@@ -404,6 +404,19 @@ pub async fn needing_extraction(db: &Db, limit: i64) -> Result<Vec<(RawItemId, S
             -- Skein, so for these sources there is nothing to fetch *for*.
             -- They stay in the Wire, ranked and linked, as they should.
             AND (s.ai_input_ok OR s.robots_override)
+            -- Google News links are redirectors, not articles. Every field in
+            -- the feed — link, guid, and the description's only href — points
+            -- at news.google.com/rss/articles/CBMi..., which answers 200 with
+            -- 592 KB of JavaScript and no publisher URL anywhere in it. There
+            -- is nothing to extract, so fetching one costs a request and a
+            -- retry and yields nothing: measured, `got=0 missed=40` every pass.
+            --
+            -- These items still earn their place. They carry the headline, the
+            -- outlet and the timestamp, which is what an aggregator is *for* —
+            -- knowing what is hot and who is covering it — and they feed
+            -- clustering and corroboration. The text comes from the publisher
+            -- feeds we read directly.
+            AND r.canonical_url NOT LIKE '%news.google.com/rss/articles/%'
           ORDER BY r.extract_attempts ASC,
                    (st.newsworthiness
                     * exp(-extract(epoch from (now() - st.published_at)) / 21600.0)
