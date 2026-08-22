@@ -339,7 +339,16 @@ pub async fn wire(
     let rows = sqlx::query(
         "SELECT st.id, st.slug, st.title, st.summary, st.category, st.source_count,
                 st.published_at, st.newsworthiness, st.image_url, st.assets, st.beat,
-                src.name AS source_name, src.slug AS source_slug, src.kind AS source_kind,
+                -- The outlet that reported it, falling back to the feed we
+                -- found it in. For a publisher own feed these are the same
+                -- name. For an aggregator they are not: the story came from
+                -- Bloomberg and we found it through Google News, so naming the
+                -- feed credits the finder rather than the reporter. On a site
+                -- whose whole claim is that you can see who stands behind a
+                -- fact, that is the wrong byline. The ingester records the real
+                -- outlet in the authors column for exactly this purpose.
+                coalesce(nullif(ri.authors[1], ''), src.name) AS source_name,
+                src.slug AS source_slug, src.kind AS source_kind,
                 ri.canonical_url AS source_url
          FROM stories st
          JOIN LATERAL (

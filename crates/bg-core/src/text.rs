@@ -416,12 +416,19 @@ mod lang_tests {
 /// Returns the headline and, when one is present, the outlet.
 pub fn split_aggregator_title(title: &str) -> (&str, Option<&str>) {
     let t = title.trim();
-    // Last separator, not the first: "Trump, Musk - and the Fed - Reuters".
-    let Some(cut) = t.rfind(" - ") else {
+    // Outlets use either separator, and some use both in one line:
+    // "Anthropic Expects to Match SpaceX's Record IPO Size | The Opening Trade".
+    // Take whichever appears last, so the split lands on the masthead rather
+    // than on a dash inside the headline.
+    let cut = [" - ", " | "]
+        .iter()
+        .filter_map(|sep| t.rfind(sep).map(|i| (i, sep.len())))
+        .max_by_key(|(i, _)| *i);
+    let Some((cut, seplen)) = cut else {
         return (t, None);
     };
     let (head, tail) = t.split_at(cut);
-    let outlet = tail[3..].trim();
+    let outlet = tail[seplen..].trim();
     let head = head.trim();
 
     // A publisher name is short and is not a sentence. Anything else is more
@@ -481,6 +488,25 @@ mod aggregator_title_tests {
         ] {
             assert_eq!(split_aggregator_title(t), (t, None), "{t}");
         }
+    }
+
+    #[test]
+    fn a_pipe_is_a_separator_too() {
+        // Straight off the live front page, where it shipped unsplit.
+        assert_eq!(
+            split_aggregator_title(
+                "Anthropic Expects to Match or Top SpaceX\u{2019}s Record IPO Size | The Opening Trade"
+            ),
+            (
+                "Anthropic Expects to Match or Top SpaceX\u{2019}s Record IPO Size",
+                Some("The Opening Trade")
+            )
+        );
+        // And a pipe deeper in the line does not beat a later dash.
+        assert_eq!(
+            split_aggregator_title("Markets | Asia wrap - Reuters"),
+            ("Markets | Asia wrap", Some("Reuters"))
+        );
     }
 
     #[test]
