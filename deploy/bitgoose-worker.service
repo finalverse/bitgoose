@@ -35,7 +35,15 @@ LockPersonality=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-ReadWritePaths=
+# The share-asset cache: mirrored publisher photographs, written at publish
+# time and by the Steward's backfill. ProtectSystem=strict makes the whole
+# filesystem read-only apart from what is named here, so leaving this empty
+# did not merely restrict the worker — it silently broke every image mirror.
+# The symptom was four days of share cards drawn by us for stories that had a
+# photograph, with `bg` able to write the directory from a shell and the
+# service unable to, which is a confusing pair of facts until you remember the
+# sandbox. See mirror::store, which now logs the EROFS instead of swallowing it.
+ReadWritePaths=/var/cache/bitgoose
 
 StandardOutput=journal
 StandardError=journal

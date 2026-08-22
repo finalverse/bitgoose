@@ -35,8 +35,10 @@ MemoryDenyWriteExecute=false
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# Only the release tree needs to be readable; nothing needs to be writable.
-ReadWritePaths=
+# The web process renders and caches OG cards on demand, and mirrors a
+# publisher photograph the first time a story is shared, so it needs the same
+# asset cache the worker writes. Everything else stays read-only.
+ReadWritePaths=/var/cache/bitgoose
 
 StandardOutput=journal
 StandardError=journal

@@ -95,6 +95,15 @@ pub struct RunOpts {
     pub max_analyses: i64,
 }
 
+/// A whole-number setting from the environment, with a default.
+fn env_i64(key: &str, default: i64) -> i64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|n| *n >= 0)
+        .unwrap_or(default)
+}
+
 impl Default for RunOpts {
     fn default() -> Self {
         Self {
@@ -104,7 +113,13 @@ impl Default for RunOpts {
             max_triage: 100,
             max_cluster: 60,
             news_horizon_hours: 72,
-            max_enrich: 4,
+            // Enrichment is a plain page fetch, not a model call — it is what
+            // gives an aggregator's headline-and-link enough text for the
+            // Herald to synthesise from at all. Four a pass was sized for a
+            // 7 KB/s uplink where every fetch threatened the pass; the link
+            // now measures 20 MB/s, and at four a pass most Wire items reached
+            // the Herald with nothing to read and published as a bare pointer.
+            max_enrich: env_i64("BG_MAX_ENRICH", 40),
             max_gaggles: 1,
             max_analyses: 3,
         }
