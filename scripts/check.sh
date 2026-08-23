@@ -17,6 +17,18 @@ export RUSTFLAGS="${RUSTFLAGS:--D warnings}"
 
 step() { printf '\n\033[1;33m==> %s\033[0m\n' "$1"; }
 
+# `target/` reached 117 GB during one long session and filling the disk
+# corrupted a build in a way that looks like nothing else: cargo leaves stale
+# fingerprints pointing at files it could not write, then `cargo clean` itself
+# partly fails, and the only reliable fix is `rm -rf target`. Worth knowing
+# before a build starts rather than halfway through one.
+if [ -d target ]; then
+  gb=$(du -sg target 2>/dev/null | cut -f1)
+  if [ "${gb:-0}" -ge 40 ]; then
+    printf '\n\033[1;33m==> target/ is %sGB — consider `rm -rf target`\033[0m\n' "$gb"
+  fi
+fi
+
 step "cargo fmt --all --check"
 cargo fmt --all --check
 
