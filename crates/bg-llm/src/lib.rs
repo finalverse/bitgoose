@@ -387,8 +387,11 @@ impl Llm {
             let Some(spec) = std::env::var(key).ok().filter(|v| !v.trim().is_empty()) else {
                 continue;
             };
-            let tier_names: Vec<String> =
-                spec.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            let tier_names: Vec<String> = spec
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
             let tier_chain = build_chain(&tier_names);
             if tier_chain.is_empty() {
                 warn!(tier = ?tier, %spec, "tier override configured nothing; leaving on the default chain");
@@ -705,10 +708,8 @@ mod tier_routing_tests {
     #[test]
     fn only_the_routed_tier_changes_provider() {
         let default_chain: Vec<Arc<dyn LlmProvider>> = vec![Arc::new(stub::StubProvider)];
-        let local: Vec<Arc<dyn LlmProvider>> = vec![
-            Arc::new(stub::StubProvider),
-            Arc::new(stub::StubProvider),
-        ];
+        let local: Vec<Arc<dyn LlmProvider>> =
+            vec![Arc::new(stub::StubProvider), Arc::new(stub::StubProvider)];
         let llm = Llm::new(default_chain).with_tier_chain(ModelTier::Fast, local);
 
         assert_eq!(llm.chain_for(ModelTier::Fast).len(), 2, "Fast is routed");

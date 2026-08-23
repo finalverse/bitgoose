@@ -134,16 +134,14 @@ pub async fn latest_all(db: &Db) -> Result<Vec<PriceTick>> {
     // context every other number on the line is read against.
     const INDEX_FIRST: &[&str] = &["SPX", "NDAQ", "DJIA"];
     let rank = |s: &str| INDEX_FIRST.iter().position(|i| *i == s);
-    ticks.sort_by(|a, b| {
-        match (rank(&a.symbol), rank(&b.symbol)) {
-            (Some(x), Some(y)) => x.cmp(&y),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => b
-                .market_cap
-                .unwrap_or_default()
-                .cmp(&a.market_cap.unwrap_or_default()),
-        }
+    ticks.sort_by(|a, b| match (rank(&a.symbol), rank(&b.symbol)) {
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b
+            .market_cap
+            .unwrap_or_default()
+            .cmp(&a.market_cap.unwrap_or_default()),
     });
     Ok(ticks)
 }

@@ -155,3 +155,48 @@ jobs:
             fail=1
           fi
           exit $fail
+
+  # ---------------------------------------------------------------------------
+  # Tell somebody.
+  #
+  # CI was red on every push to main for eleven consecutive releases and nobody
+  # noticed, because the release workflow — the one being watched — was green
+  # the whole time. A failing check that reaches no one is not a check.
+  #
+  # This opens a GitHub issue, which mails everyone watching the repository. It
+  # deliberately uses no external mail service: an alert that depends on a
+  # secret stops working the day the secret rotates, and this one only needs
+  # the token every run already has.
+  #
+  # One issue, reused. A comment per failure keeps the history in a single
+  # thread instead of filing a fresh issue every push, which would be its own
+  # kind of unread.
+  #
+  # `live-sources` is not in `needs`: it polls real publishers, it is allowed to
+  # fail when Reddit answers 429, and paging a human for that is how people
+  # learn to ignore the alerts that matter.
+  notify:
+    name: Report failure
+    runs-on: ubuntu-latest
+    needs: [wasm-boundary, test, lint, secrets]
+    if: failure() && github.ref == 'refs/heads/main'
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the CI failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          title="CI is failing on main"
+          body=$(printf 'CI failed on `%s`.\n\n%s\n\nFailing jobs are listed in the run. Reproduce everything CI checks with:\n\n```\n./scripts/check.sh\n```\n' "${SHA:0:12}" "$RUN_URL")
+          existing=$(gh issue list --label ci-failure --state open --limit 1 --json number -q '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "commented on #$existing"
+          else
+            gh label create ci-failure --color b60205 --description "CI red on main" 2>/dev/null || true
+            gh issue create --title "$title" --label ci-failure --body "$body"
+          fi

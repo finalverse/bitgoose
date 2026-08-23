@@ -182,8 +182,7 @@ impl OpenAiProvider {
         if api_key.trim().is_empty() && !is_local {
             return Err(LlmError::NotConfigured {
                 provider: "openai",
-                reason: "no OPENAI_API_KEY or XAI_API_KEY, and the endpoint is not local"
-                    .into(),
+                reason: "no OPENAI_API_KEY or XAI_API_KEY, and the endpoint is not local".into(),
             });
         }
         Ok(Self {
@@ -723,9 +722,15 @@ mod local_pricing_tests {
         // Top is left at the provider's default, which measures cheaper than
         // medium. Asking for more thinking here would cost double and buy
         // almost no extra answer.
-        assert_eq!(reasoning_effort("openai/gpt-oss-120b", ModelTier::Top), None);
+        assert_eq!(
+            reasoning_effort("openai/gpt-oss-120b", ModelTier::Top),
+            None
+        );
         // Deterministic work never reaches a provider.
-        assert_eq!(reasoning_effort("openai/gpt-oss-20b", ModelTier::None), None);
+        assert_eq!(
+            reasoning_effort("openai/gpt-oss-20b", ModelTier::None),
+            None
+        );
     }
 
     #[test]
@@ -761,7 +766,10 @@ mod local_pricing_tests {
         }
         // `off` means send nothing and let the provider decide — the knob to
         // reach for if a tier starts answering badly.
-        assert_eq!(reasoning_effort("openai/gpt-oss-20b", ModelTier::Fast), None);
+        assert_eq!(
+            reasoning_effort("openai/gpt-oss-20b", ModelTier::Fast),
+            None
+        );
         assert_eq!(
             reasoning_effort("openai/gpt-oss-120b", ModelTier::Mid).as_deref(),
             Some("high"),

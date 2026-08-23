@@ -792,16 +792,16 @@ pub async fn get_flock() -> Result<FlockPage, ServerFnError> {
                     a.tokens_24h.max(0) as u64,
                     bg_core::mandate::DEFAULT_CCC_PER_MTOK,
                 )),
-                mandate_pct: if budget_ccc == 0 {
-                    100
-                } else {
-                    ((bg_core::mandate::tokens_to_ccc(
-                        a.tokens_24h.max(0) as u64,
-                        bg_core::mandate::DEFAULT_CCC_PER_MTOK,
-                    ) * 100)
-                        / budget_ccc)
-                        .min(100) as i32
-                },
+                // A zero budget reads as fully spent: the bar is a claim about
+                // how much of an authorisation is gone, and an agent with no
+                // authorisation has no room left.
+                mandate_pct: bg_core::mandate::tokens_to_ccc(
+                    a.tokens_24h.max(0) as u64,
+                    bg_core::mandate::DEFAULT_CCC_PER_MTOK,
+                )
+                .checked_mul(100)
+                .and_then(|spent| spent.checked_div(budget_ccc))
+                .map_or(100, |pct| pct.min(100) as i32),
             })
             .collect(),
         recent: recent.iter().map(run_line).collect(),
@@ -957,7 +957,7 @@ pub async fn get_flyway() -> Result<FlywayPage, ServerFnError> {
             }
         })
         .collect();
-    categories.sort_by(|a, b| b.total.cmp(&a.total));
+    categories.sort_by_key(|c| std::cmp::Reverse(c.total));
 
     let entities = bg_db::entities::trending(db, DAYS, 14)
         .await

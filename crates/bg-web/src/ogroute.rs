@@ -43,7 +43,6 @@ use axum::{
 pub use bg_ingest::mirror::mirrored;
 use bg_ingest::mirror::{cache_dir, safe_slug, sniff, store, store_lead_image};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
@@ -55,16 +54,6 @@ pub struct CardCache(Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>);
 /// miss costs a file read rather than a re-render, and an eviction policy here
 /// would be more machinery than the problem deserves.
 const MAX_CACHED: usize = 256;
-
-/// Longest we will spend fetching a publisher's image.
-///
-/// Generous, because this only ever runs in the background — no reader and no
-/// crawler is waiting on it.
-const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
-
-/// Largest publisher image we will store. Above this it is not a lead image,
-/// and we are being used as a file host.
-const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Fetch a story's picture in the background, for the paths that discover a
 /// gap at request time.

@@ -125,12 +125,10 @@ pub async fn fetch_equity(
             source_slug: symbol.to_string(),
             detail: format!("no chart result for {name}"),
         })?;
-    let price = meta
-        .price
-        .ok_or_else(|| IngestError::Parse {
-            source_slug: symbol.to_string(),
-            detail: format!("no price for {name}"),
-        })?;
+    let price = meta.price.ok_or_else(|| IngestError::Parse {
+        source_slug: symbol.to_string(),
+        detail: format!("no price for {name}"),
+    })?;
     // A change of "0%" and "unknown" are different claims and the strip shows
     // them differently, so an absent previous close stays absent.
     let change = meta
@@ -140,8 +138,7 @@ pub async fn fetch_equity(
     Ok(PriceTick {
         symbol: symbol.to_string(),
         ts: Utc::now(),
-        price_usd: dec(price)
-            .ok_or_else(|| IngestError::Parse {
+        price_usd: dec(price).ok_or_else(|| IngestError::Parse {
             source_slug: symbol.to_string(),
             detail: format!("unrepresentable price for {name}"),
         })?,

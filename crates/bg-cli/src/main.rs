@@ -968,7 +968,10 @@ async fn doctor(url: &str) -> Result<()> {
             let why = bg_core::trouble::explain(&sample)
                 .map(str::to_string)
                 .unwrap_or_else(|| bg_core::text::truncate_words(&sample, 16));
-            println!("    [FAIL] {role:<9} {failed} of {} calls — {why}", ok + failed);
+            println!(
+                "    [FAIL] {role:<9} {failed} of {} calls — {why}",
+                ok + failed
+            );
         }
     }
 

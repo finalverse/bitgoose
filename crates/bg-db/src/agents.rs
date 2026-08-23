@@ -315,10 +315,7 @@ pub async fn tokens_by_tier_24h(db: &Db) -> Result<Vec<(bg_core::domain::ModelTi
 /// Skein's calls were being rejected — and only the second one says why.
 ///
 /// Returns `(role, ok, failed, one_error)` for every role that ran.
-pub async fn failure_rates(
-    db: &Db,
-    hours: i64,
-) -> Result<Vec<(String, i64, i64, String)>> {
+pub async fn failure_rates(db: &Db, hours: i64) -> Result<Vec<(String, i64, i64, String)>> {
     let rows: Vec<(String, i64, i64, Option<String>)> = sqlx::query_as(
         r#"
         select role,

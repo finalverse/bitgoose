@@ -534,15 +534,24 @@ mod tests {
     #[test]
     fn an_identical_headline_from_one_feed_still_merges() {
         let feed = SourceId::new();
-        let a = item(feed, "How bitcoin and gold went from a slump to an MVP week");
-        let b = item(feed, "How bitcoin and gold went from a slump to an MVP week");
+        let a = item(
+            feed,
+            "How bitcoin and gold went from a slump to an MVP week",
+        );
+        let b = item(
+            feed,
+            "How bitcoin and gold went from a slump to an MVP week",
+        );
         let m = best_match(
             &a,
             std::slice::from_ref(&b),
             &corpus_of(&[a.clone(), b.clone()]),
         );
         let (_, score) = m.expect("identical headlines must match");
-        assert!(score.decisive, "an identical headline needs no adjudication");
+        assert!(
+            score.decisive,
+            "an identical headline needs no adjudication"
+        );
     }
 
     /// The guard still earns its place: a publisher filing several pieces on
@@ -627,6 +636,10 @@ mod tests {
         // the merge cannot manufacture corroboration.
         let distinct: std::collections::HashSet<_> =
             [a.source_id, b.source_id].into_iter().collect();
-        assert_eq!(distinct.len(), 1, "one outlet publishing twice is one source");
+        assert_eq!(
+            distinct.len(),
+            1,
+            "one outlet publishing twice is one source"
+        );
     }
 }

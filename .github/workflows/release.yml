@@ -138,3 +138,30 @@ jobs:
             bitgoose-x86_64-linux.tar.gz.sha256
           generate_release_notes: true
           prerelease: ${{ github.event.inputs.tag == 'nightly' }}
+
+  # A release that fails to build is more urgent than a lint error: the tag
+  # exists, the deploy step is waiting for an asset, and nothing says so. Same
+  # mechanism as CI — an issue, mailed to watchers, no external secret.
+  notify:
+    name: Report failure
+    runs-on: ubuntu-latest
+    needs: [bundle]
+    if: failure()
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the release failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          body=$(printf 'The release bundle for `%s` failed to build, so no asset was published and any deploy of this tag will not find one.\n\n%s\n' "$TAG" "$RUN_URL")
+          existing=$(gh issue list --label release-failure --state open --limit 1 --json number -q '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh label create release-failure --color b60205 --description "Release bundle failed to build" 2>/dev/null || true
+            gh issue create --title "Release bundle is failing" --label release-failure --body "$body"
+          fi

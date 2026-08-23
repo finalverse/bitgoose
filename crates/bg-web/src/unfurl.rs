@@ -47,7 +47,6 @@
 //! which is the only test that matters.
 
 use axum::{
-    body::Body,
     extract::{Request, State},
     http::{header, HeaderMap, StatusCode},
     middleware::Next,
