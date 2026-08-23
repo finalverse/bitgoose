@@ -238,7 +238,9 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
         .await
         .map_err(e)?
         .iter()
-        .take(14)
+        // Twelve coins, three indices and four equities. The cap was 14, which
+        // silently dropped whatever sorted last — which was every equity.
+        .take(20)
         .map(|t| Tick {
             symbol: t.symbol.clone(),
             price: fmt_price(t.price_usd.to_string().parse().unwrap_or(0.0)),

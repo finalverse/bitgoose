@@ -126,11 +126,24 @@ pub async fn latest_all(db: &Db) -> Result<Vec<PriceTick>> {
     .fetch_all(&db.pool)
     .await?;
     let mut ticks: Vec<PriceTick> = rows.iter().map(tick_from_row).collect::<Result<_>>()?;
-    // Order by market cap so the strip leads with what matters, not alphabetically.
+    // Indices first, then everything else by market cap.
+    //
+    // Cap alone put the indices last: they have no market capitalisation, so
+    // they sorted behind twelve coins and fell off a strip that shows fourteen.
+    // They also belong at the front on merit — the S&P and the Nasdaq are the
+    // context every other number on the line is read against.
+    const INDEX_FIRST: &[&str] = &["SPX", "NDAQ", "DJIA"];
+    let rank = |s: &str| INDEX_FIRST.iter().position(|i| *i == s);
     ticks.sort_by(|a, b| {
-        b.market_cap
-            .unwrap_or_default()
-            .cmp(&a.market_cap.unwrap_or_default())
+        match (rank(&a.symbol), rank(&b.symbol)) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => b
+                .market_cap
+                .unwrap_or_default()
+                .cmp(&a.market_cap.unwrap_or_default()),
+        }
     });
     Ok(ticks)
 }

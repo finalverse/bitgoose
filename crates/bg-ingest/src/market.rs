@@ -43,16 +43,29 @@ pub const TRACKED: &[(&str, &str, &str)] = &[
 /// The tickers are chosen to match what the desks actually write about: the
 /// three headline indices, then the companies that recur in AI and crypto
 /// coverage.
-pub const EQUITIES: &[(&str, &str)] = &[
-    // (yahoo symbol, display name)
-    ("^GSPC", "S&P 500"),
-    ("^IXIC", "Nasdaq"),
-    ("^DJI", "Dow"),
-    ("NVDA", "Nvidia"),
-    ("COIN", "Coinbase"),
-    ("MSTR", "Strategy"),
-    ("TSLA", "Tesla"),
+/// `(vendor symbol, our symbol, display name)`.
+///
+/// The vendor's symbol stays at the edge. Yahoo writes indices as `^GSPC`, and
+/// storing that put a caret in our database, in `/asset/^GSPC` URLs and in the
+/// ticker strip, where it read as a typo. A vendor's notation is an artefact of
+/// the vendor, and the boundary is the place to leave it.
+pub const EQUITIES: &[(&str, &str, &str)] = &[
+    ("^GSPC", "SPX", "S&P 500"),
+    ("^IXIC", "NDAQ", "Nasdaq"),
+    ("^DJI", "DJIA", "Dow Jones"),
+    ("NVDA", "NVDA", "Nvidia"),
+    ("COIN", "COIN", "Coinbase"),
+    ("MSTR", "MSTR", "Strategy"),
+    ("TSLA", "TSLA", "Tesla"),
 ];
+
+/// Symbols that are stock indices rather than tradeable assets.
+///
+/// They lead the ticker — an index is the context every other number on the
+/// strip is read against — and they carry no market cap, so without this they
+/// sort to the very end behind twelve coins and fall off a strip that shows
+/// fourteen.
+pub const INDICES: &[&str] = &["SPX", "NDAQ", "DJIA"];
 
 #[derive(Debug, Deserialize)]
 struct YahooChart {
@@ -88,12 +101,13 @@ struct YahooMeta {
 /// reverse-engineering an auth handshake that Yahoo can change at will.
 pub async fn fetch_equity(
     client: &reqwest::Client,
+    vendor_symbol: &str,
     symbol: &str,
     name: &str,
 ) -> Result<PriceTick> {
     let url = format!(
         "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=2d",
-        urlencoding_min(symbol)
+        urlencoding_min(vendor_symbol)
     );
     let body: YahooChart = client
         .get(&url)
@@ -149,8 +163,8 @@ fn urlencoding_min(s: &str) -> String {
 /// gap in a ticker, not a broken newsroom.
 pub async fn refresh_equities(db: &Db, client: &reqwest::Client) -> usize {
     let mut n = 0;
-    for (symbol, name) in EQUITIES {
-        match fetch_equity(client, symbol, name).await {
+    for (vendor, symbol, name) in EQUITIES {
+        match fetch_equity(client, vendor, symbol, name).await {
             Ok(tick) => {
                 let _ = prices::upsert_asset(db, symbol, name, None, None).await;
                 if prices::insert_tick(db, &tick).await.is_ok() {
