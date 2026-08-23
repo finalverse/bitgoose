@@ -169,7 +169,22 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
         .unwrap_or_default();
 
     let mut opened = 0usize;
-    for heat in hot.iter().take(max_new) {
+    // Every hot subject is considered; only the ones that need *writing* are
+    // rationed.
+    //
+    // This was `hot.iter().take(max_new)` with max_new of 1, which rationed the
+    // wrong thing: it capped how many subjects were looked at, not how many
+    // cost a model call. The hottest subject is almost always one we already
+    // have a gaggle for, so the single slot went on refreshing it — a database
+    // write, no model — and the loop ended before reaching anything new. The
+    // result was a Special Topics row that had not gained an entry in days
+    // while the wires moved underneath it.
+    //
+    // Refreshing is free and unlimited; opening is bounded by `max_new`.
+    for heat in hot.iter() {
+        if opened >= max_new {
+            break;
+        }
         if resting.contains(&heat.topic) {
             // Refused recently and nothing has changed. Asking again would cost
             // the same tokens as asking the first time and get the same answer.

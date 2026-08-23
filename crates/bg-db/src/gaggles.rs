@@ -196,7 +196,17 @@ pub async fn live(db: &Db, within_hours: i64, limit: i64) -> Result<Vec<GaggleRo
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM gaggles
           WHERE last_hot_at > now() - make_interval(hours => $1)
-          ORDER BY source_count DESC, story_count DESC
+          -- Heat, not size. Ordering by source_count alone meant a subject that
+          -- once drew nine outlets outranked one drawing six an hour ago for as
+          -- long as it kept qualifying at all, so the Special Topics row showed
+          -- the same three entries for days while the wires moved underneath.
+          -- A twelve-hour half-life puts a fresh convergence in front of a
+          -- stale one without letting a single-outlet flurry displace a story
+          -- the whole press is covering.
+          ORDER BY source_count
+                   * exp(-extract(epoch from (now() - last_hot_at)) / 43200.0)
+                   DESC,
+                   story_count DESC
           LIMIT $2"
     ))
     .bind(within_hours as i32)
@@ -271,4 +281,25 @@ pub async fn delete(db: &Db, id: uuid::Uuid) -> Result<()> {
         .await?;
     tx.commit().await?;
     Ok(())
+}
+
+/// Special topics that stopped being topics — cold for longer than `hours`.
+///
+/// Returned rather than deleted so the caller decides, and so a read-only
+/// Steward round can report what it would retire without touching anything.
+pub async fn cold(db: &Db, hours: i64) -> Result<Vec<(uuid::Uuid, String, i64)>> {
+    let rows: Vec<(uuid::Uuid, String, Option<f64>)> = sqlx::query_as(
+        "SELECT id, title,
+                extract(epoch from (now() - last_hot_at)) / 3600.0
+           FROM gaggles
+          WHERE last_hot_at < now() - make_interval(hours => $1::int)
+          ORDER BY last_hot_at ASC",
+    )
+    .bind(hours)
+    .fetch_all(&db.pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, title, h)| (id, title, h.unwrap_or_default() as i64))
+        .collect())
 }

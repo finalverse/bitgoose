@@ -128,6 +128,7 @@ pub async fn run(ctx: &Ctx, apply: bool) -> Result<Vec<Finding>> {
     out.extend(check_queue(ctx).await);
     out.extend(check_junk_topics(ctx, apply).await);
     out.extend(check_call_failures(ctx).await);
+    out.extend(retire_cold_topics(ctx, apply).await);
     out.extend(backfill_images(ctx, apply).await);
     out.extend(check_delivery(ctx).await);
 
@@ -443,6 +444,57 @@ fn env_usize(key: &str, default: usize) -> usize {
 /// uplink the way a reader in another country does, and pretending otherwise
 /// would be the same mistake again. What it *can* state exactly is how many
 /// bytes a crawler is asked to take, which is the half that is ours.
+/// Special topics that have stopped being topics.
+///
+/// A gaggle is opened when a subject converges across independent outlets, and
+/// nothing ever closed one. The front page hides anything cold for two days, so
+/// this was invisible rather than harmless: the table accumulated subjects like
+/// "Harmony ONE Price Falls 26%", last hot nine days ago, which still counted
+/// toward every scan of the topic list and still had to be checked against
+/// every trending term on every pass.
+///
+/// A fortnight is deliberately far past the point where a reader would call it
+/// news. A subject that genuinely returns — a court case resuming, a coin
+/// moving again — is re-opened by the ordinary trend path the moment it
+/// converges again, so nothing is lost by closing it now.
+async fn retire_cold_topics(ctx: &Ctx, apply: bool) -> Vec<Finding> {
+    let cold = match bg_db::gaggles::cold(&ctx.db, COLD_TOPIC_HOURS).await {
+        Ok(v) => v,
+        Err(e) => return vec![Finding::noted("cold-topic", format!("cannot check: {e}"))],
+    };
+    if cold.is_empty() {
+        return Vec::new();
+    }
+    let detail = format!(
+        "{} special topics have not been hot in over {} days, oldest {} days: {}",
+        cold.len(),
+        COLD_TOPIC_HOURS / 24,
+        cold.last().map(|(_, _, h)| h / 24).unwrap_or(0),
+        cold.iter()
+            .map(|(_, t, _)| t.as_str())
+            .take(4)
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    if !apply {
+        return vec![Finding::noted("cold-topic", detail)];
+    }
+    let mut gone = 0usize;
+    for (id, _, _) in &cold {
+        if bg_db::gaggles::delete(&ctx.db, *id).await.is_ok() {
+            gone += 1;
+        }
+    }
+    vec![Finding::fixed(
+        "cold-topic",
+        detail,
+        format!("retired {gone}"),
+    )]
+}
+
+/// Past this with no new coverage, a special topic is an archive page.
+const COLD_TOPIC_HOURS: i64 = 24 * 14;
+
 /// Agents whose calls to the provider are mostly failing.
 ///
 /// This is the check that should have existed first, and its absence cost
