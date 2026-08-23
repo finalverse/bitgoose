@@ -32,6 +32,140 @@ pub const TRACKED: &[(&str, &str, &str)] = &[
     ("MATIC", "Polygon", "matic-network"),
 ];
 
+/// Equities and indices carried alongside the crypto strip.
+///
+/// A crypto-only ticker says the newsroom covers crypto. BitGoose runs a
+/// Markets desk, a Business desk and an AI desk, and on any given day the
+/// story is as likely to be Nasdaq or Nvidia as it is Bitcoin — the two move
+/// together often enough that showing one without the other hides the
+/// interesting part.
+///
+/// The tickers are chosen to match what the desks actually write about: the
+/// three headline indices, then the companies that recur in AI and crypto
+/// coverage.
+pub const EQUITIES: &[(&str, &str)] = &[
+    // (yahoo symbol, display name)
+    ("^GSPC", "S&P 500"),
+    ("^IXIC", "Nasdaq"),
+    ("^DJI", "Dow"),
+    ("NVDA", "Nvidia"),
+    ("COIN", "Coinbase"),
+    ("MSTR", "Strategy"),
+    ("TSLA", "Tesla"),
+];
+
+#[derive(Debug, Deserialize)]
+struct YahooChart {
+    chart: YahooChartBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooChartBody {
+    result: Option<Vec<YahooResult>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooResult {
+    meta: YahooMeta,
+}
+
+#[derive(Debug, Deserialize)]
+struct YahooMeta {
+    #[serde(rename = "regularMarketPrice")]
+    price: Option<f64>,
+    /// The previous session's close, which is what a day's move is measured
+    /// against. Yahoo names it differently on the chart endpoint than on the
+    /// quote endpoint, and the quote endpoint now answers 401 without a
+    /// crumb — so this is the one that works.
+    #[serde(rename = "chartPreviousClose")]
+    previous_close: Option<f64>,
+}
+
+/// One index or ticker from Yahoo's chart endpoint.
+///
+/// One request per symbol: the batch quote endpoint returns 401 without a
+/// session crumb, and seven small requests on a 20 MB/s link cost less than
+/// reverse-engineering an auth handshake that Yahoo can change at will.
+pub async fn fetch_equity(
+    client: &reqwest::Client,
+    symbol: &str,
+    name: &str,
+) -> Result<PriceTick> {
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=2d",
+        urlencoding_min(symbol)
+    );
+    let body: YahooChart = client
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let meta = body
+        .chart
+        .result
+        .and_then(|r| r.into_iter().next())
+        .map(|r| r.meta)
+        .ok_or_else(|| IngestError::Parse {
+            source_slug: symbol.to_string(),
+            detail: format!("no chart result for {name}"),
+        })?;
+    let price = meta
+        .price
+        .ok_or_else(|| IngestError::Parse {
+            source_slug: symbol.to_string(),
+            detail: format!("no price for {name}"),
+        })?;
+    // A change of "0%" and "unknown" are different claims and the strip shows
+    // them differently, so an absent previous close stays absent.
+    let change = meta
+        .previous_close
+        .filter(|p| *p > 0.0)
+        .map(|prev| (price - prev) / prev * 100.0);
+    Ok(PriceTick {
+        symbol: symbol.to_string(),
+        ts: Utc::now(),
+        price_usd: dec(price)
+            .ok_or_else(|| IngestError::Parse {
+            source_slug: symbol.to_string(),
+            detail: format!("unrepresentable price for {name}"),
+        })?,
+        change_24h_pct: change,
+        volume_24h: None,
+        market_cap: None,
+    })
+}
+
+/// Percent-encode the few characters an index symbol actually contains.
+///
+/// `^GSPC` needs its caret escaped and nothing else does; pulling in a whole
+/// encoding crate for one character would be the larger change.
+fn urlencoding_min(s: &str) -> String {
+    s.replace('^', "%5E")
+}
+
+/// Refresh the equities strip. Never fails the pass — a missing index is a
+/// gap in a ticker, not a broken newsroom.
+pub async fn refresh_equities(db: &Db, client: &reqwest::Client) -> usize {
+    let mut n = 0;
+    for (symbol, name) in EQUITIES {
+        match fetch_equity(client, symbol, name).await {
+            Ok(tick) => {
+                let _ = prices::upsert_asset(db, symbol, name, None, None).await;
+                if prices::insert_tick(db, &tick).await.is_ok() {
+                    n += 1;
+                }
+            }
+            Err(e) => warn!(symbol = %symbol, error = %e, "equity fetch failed"),
+        }
+    }
+    if n > 0 {
+        info!(count = n, source = "yahoo", "equities refreshed");
+    }
+    n
+}
+
 #[derive(Debug, Deserialize)]
 struct GeckoMarket {
     symbol: String,

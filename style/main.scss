@@ -664,6 +664,61 @@ th.n { text-align: right; }
 
 // Why an agent is failing, not just how often. Sits above the note because
 // the note is from a run that succeeded and reads reassuringly.
+// The overflow menu in the desk bar. Native <details>, so it works before
+// hydration and with the keyboard; the only job here is to lift the panel out
+// of the flow so it does not push the ticker strip down when opened.
+.desk-more {
+  position: relative;
+  display: inline-block;
+
+  > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    &::-webkit-details-marker { display: none; }
+    &::after { content: " \25BE"; font-size: 0.8em; opacity: 0.7; }
+  }
+
+  &[open] > summary { color: var(--gold); }
+}
+
+.desk-more-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(7rem, 1fr));
+  gap: 0.15rem 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ink-600);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.desk-more-link {
+  display: block;
+  padding: 0.3rem 0.2rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  color: var(--paper);
+  text-decoration: none;
+  border-radius: 4px;
+  &:hover { color: var(--gold); background: var(--gold-dim); }
+}
+
+// On a narrow screen the panel is the width of the viewport, not the trigger.
+@media (max-width: 640px) {
+  .desk-more-panel {
+    grid-template-columns: repeat(2, minmax(6rem, 1fr));
+    left: auto;
+    right: 0;
+  }
+}
+
 .agent-trouble {
   font-size: 0.72rem;
   color: var(--down);

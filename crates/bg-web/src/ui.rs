@@ -54,6 +54,35 @@ pub fn Masthead() -> impl IntoView {
                     <A href="/world" attr:class="desk-link">"World"</A>
                     <A href="/science" attr:class="desk-link">"Science"</A>
                     <A href="/culture" attr:class="desk-link">"Culture"</A>
+                    // Seven desks fit across a laptop; the newsroom files under
+                    // twenty-three categories, and the other sixteen were
+                    // reachable only from a chip row part-way down /desk. A
+                    // reader who wants Energy or Space should not have to know
+                    // that. `<details>` rather than a scripted menu: it opens
+                    // without JavaScript, closes on Escape, and is reachable by
+                    // keyboard for free — and this bar renders server-side
+                    // before hydration, so anything needing JS would be dead
+                    // for the first moments of every page load.
+                    <details class="desk-more">
+                        <summary class="desk-link" aria-label="All sections">
+                            "More"
+                        </summary>
+                        <div class="desk-more-panel">
+                            {bg_core::domain::Category::ALL
+                                .iter()
+                                .map(|c| {
+                                    view! {
+                                        <a
+                                            class="desk-more-link"
+                                            href=format!("/section/{}", c.as_str())
+                                        >
+                                            {c.label()}
+                                        </a>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    </details>
                 </nav>
                 <nav class="nav" aria-label="Sections">
                     <A href="/desk">"Desk"</A>

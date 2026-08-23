@@ -251,21 +251,59 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
                         Some(lead) => {
                             let lead = lead.clone();
                             let desk = fp.desk.clone();
-                            let wire = fp.wire.clone();
+                            let mut wire = fp.wire.clone();
+                            // The main column used to be: lead story, the words
+                            // "More from the Desk", and — whenever the Desk had
+                            // published nothing recently — an empty grid. The
+                            // header rendered regardless, so the front page
+                            // carried a heading with nothing under it and half a
+                            // screen of white space beside a Wire rail that was
+                            // full. A section with no contents is not a section.
+                            //
+                            // So the Desk fills the column when it has stories,
+                            // and the Wire fills it when the Desk does not.
+                            // Those Wire items are taken off the front of the
+                            // rail rather than copied, so nothing appears twice.
+                            let desk_is_empty = desk.is_empty();
+                            let filler: Vec<_> = if desk_is_empty {
+                                wire.drain(..wire.len().min(6)).collect()
+                            } else {
+                                Vec::new()
+                            };
                             view! {
                                 <div class="split">
                                     <div>
                                         <LeadStory story=lead />
-                                        <div class="rail-title">
-                                            <span>"More from the Desk"</span>
-                                            <a href="/desk">"All"</a>
-                                        </div>
-                                        <div class="card-grid">
-                                            {desk
-                                                .into_iter()
-                                                .map(|s| view! { <Card story=s /> })
-                                                .collect_view()}
-                                        </div>
+                                        {(!desk_is_empty)
+                                            .then(|| {
+                                                view! {
+                                                    <div class="rail-title">
+                                                        <span>"More from the Desk"</span>
+                                                        <a href="/desk">"All"</a>
+                                                    </div>
+                                                    <div class="card-grid">
+                                                        {desk
+                                                            .into_iter()
+                                                            .map(|s| view! { <Card story=s /> })
+                                                            .collect_view()}
+                                                    </div>
+                                                }
+                                            })}
+                                        {(!filler.is_empty())
+                                            .then(|| {
+                                                view! {
+                                                    <div class="rail-title">
+                                                        <span>"Latest"</span>
+                                                        <a href="/wire">"All"</a>
+                                                    </div>
+                                                    <div class="card-grid">
+                                                        {filler
+                                                            .into_iter()
+                                                            .map(|s| view! { <Card story=s /> })
+                                                            .collect_view()}
+                                                    </div>
+                                                }
+                                            })}
                                     </div>
                                     <aside>
                                         <div class="rail-title">

@@ -128,8 +128,17 @@ pub async fn run(ctx: &Ctx) -> Result<ScoutReport> {
 /// clutter `/flock` without telling a reader anything new.
 pub async fn refresh_prices(ctx: &Ctx) -> Result<usize> {
     stage(ctx, AgentRole::Scout, None, "prices", |_run| async move {
-        let n = bg_ingest::market::refresh(&ctx.db, &ctx.http).await;
-        Ok(StageOutput::plain(n, format!("{n} price ticks")))
+        let crypto = bg_ingest::market::refresh(&ctx.db, &ctx.http).await;
+        // Equities in the same stage, from a different vendor. A crypto-only
+        // ticker tells a reader the newsroom covers crypto; BitGoose also runs
+        // Markets, Business and AI desks, and on most days Nasdaq and Nvidia
+        // are as much the story as Bitcoin is.
+        let equities = bg_ingest::market::refresh_equities(&ctx.db, &ctx.http).await;
+        let n = crypto + equities;
+        Ok(StageOutput::plain(
+            n,
+            format!("{crypto} crypto, {equities} equities"),
+        ))
     })
     .await
 }
