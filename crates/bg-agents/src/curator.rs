@@ -235,9 +235,24 @@ fn best_match<'a>(
         if c.id == item.id || c.story_id.is_none() {
             continue;
         }
-        // Two reports of one event come from different outlets. Same source
-        // twice is far more likely two genuinely different stories.
-        if c.source_id == item.source_id {
+        // Two reports of one event come from different outlets, and the same
+        // source filing twice is usually two genuinely different stories — a
+        // publisher running five Bitcoin pieces in a day writes five similar
+        // headlines about five events, and merging those would be worse than
+        // leaving them apart.
+        //
+        // An *identical* headline is the exception, and it is not a rare one.
+        // An aggregator carries many outlets under one source_id, so when
+        // Google News surfaces the same AP story seven times it arrives seven
+        // times as `gnews-crypto` and this guard skipped every pair. Measured
+        // on the live database: seven copies of "How bitcoin and gold went from
+        // a slump to an MVP week", each published as its own single-source
+        // story, and 3,198 of 3,236 stories in a day sitting at one source.
+        //
+        // Byte-identical titles are the same story whoever filed them, so they
+        // skip the guard. Nothing else about the match is relaxed.
+        let identical = item.title.trim().eq_ignore_ascii_case(c.title.trim());
+        if c.source_id == item.source_id && !identical {
             continue;
         }
 
@@ -513,6 +528,39 @@ mod tests {
         );
     }
 
+    /// Seven copies of this exact headline were published as seven separate
+    /// single-source stories, because an aggregator carries many outlets under
+    /// one source_id and the same-source guard skipped every pair.
+    #[test]
+    fn an_identical_headline_from_one_feed_still_merges() {
+        let feed = SourceId::new();
+        let a = item(feed, "How bitcoin and gold went from a slump to an MVP week");
+        let b = item(feed, "How bitcoin and gold went from a slump to an MVP week");
+        let m = best_match(
+            &a,
+            std::slice::from_ref(&b),
+            &corpus_of(&[a.clone(), b.clone()]),
+        );
+        let (_, score) = m.expect("identical headlines must match");
+        assert!(score.decisive, "an identical headline needs no adjudication");
+    }
+
+    /// The guard still earns its place: a publisher filing several pieces on
+    /// one subject writes several similar headlines about different events,
+    /// and merging those would be worse than leaving them apart.
+    #[test]
+    fn one_publisher_writing_around_a_subject_is_still_left_alone() {
+        let desk = SourceId::new();
+        let a = item(desk, "Bitcoin climbs above $76,000 in early trading");
+        let b = item(desk, "Bitcoin miners report record second-quarter revenue");
+        assert!(best_match(
+            &a,
+            std::slice::from_ref(&b),
+            &corpus_of(&[a.clone(), b.clone()])
+        )
+        .is_none());
+    }
+
     #[test]
     fn unrelated_stories_do_not_match_at_all() {
         let a = item(SourceId::new(), "Solana outage halts block production");
@@ -553,6 +601,16 @@ mod tests {
 
     #[test]
     fn the_same_source_is_never_treated_as_corroboration() {
+        // This test used to assert that two identical headlines from one feed
+        // must *not* match, on the reasoning that one outlet publishing twice
+        // is not two sources. The reasoning is right and the mechanism was
+        // wrong: corroboration is counted as `count(DISTINCT r.source_id)` over
+        // a story's items, so merging two same-source items yields a source
+        // count of one either way. Refusing to merge never protected the
+        // invariant — it just published the story twice, and on the live site
+        // seven times.
+        //
+        // So the invariant is asserted where it actually lives.
         let src = SourceId::new();
         let a = item(src, "Solana outage halts block production for four hours");
         let b = item(src, "Solana outage halts block production for four hours");
@@ -562,8 +620,13 @@ mod tests {
                 std::slice::from_ref(&b),
                 &corpus_of(&[a.clone(), b.clone()])
             )
-            .is_none(),
-            "one outlet publishing twice is not two sources"
+            .is_some(),
+            "two copies of one headline are one story, not two"
         );
+        // And the count that reaches the page is over *distinct* sources, so
+        // the merge cannot manufacture corroboration.
+        let distinct: std::collections::HashSet<_> =
+            [a.source_id, b.source_id].into_iter().collect();
+        assert_eq!(distinct.len(), 1, "one outlet publishing twice is one source");
     }
 }
