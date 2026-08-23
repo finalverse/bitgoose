@@ -192,7 +192,17 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
     //
     // A newsroom leads with the biggest news. `ranked` is already ordered by
     // newsworthiness decayed against age, so its head is exactly that.
-    let mut lead = ranked.first().map(|s| card(s, None));
+    // …but not one whose headline arrived already cut off. Some syndicators
+    // truncate at a fixed width and Google News passes that through verbatim,
+    // so "Bitcoin falls below $76K, wiping out $100M in l..." led the front
+    // page with a word missing. The story is fine and stays in the Wire; it
+    // just cannot be the first thing a reader sees, because a severed headline
+    // reads as our error rather than the publisher's.
+    let mut lead = ranked
+        .iter()
+        .find(|s| !bg_core::text::looks_truncated(&s.title))
+        .or_else(|| ranked.first())
+        .map(|s| card(s, None));
 
     // The Desk row keeps its own character — original synthesis, not pointers —
     // minus whatever became the lead.
@@ -254,6 +264,7 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
         .iter()
         .find(|s| {
             s.newsworthiness >= 80
+                && !bg_core::text::looks_truncated(&s.title)
                 && s.published_at
                     .is_some_and(|p| (chrono::Utc::now() - p).num_hours() < 6)
         })

@@ -517,3 +517,70 @@ mod aggregator_title_tests {
         );
     }
 }
+
+/// Whether a headline arrived already cut off by whoever published it.
+///
+/// Some syndicators truncate: Pluang and moomoo Community push titles like
+/// "Bitcoin falls below $76K, wiping out $100M in l…" and Google News passes
+/// them through verbatim, so the story reaches us with words missing and no way
+/// to recover them.
+///
+/// It is not a parsing bug and there is nothing to fix in the text — but a
+/// headline severed mid-word is the one thing that should never lead a front
+/// page, because it reads as *our* mistake. Stories like this stay in the Wire,
+/// where a clipped line is a minor blemish rather than the first thing a reader
+/// sees.
+/// Any trailing ellipsis counts, deliberately.
+///
+/// Distinguishing a severed word from an author's ellipsis is not reliably
+/// possible from the text: "wiping out $100M in l..." and "The Fed blinked.
+/// Again..." both end in a letter followed by three dots, and the only thing
+/// that actually separates them is knowing the publisher truncates at a fixed
+/// width. Encoding that would be a guess dressed as a rule.
+///
+/// So the test is the crude one, because the two errors are not symmetric. A
+/// false negative puts a broken headline at the top of the front page. A false
+/// positive means a story with a stylistic ellipsis leads from the Wire instead
+/// of the lead slot, which nobody will ever notice.
+pub fn looks_truncated(title: &str) -> bool {
+    let t = title.trim_end();
+    t.ends_with('…') || t.ends_with("...")
+}
+
+#[cfg(test)]
+mod truncation_tests {
+    use super::*;
+
+    /// All four were on the live front page, one of them as the lead.
+    #[test]
+    fn a_severed_headline_is_recognised() {
+        for t in [
+            "Bitcoin falls below $76K, wiping out $100M in l...",
+            "Bitcoin's sharp rally suggests a potential mark...",
+            "Arthur Hayes bullish on Bitcoin, gold, and stoc...",
+            "WHALE SITS ON $21.4M PROFIT FROM $Bitcoin AND $Eth…",
+        ] {
+            assert!(looks_truncated(t), "missed: {t}");
+        }
+    }
+
+    #[test]
+    fn an_intact_headline_is_left_alone() {
+        for t in [
+            "Bitcoin Approaches $70,000",
+            "Fed holds rates steady as inflation cools",
+            "Trump, Musk - and the Fed",
+            "",
+        ] {
+            assert!(!looks_truncated(t), "false positive: {t}");
+        }
+    }
+
+    /// A stylistic ellipsis is caught too, and that is the intended trade: it
+    /// costs one story its place in the lead slot and still appears in the
+    /// Wire, where the alternative costs the front page its credibility.
+    #[test]
+    fn a_stylistic_ellipsis_is_knowingly_included() {
+        assert!(looks_truncated("The Fed blinked. Again..."));
+    }
+}
