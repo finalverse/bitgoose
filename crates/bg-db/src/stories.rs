@@ -1,14 +1,14 @@
 //! Stories — the event layer, and the queries the front page runs on.
 
 use crate::{convert::*, Db, DbError, Result};
-use bg_core::domain::{Category, Story, StoryKind, StoryStatus, WireEntry};
+use bg_core::domain::{Category, EditorialLanguage, Story, StoryKind, StoryStatus, WireEntry};
 use bg_core::ids::StoryId;
 use sqlx::postgres::PgRow;
 use sqlx::Row;
 use uuid::Uuid;
 
 const COLS: &str = "id, slug, kind, status, title, summary, category, newsworthiness, velocity, \
-                    source_count, primary_asset, assets, beat, image_url, video_id, first_seen_at, published_at, \
+                    source_count, primary_asset, assets, beat, editorial_language, image_url, video_id, first_seen_at, published_at, \
                     updated_at, editor_note";
 
 fn from_row(r: &PgRow) -> Result<Story> {
@@ -26,6 +26,7 @@ fn from_row(r: &PgRow) -> Result<Story> {
         primary_asset: r.try_get("primary_asset")?,
         assets: r.try_get("assets")?,
         beat: enum_col::<bg_core::domain::Beat>(r, "beat")?,
+        editorial_language: enum_col::<EditorialLanguage>(r, "editorial_language")?,
         image_url: r.try_get("image_url")?,
         video_id: r.try_get("video_id")?,
         first_seen_at: r.try_get("first_seen_at")?,
@@ -47,6 +48,27 @@ pub async fn create(
     category: Category,
     beat: bg_core::domain::Beat,
 ) -> Result<Story> {
+    create_for_language(
+        db,
+        base_slug,
+        kind,
+        title,
+        category,
+        beat,
+        EditorialLanguage::En,
+    )
+    .await
+}
+
+pub async fn create_for_language(
+    db: &Db,
+    base_slug: &str,
+    kind: StoryKind,
+    title: &str,
+    category: Category,
+    beat: bg_core::domain::Beat,
+    language: EditorialLanguage,
+) -> Result<Story> {
     for attempt in 0..25u32 {
         let slug = if attempt == 0 {
             base_slug.to_string()
@@ -54,8 +76,8 @@ pub async fn create(
             bg_core::slug::slug_with_suffix(base_slug, attempt + 1)
         };
         let res = crate::sql(format!(
-            "INSERT INTO stories (id, slug, kind, status, title, category, beat)
-             VALUES ($1,$2,$3,'triage',$4,$5,$6)
+            "INSERT INTO stories (id, slug, kind, status, title, category, beat, editorial_language)
+             VALUES ($1,$2,$3,'triage',$4,$5,$6,$7)
              ON CONFLICT (slug) DO NOTHING
              RETURNING {COLS}"
         ))
@@ -65,6 +87,7 @@ pub async fn create(
         .bind(title)
         .bind(category.as_str())
         .bind(beat.as_str())
+        .bind(language.as_str())
         .fetch_optional(&db.pool)
         .await?;
         if let Some(row) = res {
@@ -258,12 +281,24 @@ pub async fn published(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<Story>> {
+    published_for_language(db, kind, EditorialLanguage::En, limit, offset).await
+}
+
+pub async fn published_for_language(
+    db: &Db,
+    kind: Option<StoryKind>,
+    language: EditorialLanguage,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Story>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM stories
-         WHERE status = 'published' AND ($1::text IS NULL OR kind = $1)
-         ORDER BY published_at DESC LIMIT $2 OFFSET $3"
+         WHERE status = 'published' AND editorial_language = $2
+           AND ($1::text IS NULL OR kind = $1)
+         ORDER BY published_at DESC LIMIT $3 OFFSET $4"
     ))
     .bind(kind.map(|k| k.as_str()))
+    .bind(language.as_str())
     .bind(limit)
     .bind(offset)
     .fetch_all(&db.pool)
@@ -272,12 +307,22 @@ pub async fn published(
 }
 
 pub async fn by_category(db: &Db, cat: Category, limit: i64) -> Result<Vec<Story>> {
+    by_category_for_language(db, cat, EditorialLanguage::En, limit).await
+}
+
+pub async fn by_category_for_language(
+    db: &Db,
+    cat: Category,
+    language: EditorialLanguage,
+    limit: i64,
+) -> Result<Vec<Story>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM stories
-         WHERE status = 'published' AND category = $1
-         ORDER BY published_at DESC LIMIT $2"
+         WHERE status = 'published' AND category = $1 AND editorial_language = $2
+         ORDER BY published_at DESC LIMIT $3"
     ))
     .bind(cat.as_str())
+    .bind(language.as_str())
     .bind(limit)
     .fetch_all(&db.pool)
     .await?;
@@ -312,9 +357,19 @@ pub async fn front_page(
     beat: Option<bg_core::domain::Beat>,
     limit: i64,
 ) -> Result<Vec<Story>> {
+    front_page_for_language(db, beat, EditorialLanguage::En, limit).await
+}
+
+pub async fn front_page_for_language(
+    db: &Db,
+    beat: Option<bg_core::domain::Beat>,
+    language: EditorialLanguage,
+    limit: i64,
+) -> Result<Vec<Story>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM stories
-         WHERE status = 'published' AND ($2::text IS NULL OR beat = $2)
+         WHERE status = 'published' AND editorial_language = $3
+           AND ($2::text IS NULL OR beat = $2)
          ORDER BY (
             newsworthiness
             * exp(-extract(epoch from (now() - published_at)) / 21600.0)
@@ -324,6 +379,7 @@ pub async fn front_page(
     ))
     .bind(limit)
     .bind(beat.map(|b| b.as_str()))
+    .bind(language.as_str())
     .fetch_all(&db.pool)
     .await?;
     rows.iter().map(from_row).collect()
@@ -333,6 +389,16 @@ pub async fn front_page(
 pub async fn wire(
     db: &Db,
     beat: Option<bg_core::domain::Beat>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<WireEntry>> {
+    wire_for_language(db, beat, EditorialLanguage::En, limit, offset).await
+}
+
+pub async fn wire_for_language(
+    db: &Db,
+    beat: Option<bg_core::domain::Beat>,
+    language: EditorialLanguage,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<WireEntry>> {
@@ -359,13 +425,15 @@ pub async fn wire(
             LIMIT 1
          ) ri ON TRUE
          JOIN sources src ON src.id = ri.source_id
-         WHERE st.status = 'published' AND ($3::text IS NULL OR st.beat = $3)
+         WHERE st.status = 'published' AND st.editorial_language = $4
+           AND ($3::text IS NULL OR st.beat = $3)
          ORDER BY st.published_at DESC
          LIMIT $1 OFFSET $2",
     )
     .bind(limit)
     .bind(offset)
     .bind(beat.map(|b| b.as_str()))
+    .bind(language.as_str())
     .fetch_all(&db.pool)
     .await?;
 

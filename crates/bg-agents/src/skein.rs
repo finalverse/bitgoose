@@ -1,7 +1,7 @@
 //! **Skein** — what the story means, and where it goes.
 //!
 //! A skein is geese in flight formation: the flock seen as a direction rather
-//! than as birds. This agent is the one place BitGoose asserts something no
+//! than as birds. This agent is the one place VictoriaPark asserts something no
 //! source said, which makes it both the reason to read the site and the easiest
 //! thing here to get badly wrong.
 //!
@@ -182,6 +182,8 @@ impl TapSources for serde_json::Value {
 
 /// Analyse a story. `Ok(false)` means the grounding gate held it back.
 pub async fn run(ctx: &Ctx, story: StoryId) -> Result<bool> {
+    let story_record = bg_db::stories::by_id(&ctx.db, story).await?;
+    let output_language = crate::output_language(story_record.editorial_language);
     let items = bg_db::items::by_story(&ctx.db, story).await?;
     if items.is_empty() {
         return Err(FlockError::Other("story has no source items".into()));
@@ -190,7 +192,7 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<bool> {
     // Drop anything from a publisher who does not permit model input.
     //
     // The backstop to the extraction gate, and it has to exist: text ingested
-    // before a site changed its posture — or before BitGoose learned to read
+    // before a site changed its posture — or before VictoriaPark learned to read
     // the posture at all — is already in the database, and the gate upstream
     // only stops new fetches. The story keeps its citation and its link; what
     // it loses is having that outlet's words in a prompt.
@@ -240,7 +242,7 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<bool> {
             // means cost scales with the story count, not the source count.
             let share = (TOTAL_SOURCE_WORDS / items.len().max(1)).clamp(120, 900);
 
-            let mut prompt = String::from("Source material:\n\n");
+            let mut prompt = format!("OUTPUT_LANGUAGE={output_language}\n\nSource material:\n\n");
             for (i, it) in items.iter().enumerate() {
                 prompt.push_str(&format!("=== SOURCE [{i}] ===\nHeadline: {}\n", it.title));
                 if let Some(body) = it.body_raw.as_deref().or(it.summary_raw.as_deref()) {

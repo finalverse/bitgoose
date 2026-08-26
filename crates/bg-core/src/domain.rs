@@ -189,6 +189,62 @@ impl Category {
             Self::Energy => "Energy",
         }
     }
+
+    pub const fn label_zh(&self) -> &'static str {
+        match self {
+            Self::Markets => "市场",
+            Self::Policy => "政策",
+            Self::Tech => "科技",
+            Self::Defi => "去中心化金融",
+            Self::Business => "商业",
+            Self::Security => "安全",
+            Self::Ai => "人工智能",
+            Self::Nft => "数字藏品",
+            Self::Gaming => "游戏",
+            Self::Culture => "文化",
+            Self::Research => "研究",
+            Self::Models => "模型",
+            Self::Compute => "算力",
+            Self::Safety => "AI 安全",
+            Self::World => "国际",
+            Self::Politics => "政治",
+            Self::Health => "健康",
+            Self::Climate => "气候",
+            Self::Space => "太空",
+            Self::Science => "科学",
+            Self::Sports => "体育",
+            Self::Entertainment => "文娱",
+            Self::Energy => "能源",
+        }
+    }
+
+    pub const fn label_fr(&self) -> &'static str {
+        match self {
+            Self::Markets => "Marchés",
+            Self::Policy => "Politique publique",
+            Self::Tech => "Technologie",
+            Self::Defi => "Finance décentralisée",
+            Self::Business => "Entreprises",
+            Self::Security => "Sécurité",
+            Self::Ai => "Intelligence artificielle",
+            Self::Nft => "NFT",
+            Self::Gaming => "Jeux vidéo",
+            Self::Culture => "Culture",
+            Self::Research => "Recherche",
+            Self::Models => "Modèles",
+            Self::Compute => "Calcul",
+            Self::Safety => "Sûreté de l’IA",
+            Self::World => "Monde",
+            Self::Politics => "Politique",
+            Self::Health => "Santé",
+            Self::Climate => "Climat",
+            Self::Space => "Espace",
+            Self::Science => "Sciences",
+            Self::Sports => "Sports",
+            Self::Entertainment => "Divertissement",
+            Self::Energy => "Énergie",
+        }
+    }
 }
 
 impl Category {
@@ -440,6 +496,36 @@ pub struct RawItemPublic {
 // ---------------------------------------------------------------------------
 
 str_enum! {
+    /// Independently commissioned editions, not translations of one feed.
+    pub enum EditorialLanguage {
+        En => "en",
+        Zh => "zh",
+        Fr => "fr",
+    }
+}
+
+impl EditorialLanguage {
+    pub fn from_source_lang(lang: &str) -> Self {
+        let lang = lang.trim().to_ascii_lowercase();
+        if lang.starts_with("zh") {
+            Self::Zh
+        } else if lang.starts_with("fr") {
+            Self::Fr
+        } else {
+            Self::En
+        }
+    }
+
+    pub const fn html_lang(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::Zh => "zh-CN",
+            Self::Fr => "fr",
+        }
+    }
+}
+
+str_enum! {
     /// Which surface a story is destined for.
     pub enum StoryKind {
         /// The Wire: fast aggregation. Headline, short AI summary, link out.
@@ -492,6 +578,8 @@ pub struct Story {
     pub assets: Vec<String>,
     /// Which desk this belongs to.
     pub beat: Beat,
+    /// Independent edition that commissioned and published this story.
+    pub editorial_language: EditorialLanguage,
     pub image_url: Option<String>,
     /// Provider video id when this story came from a video source. An id, not
     /// a URL — the embed host is chosen at render time.

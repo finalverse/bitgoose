@@ -53,6 +53,8 @@ fn schema() -> serde_json::Value {
 
 pub async fn run(ctx: &Ctx, story: StoryId, body_md: &str) -> Result<Copy> {
     let claims = bg_db::claims::with_sources(&ctx.db, story).await?;
+    let story_record = bg_db::stories::by_id(&ctx.db, story).await?;
+    let output_language = crate::output_language(story_record.editorial_language);
     let system = crate::system_prompt(ctx, AgentRole::Copydesk).await;
     let body = body_md.to_string();
 
@@ -62,7 +64,7 @@ pub async fn run(ctx: &Ctx, story: StoryId, body_md: &str) -> Result<Copy> {
         Some(story),
         "copy",
         |_run| async move {
-            let mut prompt = String::from("Verified claims:\n");
+            let mut prompt = format!("OUTPUT_LANGUAGE={output_language}\n\nVerified claims:\n");
             for c in &claims {
                 prompt.push_str(&format!(
                     "- [{}] {}\n",

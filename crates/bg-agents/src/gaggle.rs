@@ -19,7 +19,7 @@
 //! auto-generated topic hubs is the thing this must not become.
 
 use crate::{stage, Ctx, FlockError, Result, StageOutput};
-use bg_core::domain::{AgentRole, ModelTier};
+use bg_core::domain::{AgentRole, EditorialLanguage, ModelTier};
 use bg_llm::{schema as sch, Request};
 use serde::Deserialize;
 use tracing::info;
@@ -43,30 +43,27 @@ pub const WINDOW_HOURS: i64 = 48;
 /// still reads as new.
 pub const BASELINE_DAYS: f32 = 14.0;
 
-pub const SYSTEM: &str = "Gander is opening a special topic — a page collecting \
-everything the newsroom has on one subject that many independent outlets are \
-covering at once.
-
-You are given the subject, how many separate outlets have covered it, and the \
-headlines. Write two things.
-
-TITLE. What this topic is, as a reader would name it. Four to eight words. Not \
-a headline about one event — the subject the events share. 'The Clarity Act \
-fight', not 'Senate advances Clarity Act'. No colons, no clickbait.
-
-STANDFIRST. Two or three sentences on why this is a topic right now: what is \
-actually at stake and why so many newsrooms turned to it at once. Concrete. If \
-the honest answer is that a lot of outlets covered a routine announcement, say \
-that plainly rather than inflating it — a topic page that oversells itself is \
-worse than no topic page.
-
-Write from the headlines you are given and nothing else. Do not assert facts \
-they do not contain.";
+pub const SYSTEM: &str = "Gander opens a special topic after several independent outlets converge.
+Write a concise 4-8 word title and a two-or-three-sentence standfirst explaining
+why the subject matters now. Use only the supplied headlines, never invent facts,
+and write entirely in the requested OUTPUT_LANGUAGE.";
+pub const TRACKED_SYSTEM: &str = "Refresh a permanent special-topic brief using
+only the supplied published stories and primary-source list. Separate verified
+facts from analysis, identify uncertainty, and write entirely in the requested
+OUTPUT_LANGUAGE.";
+const TRACKED_BRIEF_HOURS: i64 = 6;
 
 #[derive(Debug, Deserialize)]
 pub struct Framing {
     pub title: String,
     pub standfirst: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrackedFraming {
+    standfirst: String,
+    analysis_md: String,
+    watchpoints: Vec<String>,
 }
 
 fn schema() -> serde_json::Value {
@@ -85,6 +82,32 @@ fn schema() -> serde_json::Value {
     )
 }
 
+fn tracked_schema() -> serde_json::Value {
+    sch::object(
+        vec![
+            (
+                "standfirst",
+                sch::string_hinted("2-3 sentence current status and scope", "standfirst"),
+            ),
+            (
+                "analysis_md",
+                sch::string_hinted(
+                    "original Markdown brief with facts, analysis, viewpoint and evidence boundary",
+                    "analysis",
+                ),
+            ),
+            (
+                "watchpoints",
+                sch::array(
+                    sch::string_hinted("specific future event or measurable signal", "watchpoint"),
+                    "3-8 concrete signals to monitor",
+                ),
+            ),
+        ],
+        &["standfirst", "analysis_md", "watchpoints"],
+    )
+}
+
 /// Re-score heat and refresh existing gaggles, without consulting a model.
 ///
 /// The half of the job that is free. Called on the fast cadence so a live topic
@@ -94,12 +117,27 @@ fn schema() -> serde_json::Value {
 /// Opens nothing new — naming a topic costs a call, and that decision belongs
 /// in the budgeted pass.
 pub async fn refresh(ctx: &Ctx) -> Result<usize> {
-    let headlines = bg_db::gaggles::recent_headlines(&ctx.db, WINDOW_HOURS, 4_000).await?;
+    let tracked = bg_db::gaggles::refresh_tracked(&ctx.db).await?;
+    let mut refreshed = tracked;
+    for language in [
+        EditorialLanguage::En,
+        EditorialLanguage::Zh,
+        EditorialLanguage::Fr,
+    ] {
+        refreshed += refresh_language(ctx, language).await?;
+    }
+    Ok(refreshed)
+}
+
+async fn refresh_language(ctx: &Ctx, language: EditorialLanguage) -> Result<usize> {
+    let headlines =
+        bg_db::gaggles::recent_headlines(&ctx.db, language, WINDOW_HOURS, 4_000).await?;
     if headlines.is_empty() {
         return Ok(0);
     }
     let baseline = bg_db::gaggles::baseline_headlines(
         &ctx.db,
+        language,
         WINDOW_HOURS,
         (BASELINE_DAYS as i64) * 24,
         20_000,
@@ -108,10 +146,10 @@ pub async fn refresh(ctx: &Ctx) -> Result<usize> {
 
     let mut refreshed = 0usize;
     for heat in bg_core::trends::rank_spikes(&headlines, &baseline, BASELINE_DAYS, MIN_SOURCES) {
-        if !bg_db::gaggles::exists(&ctx.db, &heat.topic).await? {
+        if !bg_db::gaggles::exists(&ctx.db, &heat.topic, language).await? {
             continue;
         }
-        let stories = bg_db::gaggles::stories_for_topic(&ctx.db, &heat.topic, 60).await?;
+        let stories = bg_db::gaggles::stories_for_topic(&ctx.db, &heat.topic, language, 60).await?;
         let id = bg_db::gaggles::upsert(
             &ctx.db,
             &bg_db::gaggles::NewGaggle {
@@ -123,6 +161,7 @@ pub async fn refresh(ctx: &Ctx) -> Result<usize> {
                 source_count: heat.sources as i32,
                 story_count: stories.len() as i32,
                 model: None,
+                editorial_language: language,
             },
             None,
         )
@@ -137,7 +176,21 @@ pub async fn refresh(ctx: &Ctx) -> Result<usize> {
 ///
 /// Returns how many were opened or refreshed.
 pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
-    let headlines = bg_db::gaggles::recent_headlines(&ctx.db, WINDOW_HOURS, 4_000).await?;
+    let briefed = refresh_tracked_briefs(ctx, max_new.min(1)).await?;
+    let mut total = briefed;
+    for language in [
+        EditorialLanguage::En,
+        EditorialLanguage::Zh,
+        EditorialLanguage::Fr,
+    ] {
+        total += run_language(ctx, max_new, language).await?;
+    }
+    Ok(total)
+}
+
+async fn run_language(ctx: &Ctx, max_new: usize, language: EditorialLanguage) -> Result<usize> {
+    let headlines =
+        bg_db::gaggles::recent_headlines(&ctx.db, language, WINDOW_HOURS, 4_000).await?;
     if headlines.is_empty() {
         return Ok(0);
     }
@@ -148,6 +201,7 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
     // normal.
     let baseline = bg_db::gaggles::baseline_headlines(
         &ctx.db,
+        language,
         WINDOW_HOURS,
         (BASELINE_DAYS as i64) * 24,
         20_000,
@@ -192,8 +246,8 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
         }
         // A gaggle that already exists is refreshed without spending a call on
         // re-writing prose that has not stopped being true.
-        let known = bg_db::gaggles::exists(&ctx.db, &heat.topic).await?;
-        let stories = bg_db::gaggles::stories_for_topic(&ctx.db, &heat.topic, 60).await?;
+        let known = bg_db::gaggles::exists(&ctx.db, &heat.topic, language).await?;
+        let stories = bg_db::gaggles::stories_for_topic(&ctx.db, &heat.topic, language, 60).await?;
         if stories.is_empty() {
             // Hot across the wires but nothing published yet. It will still be
             // hot next pass, by which point the pipeline may have caught up.
@@ -213,6 +267,7 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
                     source_count: heat.sources as i32,
                     story_count: stories.len() as i32,
                     model: None,
+                    editorial_language: language,
                 },
                 None,
             )
@@ -227,8 +282,8 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
 
         let n = stage(ctx, AgentRole::Gander, None, "gaggle", |run| async move {
             let mut prompt = format!(
-                "Subject: {}\nIndependent outlets covering it: {}\nStories: {}\n\nHeadlines:\n",
-                heat.topic, heat.sources, heat.stories
+                "OUTPUT_LANGUAGE={}\n\nSubject: {}\nIndependent outlets covering it: {}\nStories: {}\n\nHeadlines:\n",
+                language.as_str(), heat.topic, heat.sources, heat.stories
             );
             for id in stories.iter().take(25) {
                 if let Ok(s) = bg_db::stories::by_id(&ctx.db, *id).await {
@@ -281,6 +336,7 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
                     source_count: heat.sources as i32,
                     story_count: stories.len() as i32,
                     model: Some(completion.model.clone()),
+                    editorial_language: language,
                 },
                 Some(run),
             )
@@ -295,6 +351,120 @@ pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
         opened += n;
     }
     Ok(opened)
+}
+
+/// Re-synthesise long-running topic briefs from BitGoose's published work.
+/// Story membership is refreshed separately on the fast cadence; this slower
+/// pass spends one Mid-tier call only when a brief is six hours old.
+async fn refresh_tracked_briefs(ctx: &Ctx, max: usize) -> Result<usize> {
+    if max == 0 {
+        return Ok(0);
+    }
+    let due = bg_db::gaggles::tracked_due(&ctx.db, TRACKED_BRIEF_HOURS, max as i64).await?;
+    let mut refreshed = 0usize;
+
+    for topic in due {
+        let ids = bg_db::gaggles::story_ids(&ctx.db, &topic.slug, topic.editorial_language).await?;
+        // The verified seed brief remains authoritative until the newsroom has
+        // actually published new reporting. A clock alone is not new evidence.
+        if ids.is_empty() {
+            continue;
+        }
+
+        let mut evidence = String::new();
+        for id in ids.iter().take(40) {
+            if let Ok(story) = bg_db::stories::by_id(&ctx.db, *id).await {
+                evidence.push_str("- ");
+                evidence.push_str(&story.title);
+                if let Some(summary) = story.summary.as_deref() {
+                    evidence.push_str(" — ");
+                    evidence.push_str(summary);
+                }
+                if let Some(at) = story.published_at {
+                    evidence.push_str(&format!(" [{}]", at.to_rfc3339()));
+                }
+                evidence.push('\n');
+            }
+        }
+        if evidence.is_empty() {
+            continue;
+        }
+
+        let source_lines = topic
+            .primary_source_names
+            .iter()
+            .zip(&topic.primary_source_urls)
+            .map(|(name, url)| format!("- {name}: {url}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let language = topic.editorial_language.as_str();
+        let system = format!(
+            "{}\n\n{}",
+            crate::system_prompt(ctx, AgentRole::Gander).await,
+            TRACKED_SYSTEM
+        );
+        let prompt = format!(
+            "OUTPUT_LANGUAGE={language}\nTopic: {}\n\nCurrent standfirst:\n{}\n\nCurrent brief:\n{}\n\nCurrent watchpoints:\n- {}\n\nPinned primary sources:\n{}\n\nBitGoose stories, newest first:\n{}",
+            topic.title,
+            topic.standfirst,
+            topic.analysis_md,
+            topic.watchpoints.join("\n- "),
+            source_lines,
+            evidence,
+        );
+        let topic_id = topic.id;
+
+        let n = stage(
+            ctx,
+            AgentRole::Gander,
+            None,
+            "trade-watch",
+            |run| async move {
+                let req = Request::new("gander.trade_watch", ModelTier::Mid, system, prompt)
+                    .with_schema(tracked_schema())
+                    .with_max_tokens(2_200);
+                let (brief, completion) = ctx.llm.complete_json::<TrackedFraming>(&req).await?;
+                let standfirst = brief.standfirst.trim();
+                let analysis = brief.analysis_md.trim();
+                let watchpoints: Vec<String> = brief
+                    .watchpoints
+                    .into_iter()
+                    .map(|w| w.trim().to_string())
+                    .filter(|w| !w.is_empty())
+                    .collect();
+                if standfirst.len() < 80 || analysis.len() < 400 || watchpoints.len() < 3 {
+                    return Err(FlockError::Other(
+                        "tracked-topic brief was too thin; keeping the verified prior brief".into(),
+                    ));
+                }
+                if bg_core::share::reads_as_a_refusal(standfirst)
+                    || bg_core::share::reads_as_a_refusal(analysis)
+                {
+                    return Err(FlockError::Other(
+                        "tracked-topic model declined; keeping the verified prior brief".into(),
+                    ));
+                }
+                bg_db::gaggles::update_tracked_brief(
+                    &ctx.db,
+                    topic_id,
+                    standfirst,
+                    analysis,
+                    &watchpoints,
+                    &completion.model,
+                    run,
+                )
+                .await?;
+                Ok(StageOutput::with(
+                    1usize,
+                    completion,
+                    "updated permanent trade-watch brief",
+                ))
+            },
+        )
+        .await?;
+        refreshed += n;
+    }
+    Ok(refreshed)
 }
 
 /// Twenty-five sources are polled. A threshold low enough for three outlets

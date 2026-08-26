@@ -86,6 +86,8 @@ fn schema(n: usize) -> serde_json::Value {
 
 /// Re-check one published story.
 pub async fn recheck(ctx: &Ctx, story: StoryId) -> Result<bool> {
+    let story_record = bg_db::stories::by_id(&ctx.db, story).await?;
+    let output_language = crate::output_language(story_record.editorial_language);
     let claims = bg_db::claims::with_sources(&ctx.db, story).await?;
     if claims.is_empty() {
         return Ok(false);
@@ -135,7 +137,7 @@ pub async fn recheck(ctx: &Ctx, story: StoryId) -> Result<bool> {
         "recheck",
         |_run| async move {
             let prompt = format!(
-                "Published claims:\n{}\n\nSource material that arrived after publication:\n{}\n\n\
+                "OUTPUT_LANGUAGE={output_language}\n\nPublished claims:\n{}\n\nSource material that arrived after publication:\n{}\n\n\
              Does any claim need revising?",
                 claim_list.join("\n"),
                 fresh_text.join("\n")

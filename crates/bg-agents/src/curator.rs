@@ -174,7 +174,7 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
             None => {
                 let category = item_category(ctx, &item).await;
                 let slug = bg_core::slug::slugify(&item.title);
-                let story = bg_db::stories::create(
+                let story = bg_db::stories::create_for_language(
                     &ctx.db,
                     &slug,
                     StoryKind::Wire,
@@ -187,6 +187,7 @@ pub async fn run(ctx: &Ctx, limit: i64) -> Result<usize> {
                     item.beat
                         .or_else(|| bg_core::domain::Beat::of_category(category))
                         .unwrap_or(bg_core::domain::Beat::Crypto),
+                    bg_core::domain::EditorialLanguage::from_source_lang(&item.lang),
                 )
                 .await?;
                 bg_db::items::attach_to_story(&ctx.db, item.id, story.id, ItemRole::Seed).await?;
@@ -232,7 +233,11 @@ fn best_match<'a>(
     let mut best: Option<(&RawItem, MatchScore)> = None;
 
     for c in candidates {
-        if c.id == item.id || c.story_id.is_none() {
+        if c.id == item.id
+            || c.story_id.is_none()
+            || bg_core::domain::EditorialLanguage::from_source_lang(&c.lang)
+                != bg_core::domain::EditorialLanguage::from_source_lang(&item.lang)
+        {
             continue;
         }
         // Two reports of one event come from different outlets, and the same

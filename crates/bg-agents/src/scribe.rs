@@ -123,6 +123,9 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<(Vec<ClaimId>, String)> {
     if items.is_empty() {
         return Err(FlockError::Other("story has no source items".into()));
     }
+    let output_language = crate::output_language(
+        bg_core::domain::EditorialLanguage::from_source_lang(&items[0].lang),
+    );
     let system = crate::system_prompt(ctx, AgentRole::Scribe).await;
 
     stage(
@@ -133,7 +136,7 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<(Vec<ClaimId>, String)> {
         |run| async move {
             // Source bodies are the private working copy. They go into the prompt
             // and never anywhere else — see bg-db::items for the accessor boundary.
-            let mut prompt = String::from("Source material:\n\n");
+            let mut prompt = format!("OUTPUT_LANGUAGE={output_language}\n\nSource material:\n\n");
             for (i, it) in items.iter().enumerate() {
                 prompt.push_str(&format!(
                     "=== SOURCE [{i}] — {} ===\n",

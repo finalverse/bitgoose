@@ -136,6 +136,8 @@ pub async fn review_desk(
     body_md: &str,
     copy: &crate::copydesk::Copy,
 ) -> Result<Outcome> {
+    let story_record = bg_db::stories::by_id(&ctx.db, story).await?;
+    let output_language = crate::output_language(story_record.editorial_language);
     let claims = bg_db::claims::with_sources(&ctx.db, story).await?;
     let source_refs = bg_db::stories::source_refs(&ctx.db, story).await?;
     // Private source text, used only for the verbatim-overlap check.
@@ -236,7 +238,9 @@ pub async fn review_desk(
         Some(story),
         "review",
         |_run| async move {
-            let mut prompt = format!("Headline: {headline}\nDek: {dek}\n\nVerified claims:\n");
+            let mut prompt = format!(
+                "OUTPUT_LANGUAGE={output_language}\n\nHeadline: {headline}\nDek: {dek}\n\nVerified claims:\n"
+            );
             prompt.push_str(&claims_summary.join("\n"));
             if !warnings.is_empty() {
                 prompt.push_str(&format!(

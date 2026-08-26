@@ -42,6 +42,7 @@ fn schema() -> serde_json::Value {
 pub async fn run(ctx: &Ctx, story: StoryId) -> Result<crate::gander::Outcome> {
     let items = bg_db::items::by_story(&ctx.db, story).await?;
     let s = bg_db::stories::by_id(&ctx.db, story).await?;
+    let output_language = crate::output_language(s.editorial_language);
     let system = crate::system_prompt(ctx, AgentRole::Herald).await;
     // Kept out here because `s` moves into the stage closure below.
     let headline = s.title.clone();
@@ -101,7 +102,10 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<crate::gander::Outcome> {
         Some(story),
         "wire",
         |_run| async move {
-            let mut prompt = format!("Headline: {}\n\nSource material:\n", s.title);
+            let mut prompt = format!(
+                "OUTPUT_LANGUAGE={output_language}\n\nHeadline: {}\n\nSource material:\n",
+                s.title
+            );
             for it in items.iter().take(3) {
                 if let Some(b) = it.summary_raw.as_deref().or(it.body_raw.as_deref()) {
                     prompt.push_str(&format!("- {}\n", bg_core::text::truncate_words(b, 120)));

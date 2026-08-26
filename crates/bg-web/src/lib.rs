@@ -35,7 +35,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
         // prefers light got dark until they found the toggle. Absent the
         // attribute the media query governs, and the toggle sets it only when
         // someone makes an explicit choice.
-        <html lang="en">
+        <html lang="zh-CN">
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -73,8 +73,7 @@ pub fn App() -> impl IntoView {
         // they show a generic placeholder — which is exactly the grey chain
         // link a shared BitGoose story rendered as, next to a Reuters link
         // showing its roundel.
-        <Link rel="icon" type_="image/svg+xml" href="/favicon.svg" />
-        <Link rel="icon" type_="image/x-icon" href="/favicon.ico" sizes="any" />
+        <Link rel="icon" type_="image/png" href="/icon-192.png" sizes="192x192" />
         <Link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
         <Link rel="manifest" href="/site.webmanifest" />
         // No site-wide description here on purpose: pages set their own via
@@ -85,18 +84,42 @@ pub fn App() -> impl IntoView {
             <ui::Masthead />
             <main>
                 <Routes fallback=pages::NotFound>
-                    <Route path=path!("/") view=pages::Home />
-                    <Route path=path!("/ai") view=pages::DeskAi />
-                    <Route path=path!("/crypto") view=pages::DeskCrypto />
-                    <Route path=path!("/markets") view=pages::DeskMarkets />
-                    <Route path=path!("/tech") view=pages::DeskTech />
-                    <Route path=path!("/world") view=pages::DeskWorld />
-                    <Route path=path!("/science") view=pages::DeskScience />
-                    <Route path=path!("/culture") view=pages::DeskCulture />
-                    <Route path=path!("/wire") view=pages::Wire />
+                    <Route path=path!("/") view=pages::HomeEn />
+                    <Route path=path!("/zh") view=pages::Home />
+                    <Route path=path!("/fr") view=pages::HomeFr />
+                    <Route path=path!("/ai") view=pages::DeskAiEn />
+                    <Route path=path!("/zh/ai") view=pages::DeskAi />
+                    <Route path=path!("/fr/ai") view=pages::DeskAiFr />
+                    <Route path=path!("/crypto") view=pages::DeskCryptoEn />
+                    <Route path=path!("/zh/crypto") view=pages::DeskCrypto />
+                    <Route path=path!("/fr/crypto") view=pages::DeskCryptoFr />
+                    <Route path=path!("/markets") view=pages::DeskMarketsEn />
+                    <Route path=path!("/zh/markets") view=pages::DeskMarkets />
+                    <Route path=path!("/fr/markets") view=pages::DeskMarketsFr />
+                    <Route path=path!("/tech") view=pages::DeskTechEn />
+                    <Route path=path!("/zh/tech") view=pages::DeskTech />
+                    <Route path=path!("/fr/tech") view=pages::DeskTechFr />
+                    <Route path=path!("/world") view=pages::DeskWorldEn />
+                    <Route path=path!("/zh/world") view=pages::DeskWorld />
+                    <Route path=path!("/fr/world") view=pages::DeskWorldFr />
+                    <Route path=path!("/science") view=pages::DeskScienceEn />
+                    <Route path=path!("/zh/science") view=pages::DeskScience />
+                    <Route path=path!("/fr/science") view=pages::DeskScienceFr />
+                    <Route path=path!("/culture") view=pages::DeskCultureEn />
+                    <Route path=path!("/zh/culture") view=pages::DeskCulture />
+                    <Route path=path!("/fr/culture") view=pages::DeskCultureFr />
+                    <Route path=path!("/wire") view=pages::WireEn />
+                    <Route path=path!("/zh/wire") view=pages::Wire />
+                    <Route path=path!("/fr/wire") view=pages::WireFr />
                     <Route path=path!("/gaggle/:slug") view=pages::Gaggle ssr=SsrMode::Async />
-                    <Route path=path!("/desk") view=pages::Desk />
-                    <Route path=path!("/section/:category") view=pages::Section />
+                    <Route path=path!("/zh/gaggle/:slug") view=pages::Gaggle ssr=SsrMode::Async />
+                    <Route path=path!("/fr/gaggle/:slug") view=pages::Gaggle ssr=SsrMode::Async />
+                    <Route path=path!("/desk") view=pages::DeskEn />
+                    <Route path=path!("/zh/desk") view=pages::Desk />
+                    <Route path=path!("/fr/desk") view=pages::DeskFr />
+                    <Route path=path!("/section/:category") view=pages::SectionEn />
+                    <Route path=path!("/zh/section/:category") view=pages::Section />
+                    <Route path=path!("/fr/section/:category") view=pages::SectionFr />
                     // The one route that must not stream out of order.
                     //
                     // A story's `og:image`, `og:title` and JSON-LD all depend on
@@ -112,7 +135,9 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/flock") view=pages::Flock />
                     <Route path=path!("/prices") view=pages::Prices />
                     <Route path=path!("/asset/:ticker") view=pages::Asset />
-                    <Route path=path!("/flyway") view=pages::Flyway />
+                    <Route path=path!("/flyway") view=pages::FlywayEn />
+                    <Route path=path!("/zh/flyway") view=pages::Flyway />
+                    <Route path=path!("/fr/flyway") view=pages::FlywayFr />
                     <Route path=path!("/standards") view=pages::Standards />
                     <Route path=path!("/developers") view=pages::Developers />
                 </Routes>

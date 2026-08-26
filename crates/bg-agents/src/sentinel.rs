@@ -1,6 +1,6 @@
 //! **Sentinel** — checks every claim against every source.
 //!
-//! Top tier, and the most important agent in the newsroom. Everything BitGoose
+//! Top tier, and the most important agent in the newsroom. Everything VictoriaPark
 //! claims to offer over a conventional aggregator rests on the confidence
 //! numbers this agent assigns, so it runs on the strongest model available and
 //! is the one place where being slow and expensive is the correct trade.
@@ -116,6 +116,14 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<usize> {
         return Ok(0);
     }
     let items = bg_db::items::by_story(&ctx.db, story).await?;
+    let output_language = items
+        .first()
+        .map(|it| {
+            crate::output_language(bg_core::domain::EditorialLanguage::from_source_lang(
+                &it.lang,
+            ))
+        })
+        .unwrap_or("zh");
     let counts: HashMap<_, _> = bg_db::claims::source_counts(&ctx.db, story)
         .await?
         .into_iter()
@@ -128,7 +136,7 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<usize> {
         Some(story),
         "verify",
         |_run| async move {
-            let mut prompt = String::from("Source material:\n\n");
+            let mut prompt = format!("OUTPUT_LANGUAGE={output_language}\n\nSource material:\n\n");
             for (i, it) in items.iter().enumerate() {
                 prompt.push_str(&format!("=== SOURCE [{i}] ===\n{}\n", it.title));
                 if let Some(b) = it.body_raw.as_deref().or(it.summary_raw.as_deref()) {

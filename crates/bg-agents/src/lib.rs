@@ -535,6 +535,15 @@ explained again.
 6. If the material does not support a story, say so. An empty result is a valid \
 answer and is better than a padded one.";
 
+/// Independent edition requested for every language-capable model stage.
+pub const fn output_language(lang: bg_core::domain::EditorialLanguage) -> &'static str {
+    match lang {
+        bg_core::domain::EditorialLanguage::En => "en",
+        bg_core::domain::EditorialLanguage::Zh => "zh",
+        bg_core::domain::EditorialLanguage::Fr => "fr",
+    }
+}
+
 /// How much latitude each role gets. Extraction and judgement run at zero;
 /// only the roles that choose words are allowed any.
 ///

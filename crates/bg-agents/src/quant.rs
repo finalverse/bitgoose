@@ -62,6 +62,7 @@ pub struct MarketContext {
 
 pub async fn run(ctx: &Ctx, story: StoryId) -> Result<MarketContext> {
     let s = bg_db::stories::by_id(&ctx.db, story).await?;
+    let output_language = crate::output_language(s.editorial_language);
     let claims = bg_db::claims::by_story(&ctx.db, story).await?;
     let system = crate::system_prompt(ctx, AgentRole::Quant).await;
 
@@ -71,7 +72,10 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<MarketContext> {
         Some(story),
         "market",
         |_run| async move {
-            let mut prompt = format!("Story: {}\n\nClaims:\n", s.title);
+            let mut prompt = format!(
+                "OUTPUT_LANGUAGE={output_language}\n\nStory: {}\n\nClaims:\n",
+                s.title
+            );
             for c in &claims {
                 prompt.push_str(&format!("- {}\n", c.text));
             }

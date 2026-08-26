@@ -180,6 +180,18 @@ pub struct GaggleCard {
     pub sources: i32,
     pub stories: i32,
     pub model: String,
+    pub language: String,
+    pub pinned: bool,
+    pub analysis_html: String,
+    pub watchpoints: Vec<String>,
+    pub primary_sources: Vec<TopicSource>,
+    pub last_updated: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TopicSource {
+    pub name: String,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -303,6 +315,7 @@ pub struct SourceHealthRow {
 pub struct FlywayPage {
     pub categories: Vec<CategoryTrend>,
     pub entities: Vec<(String, String, i64)>,
+    pub topics: Vec<GaggleCard>,
     pub days: i32,
 }
 

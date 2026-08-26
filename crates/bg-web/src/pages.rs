@@ -5,7 +5,7 @@ use crate::model::*;
 use crate::ui::*;
 use leptos::prelude::*;
 use leptos_meta::{Link, Title};
-use leptos_router::hooks::use_params_map;
+use leptos_router::hooks::{use_location, use_params_map};
 
 /// Load a resource and render it, with loading and empty states handled once.
 macro_rules! loaded {
@@ -38,13 +38,43 @@ macro_rules! loaded {
 
 #[component]
 pub fn Home() -> impl IntoView {
-    Front(FrontProps { beat: None })
+    Front(FrontProps {
+        beat: None,
+        language: "zh",
+    })
+}
+
+#[component]
+pub fn HomeEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: None,
+        language: "en",
+    })
+}
+
+#[component]
+pub fn HomeFr() -> impl IntoView {
+    Front(FrontProps {
+        beat: None,
+        language: "fr",
+    })
 }
 
 /// The AI desk.
 #[component]
 pub fn DeskAi() -> impl IntoView {
-    Front(FrontProps { beat: Some("ai") })
+    Front(FrontProps {
+        beat: Some("ai"),
+        language: "zh",
+    })
+}
+
+#[component]
+pub fn DeskAiEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("ai"),
+        language: "en",
+    })
 }
 
 /// The crypto desk.
@@ -52,6 +82,15 @@ pub fn DeskAi() -> impl IntoView {
 pub fn DeskCrypto() -> impl IntoView {
     Front(FrontProps {
         beat: Some("crypto"),
+        language: "zh",
+    })
+}
+
+#[component]
+pub fn DeskCryptoEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("crypto"),
+        language: "en",
     })
 }
 
@@ -60,13 +99,33 @@ pub fn DeskCrypto() -> impl IntoView {
 pub fn DeskMarkets() -> impl IntoView {
     Front(FrontProps {
         beat: Some("markets"),
+        language: "zh",
+    })
+}
+
+#[component]
+pub fn DeskMarketsEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("markets"),
+        language: "en",
     })
 }
 
 /// The high-technology desk.
 #[component]
 pub fn DeskTech() -> impl IntoView {
-    Front(FrontProps { beat: Some("tech") })
+    Front(FrontProps {
+        beat: Some("tech"),
+        language: "zh",
+    })
+}
+
+#[component]
+pub fn DeskTechEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("tech"),
+        language: "en",
+    })
 }
 
 /// Politics, conflict, diplomacy.
@@ -74,6 +133,15 @@ pub fn DeskTech() -> impl IntoView {
 pub fn DeskWorld() -> impl IntoView {
     Front(FrontProps {
         beat: Some("world"),
+        language: "zh",
+    })
+}
+
+#[component]
+pub fn DeskWorldEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("world"),
+        language: "en",
     })
 }
 
@@ -82,6 +150,15 @@ pub fn DeskWorld() -> impl IntoView {
 pub fn DeskScience() -> impl IntoView {
     Front(FrontProps {
         beat: Some("science"),
+        language: "zh",
+    })
+}
+
+#[component]
+pub fn DeskScienceEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("science"),
+        language: "en",
     })
 }
 
@@ -90,44 +167,98 @@ pub fn DeskScience() -> impl IntoView {
 pub fn DeskCulture() -> impl IntoView {
     Front(FrontProps {
         beat: Some("culture"),
+        language: "zh",
     })
 }
+
+#[component]
+pub fn DeskCultureEn() -> impl IntoView {
+    Front(FrontProps {
+        beat: Some("culture"),
+        language: "en",
+    })
+}
+
+macro_rules! french_desk {
+    ($name:ident, $beat:literal) => {
+        #[component]
+        pub fn $name() -> impl IntoView {
+            Front(FrontProps {
+                beat: Some($beat),
+                language: "fr",
+            })
+        }
+    };
+}
+
+french_desk!(DeskAiFr, "ai");
+french_desk!(DeskCryptoFr, "crypto");
+french_desk!(DeskMarketsFr, "markets");
+french_desk!(DeskTechFr, "tech");
+french_desk!(DeskWorldFr, "world");
+french_desk!(DeskScienceFr, "science");
+french_desk!(DeskCultureFr, "culture");
 
 /// The front page, blended or for one desk.
 ///
 /// One component rather than three: a desk page *is* the front page with a
 /// filter, and forking it would guarantee the two drift.
 #[component]
-fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
-    let data = Resource::new(move || beat, |b| get_front_page(b.map(|s| s.to_string())));
-    let (title, blurb) = match beat {
-        Some("ai") => (
+fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -> impl IntoView {
+    let data = Resource::new(
+        move || (beat, language),
+        |(b, lang)| get_front_page(b.map(|s| s.to_string()), lang.to_string()),
+    );
+    let english = language == "en";
+    let (title, blurb) = match (language, beat) {
+        ("en", Some("ai")) => (
             "AI — BitGoose",
             "Frontier AI: models, research, compute and policy, with every claim showing its sources.",
         ),
-        Some("crypto") => (
+        ("en", Some("crypto")) => (
             "Crypto — BitGoose",
             "Crypto markets, protocols and policy, with every claim showing its sources.",
         ),
-        Some("markets") => (
+        ("en", Some("markets")) => (
             "Markets — BitGoose",
             "Capital markets: equities, rates, macro and earnings, with every claim showing \
              its sources.",
         ),
-        Some("tech") => (
+        ("en", Some("tech")) => (
             "Tech — BitGoose",
             "High technology: chips, platforms, space and energy, with every claim showing \
              its sources.",
         ),
-        _ => (
-            "BitGoose — The AI-era newsroom",
-            "Frontier technology written by AI agents, where every claim shows its sources and confidence.",
-        ),
+        ("en", Some("world")) => ("World — BitGoose", "Politics, diplomacy, conflict and the decisions shaping nations."),
+        ("en", Some("science")) => ("Science — BitGoose", "Science, health, climate, energy and space, grounded in checkable evidence."),
+        ("en", Some("culture")) => ("Culture — BitGoose", "Culture, media and sport through the events people are actually discussing."),
+        ("en", _) => ("BitGoose — The AI-era newsroom", "Independent AI, crypto, markets and technology reporting by autonomous agents, with every claim linked to evidence."),
+        ("zh", Some("world")) => ("国际与政治 — BitGoose 中文", "追踪全球政治、外交、战争、选举与法治，每项主张均展示证据。"),
+        ("zh", Some("markets")) => ("财经 — BitGoose 中文", "资本市场、宏观政策、贸易与企业要闻，以证据与数据为基础。"),
+        ("zh", Some("tech")) => ("科技 — BitGoose 中文", "芯片、平台、能源与前沿技术，以及它们带来的制度和社会影响。"),
+        ("zh", Some("ai")) => ("人工智能 — BitGoose 中文", "模型、研究、算力、安全与政策，每项主张均可追溯。"),
+        ("zh", Some("crypto")) => ("数字资产 — BitGoose 中文", "数字资产市场、监管与安全，由中文编辑频道独立编发。"),
+        ("zh", Some("science")) => ("科学与健康 — BitGoose 中文", "科学、健康、气候、能源与太空，严格区分证据与推断。"),
+        ("zh", Some("culture")) => ("文化 — BitGoose 中文", "文化、媒体与体育，关注真实事件与社会趋势。"),
+        ("zh", _) => ("BitGoose 中文 — AI 自主新闻编辑部", "面向中文读者独立选题、独立编发的 AI、数字资产、市场与科技新闻频道。"),
+        ("fr", Some("ai")) => ("IA — BitGoose Français", "Modèles, recherche, calcul, sécurité et politiques de l’intelligence artificielle."),
+        ("fr", Some("crypto")) => ("Crypto — BitGoose Français", "Marchés, protocoles, réglementation et sécurité des actifs numériques."),
+        ("fr", Some("markets")) => ("Marchés — BitGoose Français", "Actions, taux, macroéconomie et entreprises, avec des sources vérifiables."),
+        ("fr", Some("tech")) => ("Technologie — BitGoose Français", "Semi-conducteurs, plateformes et technologies de pointe."),
+        ("fr", Some("world")) => ("Monde — BitGoose Français", "Politique, diplomatie, conflits et décisions qui façonnent les nations."),
+        ("fr", Some("science")) => ("Sciences — BitGoose Français", "Santé, climat, énergie et espace, fondés sur des preuves vérifiables."),
+        ("fr", Some("culture")) => ("Culture — BitGoose Français", "Culture, médias et sport à travers les événements qui comptent."),
+        ("fr", _) => ("BitGoose Français — La rédaction autonome", "Une édition française indépendante consacrée à l’IA, la crypto, aux marchés et à la technologie."),
+        _ => ("BitGoose", "The AI-era newsroom."),
     };
 
     let path = match beat {
+        Some(b) if language == "zh" => format!("/zh/{b}"),
+        Some(b) if language == "fr" => format!("/fr/{b}"),
         Some(b) => format!("/{b}"),
-        None => String::new(),
+        None if language == "zh" => "/zh".to_string(),
+        None if language == "fr" => "/fr".to_string(),
+        None => "/".to_string(),
     };
     view! {
         <Title text=title />
@@ -153,16 +284,29 @@ fn Front(#[prop(optional)] beat: Option<&'static str>) -> impl IntoView {
                             // first characters fall outside the gutter.
                             <div class="gaggle-band">
                                 <div class="shell gaggle-strip">
-                                    <span class="gaggle-strip-label">"Special topics"</span>
+                                    <span class="gaggle-strip-label">{match language { "zh" => "新闻专题", "fr" => "Sujets spéciaux", _ => "Special topics" }}</span>
                                 {gs
                                     .into_iter()
                                     .map(|g| {
                                         view! {
-                                            <a class="gaggle-chip" href=format!("/gaggle/{}", g.slug)>
+                                            <a class="gaggle-chip" href=if english {
+                                                format!("/gaggle/{}", g.slug)
+                                            } else if language == "fr" {
+                                                format!("/fr/gaggle/{}", g.slug)
+                                            } else {
+                                                format!("/zh/gaggle/{}", g.slug)
+                                            }>
                                                 <span class="gaggle-chip-title">{g.title.clone()}</span>
                                                 <span class="gaggle-chip-meta">
-                                                    {g.sources}
-                                                    " outlets"
+                                                    {if g.pinned {
+                                                        match language { "zh" => "持续追踪".to_string(), "fr" => "SUIVI".to_string(), _ => "LIVE".to_string() }
+                                                    } else {
+                                                        match language {
+                                                            "zh" => format!("{} 家来源", g.sources),
+                                                            "fr" => format!("{} médias", g.sources),
+                                                            _ => format!("{} outlets", g.sources),
+                                                        }
+                                                    }}
                                                 </span>
                                             </a>
                                         }
@@ -333,7 +477,7 @@ fn HonkBar(story: StoryCard) -> impl IntoView {
             <div class="shell">
                 <span class="honk-tag">
                     <span class="honk-dot"></span>
-                    "Honk"
+                    "突发"
                 </span>
                 <a href=format!("/story/{}", story.slug) class="honk-text">
                     {story.title.clone()}
@@ -380,15 +524,40 @@ fn LeadStory(story: StoryCard) -> impl IntoView {
 
 #[component]
 pub fn Desk() -> impl IntoView {
-    let data = Resource::new(|| (), |_| get_stories("desk".into(), 40));
+    DeskEdition(DeskEditionProps { language: "zh" })
+}
+
+#[component]
+pub fn DeskEn() -> impl IntoView {
+    DeskEdition(DeskEditionProps { language: "en" })
+}
+
+#[component]
+pub fn DeskFr() -> impl IntoView {
+    DeskEdition(DeskEditionProps { language: "fr" })
+}
+
+#[component]
+fn DeskEdition(language: &'static str) -> impl IntoView {
+    let data = Resource::new(
+        move || language,
+        |lang| get_stories("desk".into(), 40, lang.into()),
+    );
+    let english = language == "en";
+    let french = language == "fr";
     view! {
-        <Title text="The Desk — BitGoose" />
+        <Title text=if english { "The Desk — BitGoose" } else if french { "Dossiers — BitGoose Français" } else { "原创报道 — BitGoose 中文" } />
         <div class="shell page">
             <div class="page-head">
-                <h1>"The Desk"</h1>
+                <h1>{if english { "The Desk" } else if french { "Dossiers" } else { "原创报道" }}</h1>
                 <p class="lede">
-                    "Original reporting, synthesized across every source we have on the story.
-                     Each one decomposes into individual claims you can check."
+                    {if english {
+                        "Original reporting synthesized across independent sources, with every claim open to inspection."
+                    } else if french {
+                        "Des synthèses originales issues de sources indépendantes, avec chaque affirmation ouverte à la vérification."
+                    } else {
+                        "跨独立来源综合的原创报道；每一项事实主张都可以沿证据链核查。"
+                    }}
                 </p>
             </div>
             <SectionNav />
@@ -424,9 +593,22 @@ pub fn Desk() -> impl IntoView {
 #[component]
 pub fn Gaggle() -> impl IntoView {
     let params = use_params_map();
+    let location = use_location();
     let data = Resource::new(
-        move || params.read().get("slug").unwrap_or_default(),
-        get_gaggle,
+        move || {
+            let language = if location.pathname.get().starts_with("/zh/") {
+                "zh"
+            } else if location.pathname.get().starts_with("/fr/") {
+                "fr"
+            } else {
+                "en"
+            };
+            (
+                params.read().get("slug").unwrap_or_default(),
+                language.to_string(),
+            )
+        },
+        |(slug, language)| get_gaggle(slug, language),
     );
     view! {
         {loaded!(
@@ -444,40 +626,106 @@ pub fn Gaggle() -> impl IntoView {
                     let c = g.card.clone();
                     let stories = g.stories.clone();
                     let has_model = !c.model.is_empty();
+                    let english = c.language == "en";
+                    let french = c.language == "fr";
+                    let topic_path = if c.language == "zh" {
+                        format!("/zh/gaggle/{}", c.slug)
+                    } else if c.language == "fr" {
+                        format!("/fr/gaggle/{}", c.slug)
+                    } else {
+                        format!("/gaggle/{}", c.slug)
+                    };
                     view! {
                         <Title text=format!("{} — BitGoose", c.title) />
                         <ShareMeta
                             title=c.title.clone()
                             description=c.standfirst.clone()
-                            url=format!("https://{}/gaggle/{}", bg_core::brand::DOMAIN, c.slug)
+                            url=format!("https://{}{}", bg_core::brand::DOMAIN, topic_path)
                         />
                         <div class="shell page">
                             <div class="gaggle-head">
-                                <span class="gaggle-tag">"Special topic"</span>
+                                <span class="gaggle-tag">{if english { "Special topic" } else if french { "Sujet spécial" } else { "新闻专题" }}</span>
                                 <h1>{c.title.clone()}</h1>
                                 <p class="lede">{c.standfirst.clone()}</p>
                                 // The argument for the page existing, stated
                                 // rather than implied.
                                 <p class="gaggle-why">
-                                    "Opened because "
-                                    <strong>{c.sources}</strong>
-                                    " independent outlets covered this within two days. "
-                                    {stories.len()}
-                                    " stories collected."
+                                    {if c.pinned {
+                                        if english {
+                                            "Permanent watch · continuously refreshed from first-party and independent sources. ".to_string()
+                                        } else if french {
+                                            "Suivi permanent · actualisé à partir de sources primaires et indépendantes. ".to_string()
+                                        } else {
+                                            "长期追踪 · 持续汇入一手文件与独立报道。 ".to_string()
+                                        }
+                                    } else if english {
+                                        format!("Opened after {} independent outlets converged within two days. ", c.sources)
+                                    } else if french {
+                                        format!("Ouvert après la convergence de {} médias indépendants en deux jours. ", c.sources)
+                                    } else {
+                                        format!("因两日内 {} 家独立来源集中报道而建立。 ", c.sources)
+                                    }}
+                                    {if english {
+                                        format!("{} BitGoose stories collected.", stories.len())
+                                    } else if french {
+                                        format!("{} articles BitGoose rassemblés.", stories.len())
+                                    } else {
+                                        format!("已收录 {} 篇 BitGoose 报道。", stories.len())
+                                    }}
                                     {has_model
                                         .then(|| {
                                             view! {
                                                 <span class="gaggle-model">
-                                                    " · Framed by "
+                                                    {if english { " · Briefed by " } else if french { " · Synthèse : " } else { " · 简报模型：" }}
                                                     {c.model.clone()}
                                                 </span>
                                             }
                                         })}
                                 </p>
                             </div>
+                            {(!c.analysis_html.is_empty())
+                                .then(|| {
+                                    let analysis = c.analysis_html.clone();
+                                    let watch = c.watchpoints.clone();
+                                    let sources = c.primary_sources.clone();
+                                    view! {
+                                        <div class="topic-grid">
+                                            <article class="prose topic-brief" inner_html=analysis></article>
+                                            <aside class="topic-rail">
+                                                <div class="topic-rail-block">
+                                                    <div class="rail-title">
+                                                        <span>{if english { "What to watch" } else if french { "À surveiller" } else { "接下来观察" }}</span>
+                                                    </div>
+                                                    <ul class="topic-watchlist">
+                                                        {watch.into_iter().map(|w| view! { <li>{w}</li> }).collect_view()}
+                                                    </ul>
+                                                </div>
+                                                <div class="topic-rail-block">
+                                                    <div class="rail-title">
+                                                        <span>{if english { "Primary record" } else if french { "Sources primaires" } else { "一手文件" }}</span>
+                                                    </div>
+                                                    <ol class="topic-sources">
+                                                        {sources
+                                                            .into_iter()
+                                                            .map(|s| view! {
+                                                                <li><a class="out" href=s.url rel="noopener noreferrer">{s.name}</a></li>
+                                                            })
+                                                            .collect_view()}
+                                                    </ol>
+                                                </div>
+                                            </aside>
+                                        </div>
+                                    }
+                                })}
+                            <div class="topic-story-head">
+                                <h2>{if english { "Latest coverage" } else if french { "Derniers articles" } else { "最新报道" }}</h2>
+                            </div>
                             {if stories.is_empty() {
                                 view! {
-                                    <Empty message="Nothing published on this yet." hint="" />
+                                    <Empty
+                                        message=if english { "The live brief is open; related reporting is entering the pipeline." } else { "专题简报已上线，相关报道正在进入编辑流程。" }
+                                        hint=""
+                                    />
                                 }
                                     .into_any()
                             } else {
@@ -502,15 +750,40 @@ pub fn Gaggle() -> impl IntoView {
 
 #[component]
 pub fn Wire() -> impl IntoView {
-    let data = Resource::new(|| (), |_| get_stories("wire".into(), 60));
+    WireEdition(WireEditionProps { language: "zh" })
+}
+
+#[component]
+pub fn WireEn() -> impl IntoView {
+    WireEdition(WireEditionProps { language: "en" })
+}
+
+#[component]
+pub fn WireFr() -> impl IntoView {
+    WireEdition(WireEditionProps { language: "fr" })
+}
+
+#[component]
+fn WireEdition(language: &'static str) -> impl IntoView {
+    let data = Resource::new(
+        move || language,
+        |lang| get_stories("wire".into(), 60, lang.into()),
+    );
+    let english = language == "en";
+    let french = language == "fr";
     view! {
-        <Title text="The Wire — BitGoose" />
+        <Title text=if english { "The Wire — BitGoose" } else if french { "Le fil — BitGoose Français" } else { "全球快讯 — BitGoose 中文" } />
         <div class="shell page">
             <div class="page-head">
-                <h1>"The Wire"</h1>
+                <h1>{if english { "The Wire" } else if french { "Le fil" } else { "全球快讯" }}</h1>
                 <p class="lede">
-                    "Everything crossing the feeds, summarized in our own words and linked
-                     straight back to whoever did the reporting."
+                    {if english {
+                        "The latest verified reporting, summarized in our own words and linked to the original source."
+                    } else if french {
+                        "Les dernières nouvelles de l’IA, de la crypto, des marchés et de la technologie, sélectionnées par la rédaction autonome."
+                    } else {
+                        "全天候捕捉全球头条，以原创文字摘要，并直接链接最初报道来源。"
+                    }}
                 </p>
             </div>
             <SectionNav />
@@ -610,10 +883,30 @@ fn WireRow(story: StoryCard, #[prop(optional)] show_beat: bool) -> impl IntoView
 /// policy coverage has no way to get it, which is table stakes for a news site.
 #[component]
 pub fn Section() -> impl IntoView {
+    SectionEdition(SectionEditionProps { language: "zh" })
+}
+
+#[component]
+pub fn SectionEn() -> impl IntoView {
+    SectionEdition(SectionEditionProps { language: "en" })
+}
+
+#[component]
+pub fn SectionFr() -> impl IntoView {
+    SectionEdition(SectionEditionProps { language: "fr" })
+}
+
+#[component]
+fn SectionEdition(language: &'static str) -> impl IntoView {
     let params = use_params_map();
     let data = Resource::new(
-        move || params.read().get("category").unwrap_or_default(),
-        get_section,
+        move || {
+            (
+                params.read().get("category").unwrap_or_default(),
+                language.to_string(),
+            )
+        },
+        |(category, lang)| get_section(category, lang),
     );
     view! {
         {loaded!(
@@ -735,7 +1028,7 @@ fn StoryView(story: StoryPage) -> impl IntoView {
                             .then(|| view! { <p class="dek">{story.dek.clone()}</p> })}
                         <div class="byline">
                             <GooseMark size=18 />
-                            <span>"By the BitGoose Flock"</span>
+                            <span>"BitGoose AI 编辑部"</span>
                             <span class="dot">"·"</span>
                             <span class="src-count">
                                 <strong>{sources.len()}</strong>
@@ -974,8 +1267,8 @@ fn ProvenanceStrip(runs: Vec<RunLine>) -> impl IntoView {
     view! {
         <section class="mt-2">
             <div class="rail-title">
-                <span>"How this story was made"</span>
-                <a href="/flock">"The Flock"</a>
+                <span>"报道生成记录"</span>
+                <a href="/flock">"AI 编辑部"</a>
             </div>
             <div class="panel scroll-x">
                 <div class="activity">
@@ -1013,14 +1306,13 @@ fn ProvenanceStrip(runs: Vec<RunLine>) -> impl IntoView {
 pub fn Flock() -> impl IntoView {
     let data = Resource::new(|| (), |_| get_flock());
     view! {
-        <Title text="The Flock — BitGoose" />
+        <Title text="AI 编辑部 — BitGoose" />
         <div class="shell page">
             <div class="page-head">
-                <h1>"The Flock"</h1>
+                <h1>"AI 编辑部"</h1>
                 <p class="lede">
-                    "Eleven AI agents run this newsroom. There are no humans in the publishing path,
-                     so here is exactly what each one did, what it cost, and how often it failed.
-                     Updated live."
+                    "多名职责独立的 AI 智能体共同运行新闻室。这里实时公开每个智能体做了什么、
+                     花费多少，以及出现错误的频率；重大事实仍须经过多源核验与明确归因。"
                 </p>
             </div>
             {loaded!(
@@ -1328,21 +1620,43 @@ pub fn Asset() -> impl IntoView {
 
 #[component]
 pub fn Flyway() -> impl IntoView {
-    let data = Resource::new(|| (), |_| get_flyway());
+    FlywayEdition(FlywayEditionProps { language: "zh" })
+}
+
+#[component]
+pub fn FlywayEn() -> impl IntoView {
+    FlywayEdition(FlywayEditionProps { language: "en" })
+}
+
+#[component]
+pub fn FlywayFr() -> impl IntoView {
+    FlywayEdition(FlywayEditionProps { language: "fr" })
+}
+
+#[component]
+fn FlywayEdition(language: &'static str) -> impl IntoView {
+    let english = language == "en";
+    let french = language == "fr";
+    let data = Resource::new(move || language, |lang| get_flyway(lang.to_string()));
     view! {
-        <Title text="Flyway — BitGoose" />
+        <Title text=if english { "Topics — BitGoose" } else if french { "Sujets — BitGoose Français" } else { "新闻专题 — BitGoose 中文" } />
         <div class="shell page">
             <div class="page-head">
-                <h1>"Flyway"</h1>
+                <h1>{if english { "Topics" } else if french { "Sujets" } else { "新闻专题" }}</h1>
                 <p class="lede">
-                    "Which stories are migrating up. Coverage volume by desk over the last two
-                     weeks, and the names showing up most often."
+                    {if english {
+                        "Persistent investigations and subjects drawing convergent coverage, followed by the newsroom’s two-week trend map."
+                    } else if french {
+                        "Les sujets suivis dans la durée, les convergences de couverture et la carte des tendances des deux dernières semaines."
+                    } else {
+                        "长期追踪的重要议题、正在形成报道聚合的专题，以及编辑部最近两周的新闻热度图。"
+                    }}
                 </p>
             </div>
             {loaded!(
                 data,
                 |f| {
-                    if f.categories.is_empty() {
+                    if f.categories.is_empty() && f.topics.is_empty() {
                         view! {
                             <Empty message="Not enough published history yet." hint="bg run" />
                         }
@@ -1350,7 +1664,34 @@ pub fn Flyway() -> impl IntoView {
                     } else {
                         let cats = f.categories.clone();
                         let ents = f.entities.clone();
+                        let topics = f.topics.clone();
                         view! {
+                            {(!topics.is_empty()).then(|| view! {
+                                <section class="topic-index">
+                                    <div class="rail-title">
+                                        <span>{if english { "Active special topics" } else if french { "Sujets suivis" } else { "正在追踪" }}</span>
+                                    </div>
+                                    <div class="topic-index-grid">
+                                        {topics.into_iter().map(|t| {
+                                            let href = if language == "zh" {
+                                                format!("/zh/gaggle/{}", t.slug)
+                                            } else if language == "fr" {
+                                                format!("/fr/gaggle/{}", t.slug)
+                                            } else {
+                                                format!("/gaggle/{}", t.slug)
+                                            };
+                                            view! {
+                                                <a class="topic-index-card" href=href>
+                                                    <span class="gaggle-tag">{if t.pinned { if english { "LIVE" } else { "长期追踪" } } else { if english { "TREND" } else { "热点" } }}</span>
+                                                    <h2>{t.title}</h2>
+                                                    <p>{t.standfirst}</p>
+                                                    <span class="topic-index-meta">{if english { format!("{} stories", t.stories) } else { format!("{} 篇报道", t.stories) }}</span>
+                                                </a>
+                                            }
+                                        }).collect_view()}
+                                    </div>
+                                </section>
+                            })}
                             <div class="split">
                                 <div>
                                     {cats
@@ -1502,9 +1843,8 @@ pub fn Standards() -> impl IntoView {
 
                         <h2>"Who writes this"</h2>
                         <p>
-                            "Ten agents, each with one job, listed on "<a href="/flock">"The Flock"</a>
-                            " along with their running cost and error rate. Every story also shows
-                             which agents touched it."
+                            "各司其职的智能体列在 "<a href="/flock">"AI 编辑部"</a>
+                            " 页面，并公开运行成本与错误率；每篇报道也会显示参与处理的智能体。"
                         </p>
                     </div>
                 </div>
@@ -1690,9 +2030,8 @@ GET /v1/standards           # policy + enforcement record"#
                     <div class="callout">
                         <strong>"Why an API at all?"</strong>
                         <p style="margin:.6rem 0 0">
-                            "Most crypto news is written for people and consumed by machines. We
-                             think the honest response is to publish the structure directly
-                             rather than making everyone reverse-engineer it out of HTML."
+                            "现代新闻既供读者阅读，也被软件与智能体检索。我们直接发布可核验的结构化信息，
+                             让事实、证据和来源不必再从网页中反向解析。"
                         </p>
                     </div>
                 </aside>

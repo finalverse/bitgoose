@@ -95,7 +95,12 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
         title: s.title.clone(),
         dek: s.summary.clone().unwrap_or_default(),
         category: s.category.as_str().into(),
-        category_label: s.category.label().into(),
+        category_label: match s.editorial_language {
+            bg_core::domain::EditorialLanguage::Zh => s.category.label_zh(),
+            bg_core::domain::EditorialLanguage::En => s.category.label(),
+            bg_core::domain::EditorialLanguage::Fr => s.category.label_fr(),
+        }
+        .into(),
         source_count: s.source_count,
         newsworthiness: s.newsworthiness,
         published_at: s.published_at.map(|d| d.to_rfc3339()).unwrap_or_default(),
@@ -171,13 +176,20 @@ pub(crate) fn render_body(md: &str) -> String {
 /// an unrecognised value blends rather than erroring, so a stale or hand-typed
 /// URL degrades to the full front page instead of a 500.
 #[server(name = GetFrontPage, prefix = "/rpc")]
-pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnError> {
+pub async fn get_front_page(
+    beat: Option<String>,
+    language: String,
+) -> Result<FrontPage, ServerFnError> {
     use std::str::FromStr;
     let beat = beat
         .as_deref()
         .and_then(|b| bg_core::domain::Beat::from_str(b).ok());
+    let language = bg_core::domain::EditorialLanguage::from_str(&language)
+        .unwrap_or(bg_core::domain::EditorialLanguage::En);
     let db = db();
-    let ranked = bg_db::stories::front_page(db, beat, 40).await.map_err(e)?;
+    let ranked = bg_db::stories::front_page_for_language(db, beat, language, 40)
+        .await
+        .map_err(e)?;
 
     // The lead is the best story on the site right now, whatever form it took.
     //
@@ -214,7 +226,9 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
         .map(|s| card(s, None))
         .collect();
 
-    let wire_entries = bg_db::stories::wire(db, beat, 14, 0).await.map_err(e)?;
+    let wire_entries = bg_db::stories::wire_for_language(db, beat, language, 14, 0)
+        .await
+        .map_err(e)?;
     let mut wire: Vec<StoryCard> = wire_entries
         .iter()
         .filter(|w| Some(&w.slug) != lead.as_ref().map(|l| &l.slug))
@@ -285,7 +299,7 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
     // Live only — a topic nobody has written about for two days is an archive
     // page, not a special topic, and offering it as one is how a news site ends
     // up looking abandoned.
-    let gaggles: Vec<GaggleCard> = bg_db::gaggles::live(db, 48, 3)
+    let gaggles: Vec<GaggleCard> = bg_db::gaggles::live_for_language(db, language, 48, 3)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -296,6 +310,20 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
             sources: g.source_count,
             stories: g.story_count,
             model: g.model.unwrap_or_default(),
+            language: g.editorial_language,
+            pinned: g.pinned,
+            analysis_html: render_body(&g.analysis_md),
+            watchpoints: g.watchpoints,
+            primary_sources: g
+                .primary_source_names
+                .into_iter()
+                .zip(g.primary_source_urls)
+                .map(|(name, url)| TopicSource { name, url })
+                .collect(),
+            last_updated: g
+                .last_briefed_at
+                .map(|at| at.to_rfc3339())
+                .unwrap_or_default(),
         })
         .collect();
 
@@ -314,12 +342,20 @@ pub async fn get_front_page(beat: Option<String>) -> Result<FrontPage, ServerFnE
 // ---------------------------------------------------------------------------
 
 #[server(name = GetStories, prefix = "/rpc")]
-pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, ServerFnError> {
+pub async fn get_stories(
+    kind: String,
+    limit: i64,
+    language: String,
+) -> Result<Vec<StoryCard>, ServerFnError> {
     use std::str::FromStr;
     let db = db();
+    let language = bg_core::domain::EditorialLanguage::from_str(&language)
+        .unwrap_or(bg_core::domain::EditorialLanguage::En);
     let k = bg_core::domain::StoryKind::from_str(&kind).ok();
     if k == Some(bg_core::domain::StoryKind::Wire) {
-        let entries = bg_db::stories::wire(db, None, limit, 0).await.map_err(e)?;
+        let entries = bg_db::stories::wire_for_language(db, None, language, limit, 0)
+            .await
+            .map_err(e)?;
         let mut cards: Vec<StoryCard> = entries
             .iter()
             .map(|w| StoryCard {
@@ -349,7 +385,7 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
         flag_analysis_wire(db, &entries, &mut cards).await;
         return Ok(cards);
     }
-    let stories = bg_db::stories::published(db, k, limit, 0)
+    let stories = bg_db::stories::published_for_language(db, k, language, limit, 0)
         .await
         .map_err(e)?;
     let mut cards: Vec<StoryCard> = stories.iter().map(|s| card(s, None)).collect();
@@ -358,12 +394,23 @@ pub async fn get_stories(kind: String, limit: i64) -> Result<Vec<StoryCard>, Ser
 }
 
 #[server(name = GetGaggle, prefix = "/rpc")]
-pub async fn get_gaggle(slug: String) -> Result<Option<GagglePage>, ServerFnError> {
+pub async fn get_gaggle(
+    slug: String,
+    language: String,
+) -> Result<Option<GagglePage>, ServerFnError> {
+    use std::str::FromStr;
     let db = db();
-    let Some(g) = bg_db::gaggles::by_slug(db, &slug).await.map_err(e)? else {
+    let language = bg_core::domain::EditorialLanguage::from_str(&language)
+        .unwrap_or(bg_core::domain::EditorialLanguage::En);
+    let Some(g) = bg_db::gaggles::by_slug(db, &slug, language)
+        .await
+        .map_err(e)?
+    else {
         return Ok(None);
     };
-    let ids = bg_db::gaggles::story_ids(db, &slug).await.map_err(e)?;
+    let ids = bg_db::gaggles::story_ids(db, &slug, language)
+        .await
+        .map_err(e)?;
 
     let mut stories = Vec::with_capacity(ids.len());
     for id in &ids {
@@ -382,18 +429,39 @@ pub async fn get_gaggle(slug: String) -> Result<Option<GagglePage>, ServerFnErro
             sources: g.source_count,
             stories: g.story_count,
             model: g.model.unwrap_or_default(),
+            language: g.editorial_language,
+            pinned: g.pinned,
+            analysis_html: render_body(&g.analysis_md),
+            watchpoints: g.watchpoints,
+            primary_sources: g
+                .primary_source_names
+                .into_iter()
+                .zip(g.primary_source_urls)
+                .map(|(name, url)| TopicSource { name, url })
+                .collect(),
+            last_updated: g
+                .last_briefed_at
+                .map(|at| at.to_rfc3339())
+                .unwrap_or_default(),
         },
         stories: cards,
     }))
 }
 
 #[server(name = GetSection, prefix = "/rpc")]
-pub async fn get_section(category: String) -> Result<(String, Vec<StoryCard>), ServerFnError> {
+pub async fn get_section(
+    category: String,
+    language: String,
+) -> Result<(String, Vec<StoryCard>), ServerFnError> {
     use std::str::FromStr;
     let db = db();
     let cat = bg_core::domain::Category::from_str(&category)
         .map_err(|_| ServerFnError::new(format!("no such section: {category}")))?;
-    let stories = bg_db::stories::by_category(db, cat, 60).await.map_err(e)?;
+    let language = bg_core::domain::EditorialLanguage::from_str(&language)
+        .unwrap_or(bg_core::domain::EditorialLanguage::En);
+    let stories = bg_db::stories::by_category_for_language(db, cat, language, 60)
+        .await
+        .map_err(e)?;
     let mut cards: Vec<StoryCard> = stories.iter().map(|s| card(s, None)).collect();
     flag_analysis(db, &stories, &mut cards).await;
     Ok((cat.label().to_string(), cards))
@@ -626,7 +694,7 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         "isAccessibleForFree": true,
         "author": {
             "@type": "Organization",
-            "name": "The BitGoose Flock",
+            "name": "BitGoose AI 编辑部",
             "description": bg_core::brand::AI_DISCLOSURE,
             "url": format!("{}/flock", base.trim_end_matches('/')),
         },
@@ -921,11 +989,13 @@ pub async fn get_standards() -> Result<StandardsPage, ServerFnError> {
 }
 
 #[server(name = GetFlyway, prefix = "/rpc")]
-pub async fn get_flyway() -> Result<FlywayPage, ServerFnError> {
+pub async fn get_flyway(language: String) -> Result<FlywayPage, ServerFnError> {
     use std::collections::BTreeMap;
     use std::str::FromStr;
     let db = db();
     const DAYS: i32 = 14;
+    let language = bg_core::domain::EditorialLanguage::from_str(&language)
+        .unwrap_or(bg_core::domain::EditorialLanguage::En);
 
     let rows = bg_db::stories::flyway(db, DAYS).await.map_err(e)?;
     let mut by_cat: BTreeMap<String, BTreeMap<chrono::NaiveDate, i64>> = BTreeMap::new();
@@ -947,7 +1017,11 @@ pub async fn get_flyway() -> Result<FlywayPage, ServerFnError> {
                 })
                 .collect();
             let label = bg_core::domain::Category::from_str(&cat)
-                .map(|c| c.label().to_string())
+                .map(|c| match language {
+                    bg_core::domain::EditorialLanguage::Zh => c.label_zh().to_string(),
+                    bg_core::domain::EditorialLanguage::En => c.label().to_string(),
+                    bg_core::domain::EditorialLanguage::Fr => c.label_fr().to_string(),
+                })
                 .unwrap_or_else(|_| cat.clone());
             CategoryTrend {
                 category: cat,
@@ -966,9 +1040,38 @@ pub async fn get_flyway() -> Result<FlywayPage, ServerFnError> {
         .map(|(ent, n)| (ent.name, ent.slug, n))
         .collect();
 
+    let topics = bg_db::gaggles::live_for_language(db, language, 24 * 14, 20)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| GaggleCard {
+            slug: g.slug,
+            title: g.title,
+            standfirst: g.standfirst,
+            sources: g.source_count,
+            stories: g.story_count,
+            model: g.model.unwrap_or_default(),
+            language: g.editorial_language,
+            pinned: g.pinned,
+            analysis_html: render_body(&g.analysis_md),
+            watchpoints: g.watchpoints,
+            primary_sources: g
+                .primary_source_names
+                .into_iter()
+                .zip(g.primary_source_urls)
+                .map(|(name, url)| TopicSource { name, url })
+                .collect(),
+            last_updated: g
+                .last_briefed_at
+                .map(|at| at.to_rfc3339())
+                .unwrap_or_default(),
+        })
+        .collect();
+
     Ok(FlywayPage {
         categories,
         entities,
+        topics,
         days: DAYS,
     })
 }
