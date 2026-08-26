@@ -2,6 +2,7 @@
 
 use crate::model::*;
 use leptos::prelude::*;
+use leptos_meta::Html;
 use leptos_router::components::A;
 use leptos_router::hooks::use_location;
 
@@ -70,6 +71,14 @@ pub fn Masthead() -> impl IntoView {
         }
     };
     view! {
+        <Html
+            {..}
+            lang=move || match language.get() {
+                "zh" => "zh-CN",
+                "fr" => "fr",
+                _ => "en",
+            }
+        />
         <header class="masthead">
             <div class="shell">
                 <A href="/" attr:class="brand">

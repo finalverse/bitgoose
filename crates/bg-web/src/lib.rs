@@ -35,7 +35,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
         // prefers light got dark until they found the toggle. Absent the
         // attribute the media query governs, and the toggle sets it only when
         // someone makes an explicit choice.
-        <html lang="zh-CN">
+        // The active edition sets `lang` through `leptos_meta::Html` inside
+        // the router, where the request path is available.
+        <html>
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
