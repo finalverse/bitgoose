@@ -59,6 +59,34 @@ fn is_aggregator(slug: &str) -> bool {
     slug.starts_with("gnews")
 }
 
+/// Feed metadata is often missing or generic. The curated source roster is
+/// authoritative for the boundaries between independently edited editions.
+fn source_language(slug: &str, advertised: &str) -> String {
+    if slug.starts_with("gnews-zh-hant-")
+        || slug.starts_with("rthk-")
+        || slug.starts_with("abmedia-")
+        || slug.starts_with("ithome-")
+    {
+        "zh-hant".into()
+    } else if slug.starts_with("gnews-zh-") || slug.starts_with("voa-zh-") {
+        "zh".into()
+    } else if slug.starts_with("gnews-fr-")
+        || slug.starts_with("france24-fr")
+        || slug.starts_with("numerama-fr")
+        || slug.starts_with("journal-du-coin-fr")
+    {
+        "fr".into()
+    } else if slug.starts_with("gnews-es-") || slug.ends_with("-es") {
+        "es".into()
+    } else if slug.starts_with("gnews-ja-") || slug.ends_with("-ja") {
+        "ja".into()
+    } else if slug.starts_with("gnews-ko-") || slug.ends_with("-ko") {
+        "ko".into()
+    } else {
+        bg_core::text::normalize_lang(advertised)
+    }
+}
+
 pub async fn poll_source(db: &Db, client: &reqwest::Client, src: &Source) -> PollReport {
     let mut rep = PollReport {
         source_slug: src.slug.clone(),
@@ -293,7 +321,7 @@ async fn poll_inner(
             // Normalised at the boundary. The corpus already holds `en-us`,
             // `en` and `en-US` for the same language, which makes any
             // per-language surface built on this quietly wrong.
-            lang: bg_core::text::normalize_lang(feed.language.as_deref().unwrap_or("en")),
+            lang: source_language(&src.slug, feed.language.as_deref().unwrap_or("en")),
             // YouTube's media:content is the player URL, not a picture.
             // Converting here means the column holds something an <img> can
             // actually load, rather than every reader having to know.
@@ -364,7 +392,7 @@ async fn crawl_inner(
             body_raw: None,
             body_hash: None,
             simhash: simhash64(&f.title),
-            lang: bg_core::text::normalize_lang("en"),
+            lang: source_language(&src.slug, "en"),
             image_url: None,
             video_id: None,
             beat: crate::relevance::classify(&f.title),

@@ -21,15 +21,21 @@ pub async fn recent_headlines(
     limit: i64,
 ) -> Result<Vec<(String, String)>> {
     let rows = sqlx::query(
-        "SELECT r.title, s.slug
+        "SELECT r.title, s.homepage
            FROM raw_items r
            JOIN sources s ON s.id = r.source_id
           WHERE r.published_at > now() - make_interval(hours => $1)
             AND s.robots_ok
             AND CASE
-                WHEN $2 = 'zh' THEN lower(r.lang) LIKE 'zh%'
+                WHEN $2 = 'zh-hant' THEN lower(r.lang) = 'zh-hant'
+                WHEN $2 = 'zh' THEN lower(r.lang) = 'zh'
                 WHEN $2 = 'fr' THEN lower(r.lang) LIKE 'fr%'
+                WHEN $2 = 'es' THEN lower(r.lang) LIKE 'es%'
+                WHEN $2 = 'ja' THEN lower(r.lang) LIKE 'ja%'
+                WHEN $2 = 'ko' THEN lower(r.lang) LIKE 'ko%'
                 ELSE lower(r.lang) NOT LIKE 'zh%' AND lower(r.lang) NOT LIKE 'fr%'
+                     AND lower(r.lang) NOT LIKE 'es%'
+                     AND lower(r.lang) NOT LIKE 'ja%' AND lower(r.lang) NOT LIKE 'ko%'
             END
           ORDER BY r.published_at DESC
           LIMIT $3",
@@ -41,7 +47,7 @@ pub async fn recent_headlines(
     .await?;
     Ok(rows
         .iter()
-        .map(|r| (r.get("title"), r.get("slug")))
+        .map(|r| (r.get("title"), r.get("homepage")))
         .collect())
 }
 
@@ -57,16 +63,22 @@ pub async fn baseline_headlines(
     limit: i64,
 ) -> Result<Vec<(String, String)>> {
     let rows = sqlx::query(
-        "SELECT r.title, s.slug
+        "SELECT r.title, s.homepage
            FROM raw_items r
            JOIN sources s ON s.id = r.source_id
           WHERE r.published_at <= now() - make_interval(hours => $1)
             AND r.published_at >  now() - make_interval(hours => $2)
             AND s.robots_ok
             AND CASE
-                WHEN $3 = 'zh' THEN lower(r.lang) LIKE 'zh%'
+                WHEN $3 = 'zh-hant' THEN lower(r.lang) = 'zh-hant'
+                WHEN $3 = 'zh' THEN lower(r.lang) = 'zh'
                 WHEN $3 = 'fr' THEN lower(r.lang) LIKE 'fr%'
+                WHEN $3 = 'es' THEN lower(r.lang) LIKE 'es%'
+                WHEN $3 = 'ja' THEN lower(r.lang) LIKE 'ja%'
+                WHEN $3 = 'ko' THEN lower(r.lang) LIKE 'ko%'
                 ELSE lower(r.lang) NOT LIKE 'zh%' AND lower(r.lang) NOT LIKE 'fr%'
+                     AND lower(r.lang) NOT LIKE 'es%'
+                     AND lower(r.lang) NOT LIKE 'ja%' AND lower(r.lang) NOT LIKE 'ko%'
             END
           ORDER BY r.published_at DESC
           LIMIT $4",
@@ -79,7 +91,7 @@ pub async fn baseline_headlines(
     .await?;
     Ok(rows
         .iter()
-        .map(|r| (r.get("title"), r.get("slug")))
+        .map(|r| (r.get("title"), r.get("homepage")))
         .collect())
 }
 
@@ -440,7 +452,7 @@ pub async fn all_titles(db: &Db) -> Result<Vec<(uuid::Uuid, String, String)>> {
 
 /// Remove a special topic and its story links.
 ///
-/// A gaggle is VictoriaPark's own furniture rather than reporting, so unlike a
+/// A gaggle is BitGoose's own furniture rather than reporting, so unlike a
 /// story it can simply go: nothing was published under its URL that another
 /// site would have linked to, and the stories it collected are untouched.
 pub async fn delete(db: &Db, id: uuid::Uuid) -> Result<()> {

@@ -518,29 +518,18 @@ where
 /// Consolidated so the voice cannot drift between agents — and so the
 /// non-negotiables (never reproduce source wording, never invent a number) are
 /// stated once, in front of every model call.
-pub const HOUSE_STYLE: &str = "\
-You work for BitGoose, an AI-run newsroom covering crypto.
-
-House rules, in order of priority:
-1. Never reproduce a source's wording. Write everything in your own words. If \
-you must quote, keep it under 25 words and attribute it.
-2. Never state a fact you cannot point to a source for. If sources disagree, \
-say so; do not average them or pick the more exciting one.
-3. Numbers are load-bearing. Never estimate, round for effect, or infer a figure \
-that is not in the sources.
-4. Write plainly. No hype, no 'game-changer', no 'revolutionary', no exclamation \
-marks. Assume a reader who knows what a blockchain is and does not need it \
-explained again.
-5. Lead with what happened. Context comes after, not before.
-6. If the material does not support a story, say so. An empty result is a valid \
-answer and is better than a padded one.";
+pub const HOUSE_STYLE: &str = include_str!("../../../prompts/master-system.md");
 
 /// Independent edition requested for every language-capable model stage.
 pub const fn output_language(lang: bg_core::domain::EditorialLanguage) -> &'static str {
     match lang {
         bg_core::domain::EditorialLanguage::En => "en",
         bg_core::domain::EditorialLanguage::Zh => "zh",
+        bg_core::domain::EditorialLanguage::ZhHant => "zh-hant",
         bg_core::domain::EditorialLanguage::Fr => "fr",
+        bg_core::domain::EditorialLanguage::Es => "es",
+        bg_core::domain::EditorialLanguage::Ja => "ja",
+        bg_core::domain::EditorialLanguage::Ko => "ko",
     }
 }
 

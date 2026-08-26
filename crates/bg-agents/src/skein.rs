@@ -1,7 +1,7 @@
 //! **Skein** — what the story means, and where it goes.
 //!
 //! A skein is geese in flight formation: the flock seen as a direction rather
-//! than as birds. This agent is the one place VictoriaPark asserts something no
+//! than as birds. This agent is the one place BitGoose asserts something no
 //! source said, which makes it both the reason to read the site and the easiest
 //! thing here to get badly wrong.
 //!
@@ -192,7 +192,7 @@ pub async fn run(ctx: &Ctx, story: StoryId) -> Result<bool> {
     // Drop anything from a publisher who does not permit model input.
     //
     // The backstop to the extraction gate, and it has to exist: text ingested
-    // before a site changed its posture — or before VictoriaPark learned to read
+    // before a site changed its posture — or before BitGoose learned to read
     // the posture at all — is already in the database, and the gate upstream
     // only stops new fetches. The story keeps its citation and its link; what
     // it loses is having that outlet's words in a prompt.

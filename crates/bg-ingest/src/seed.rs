@@ -25,6 +25,144 @@ pub struct SeedSource {
 }
 
 pub const SOURCES: &[SeedSource] = &[
+    // ---- Traditional Chinese: crypto, AI and technology -----------------
+    SeedSource {
+        slug: "gnews-zh-hant-ai", name: "Google 新聞 · 人工智能", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E6%85%A7+OR+OpenAI+OR+Anthropic+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 240, beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "gnews-zh-hant-crypto", name: "Google 新聞 · 加密市場", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=%E6%AF%94%E7%89%B9%E5%B9%A3+OR+%E4%BB%A5%E5%A4%AA%E5%B9%A3+OR+%E7%A9%A9%E5%AE%9A%E5%B9%A3+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 180, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "gnews-zh-hant-tech", name: "Google 新聞 · 科技", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 300, beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "abmedia-zh-hant", name: "鏈新聞 ABMedia", kind: SourceKind::Rss,
+        url: "https://abmedia.io/feed", homepage: "https://abmedia.io", trust: 70,
+        poll_interval_s: 240, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "ithome-zh-hant", name: "iThome", kind: SourceKind::Rss,
+        url: "https://www.ithome.com.tw/rss", homepage: "https://www.ithome.com.tw", trust: 78,
+        poll_interval_s: 360, beat: Some(Beat::Tech),
+    },
+
+    // ---- Japanese -------------------------------------------------------
+    SeedSource {
+        slug: "gnews-ja-ai", name: "Google ニュース · AI", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=AI+OR+OpenAI+OR+Anthropic+when:1d&hl=ja&gl=JP&ceid=JP:ja",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 240, beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "gnews-ja-crypto", name: "Google ニュース · 暗号資産", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=%E3%83%93%E3%83%83%E3%83%88%E3%82%B3%E3%82%A4%E3%83%B3+OR+%E6%9A%97%E5%8F%B7%E8%B3%87%E7%94%A3+when:1d&hl=ja&gl=JP&ceid=JP:ja",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 180, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "gnews-ja-tech", name: "Google ニュース · テクノロジー", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=ja&gl=JP&ceid=JP:ja",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 300, beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "coinpost-ja", name: "CoinPost", kind: SourceKind::Rss,
+        url: "https://coinpost.jp/?feed=rss2", homepage: "https://coinpost.jp", trust: 72,
+        poll_interval_s: 180, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "itmedia-ai-ja", name: "ITmedia AI+", kind: SourceKind::Rss,
+        url: "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml", homepage: "https://www.itmedia.co.jp/aiplus/", trust: 78,
+        poll_interval_s: 300, beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "neweconomy-ja", name: "あたらしい経済", kind: SourceKind::Rss,
+        url: "https://www.neweconomy.jp/feed", homepage: "https://www.neweconomy.jp", trust: 70,
+        poll_interval_s: 240, beat: Some(Beat::Crypto),
+    },
+
+    // ---- Korean ---------------------------------------------------------
+    SeedSource {
+        slug: "gnews-ko-ai", name: "Google 뉴스 · AI", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=AI+OR+OpenAI+OR+Anthropic+when:1d&hl=ko&gl=KR&ceid=KR:ko",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 240, beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "gnews-ko-crypto", name: "Google 뉴스 · 가상자산", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=%EB%B9%84%ED%8A%B8%EC%BD%94%EC%9D%B8+OR+%EA%B0%80%EC%83%81%EC%9E%90%EC%82%B0+when:1d&hl=ko&gl=KR&ceid=KR:ko",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 180, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "gnews-ko-tech", name: "Google 뉴스 · 기술", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=ko&gl=KR&ceid=KR:ko",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 300, beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "aitimes-ko", name: "AI타임스", kind: SourceKind::Rss,
+        url: "https://www.aitimes.com/rss/allArticle.xml", homepage: "https://www.aitimes.com", trust: 72,
+        poll_interval_s: 300, beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "blockmedia-ko", name: "블록미디어", kind: SourceKind::Rss,
+        url: "https://www.blockmedia.co.kr/feed/", homepage: "https://www.blockmedia.co.kr", trust: 70,
+        poll_interval_s: 180, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "tokenpost-ko", name: "토큰포스트", kind: SourceKind::Rss,
+        url: "https://www.tokenpost.kr/rss", homepage: "https://www.tokenpost.kr", trust: 66,
+        poll_interval_s: 240, beat: Some(Beat::Crypto),
+    },
+
+    // ---- Spanish --------------------------------------------------------
+    SeedSource {
+        slug: "gnews-es-ai", name: "Google Noticias · IA", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=inteligencia+artificial+OR+OpenAI+OR+Anthropic+when:1d&hl=es&gl=ES&ceid=ES:es",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 240, beat: Some(Beat::Ai),
+    },
+    SeedSource {
+        slug: "gnews-es-crypto", name: "Google Noticias · Cripto", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=bitcoin+OR+ethereum+OR+criptomonedas+when:1d&hl=es&gl=ES&ceid=ES:es",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 180, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "gnews-es-tech", name: "Google Noticias · Tecnología", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=es&gl=ES&ceid=ES:es",
+        homepage: "https://news.google.com", trust: 70, poll_interval_s: 300, beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "xataka-es", name: "Xataka", kind: SourceKind::Rss,
+        url: "https://www.xataka.com/index.xml", homepage: "https://www.xataka.com", trust: 76,
+        poll_interval_s: 300, beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "genbeta-es", name: "Genbeta", kind: SourceKind::Rss,
+        url: "https://www.genbeta.com/index.xml", homepage: "https://www.genbeta.com", trust: 72,
+        poll_interval_s: 360, beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "hipertextual-es", name: "Hipertextual", kind: SourceKind::Rss,
+        url: "https://hipertextual.com/feed", homepage: "https://hipertextual.com", trust: 72,
+        poll_interval_s: 360, beat: Some(Beat::Tech),
+    },
+    SeedSource {
+        slug: "diariobitcoin-es", name: "DiarioBitcoin", kind: SourceKind::Rss,
+        url: "https://www.diariobitcoin.com/feed/", homepage: "https://www.diariobitcoin.com", trust: 66,
+        poll_interval_s: 240, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "beincrypto-es", name: "BeInCrypto Español", kind: SourceKind::Rss,
+        url: "https://es.beincrypto.com/feed/", homepage: "https://es.beincrypto.com", trust: 64,
+        poll_interval_s: 240, beat: Some(Beat::Crypto),
+    },
+    SeedSource {
+        slug: "cryptonomist-es", name: "The Cryptonomist Español", kind: SourceKind::Rss,
+        url: "https://es.cryptonomist.ch/feed/", homepage: "https://es.cryptonomist.ch", trust: 64,
+        poll_interval_s: 300, beat: Some(Beat::Crypto),
+    },
+
     // ---- Independent Chinese edition ------------------------------------
     SeedSource {
         slug: "gnews-zh-ai",

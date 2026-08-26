@@ -95,12 +95,7 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
         title: s.title.clone(),
         dek: s.summary.clone().unwrap_or_default(),
         category: s.category.as_str().into(),
-        category_label: match s.editorial_language {
-            bg_core::domain::EditorialLanguage::Zh => s.category.label_zh(),
-            bg_core::domain::EditorialLanguage::En => s.category.label(),
-            bg_core::domain::EditorialLanguage::Fr => s.category.label_fr(),
-        }
-        .into(),
+        category_label: category_label(s.category, s.editorial_language).into(),
         source_count: s.source_count,
         newsworthiness: s.newsworthiness,
         published_at: s.published_at.map(|d| d.to_rfc3339()).unwrap_or_default(),
@@ -118,6 +113,22 @@ fn card(s: &bg_core::domain::Story, lead: Option<(&str, &str)>) -> StoryCard {
         beat: s.beat.as_str().into(),
         source_kind: String::new(),
         has_analysis: false,
+    }
+}
+
+#[cfg(feature = "ssr")]
+fn category_label(
+    category: bg_core::domain::Category,
+    language: bg_core::domain::EditorialLanguage,
+) -> &'static str {
+    match language {
+        bg_core::domain::EditorialLanguage::En => category.label(),
+        bg_core::domain::EditorialLanguage::Zh => category.label_zh(),
+        bg_core::domain::EditorialLanguage::ZhHant => category.label_zh_hant(),
+        bg_core::domain::EditorialLanguage::Fr => category.label_fr(),
+        bg_core::domain::EditorialLanguage::Es => category.label_es(),
+        bg_core::domain::EditorialLanguage::Ja => category.label_ja(),
+        bg_core::domain::EditorialLanguage::Ko => category.label_ko(),
     }
 }
 
@@ -238,12 +249,7 @@ pub async fn get_front_page(
             title: w.title.clone(),
             dek: w.summary.clone(),
             category: w.category.as_str().into(),
-            category_label: match language {
-                bg_core::domain::EditorialLanguage::Zh => w.category.label_zh(),
-                bg_core::domain::EditorialLanguage::Fr => w.category.label_fr(),
-                bg_core::domain::EditorialLanguage::En => w.category.label(),
-            }
-            .into(),
+            category_label: category_label(w.category, language).into(),
             source_count: w.source_count,
             newsworthiness: w.newsworthiness,
             published_at: w.published_at.to_rfc3339(),
@@ -369,12 +375,7 @@ pub async fn get_stories(
                 title: w.title.clone(),
                 dek: w.summary.clone(),
                 category: w.category.as_str().into(),
-                category_label: match language {
-                    bg_core::domain::EditorialLanguage::Zh => w.category.label_zh(),
-                    bg_core::domain::EditorialLanguage::Fr => w.category.label_fr(),
-                    bg_core::domain::EditorialLanguage::En => w.category.label(),
-                }
-                .into(),
+                category_label: category_label(w.category, language).into(),
                 source_count: w.source_count,
                 newsworthiness: w.newsworthiness,
                 published_at: w.published_at.to_rfc3339(),
@@ -622,7 +623,21 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         .unwrap_or(story.title.clone());
     let base = std::env::var("BG_PUBLIC_BASE_URL")
         .unwrap_or_else(|_| format!("https://{}", bg_core::brand::DOMAIN));
-    let canonical = format!("{}/story/{}", base.trim_end_matches('/'), story.slug);
+    let language = story.editorial_language;
+    let edition_prefix = match language {
+        bg_core::domain::EditorialLanguage::En => "",
+        bg_core::domain::EditorialLanguage::Zh => "/zh",
+        bg_core::domain::EditorialLanguage::ZhHant => "/zh-hant",
+        bg_core::domain::EditorialLanguage::Fr => "/fr",
+        bg_core::domain::EditorialLanguage::Es => "/es",
+        bg_core::domain::EditorialLanguage::Ja => "/ja",
+        bg_core::domain::EditorialLanguage::Ko => "/ko",
+    };
+    let canonical = format!(
+        "{}{edition_prefix}/story/{}",
+        base.trim_end_matches('/'),
+        story.slug
+    );
 
     // The lead image and who to credit for it. `refs` is ordered seed-first, so
     // its head is the outlet the image most likely came from.
@@ -686,6 +701,16 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
     // schema.org NewsArticle. `citation` carries every source URL, which is
     // both honest and the structured-data way to say "this is synthesis over
     // other people's reporting, and here is whose".
+    let category_label = category_label(story.category, language);
+    let author = match language {
+        bg_core::domain::EditorialLanguage::Zh => "BitGoose AI 编辑部",
+        bg_core::domain::EditorialLanguage::ZhHant => "BitGoose AI 編輯部",
+        bg_core::domain::EditorialLanguage::Fr => "Rédaction IA BitGoose",
+        bg_core::domain::EditorialLanguage::Es => "Redacción IA BitGoose",
+        bg_core::domain::EditorialLanguage::Ja => "BitGoose AI編集部",
+        bg_core::domain::EditorialLanguage::Ko => "BitGoose AI 편집국",
+        bg_core::domain::EditorialLanguage::En => "BitGoose AI Desk",
+    };
     let json_ld = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "NewsArticle",
@@ -699,14 +724,14 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
         // has no image in its structured data.
         "image": if image_url.is_empty() { serde_json::Value::Null }
                  else { serde_json::json!([image_url]) },
-        "articleSection": story.category.label(),
-        "inLanguage": "en",
+        "articleSection": category_label,
+        "inLanguage": language.html_lang(),
         "isAccessibleForFree": true,
         "author": {
             "@type": "Organization",
-            "name": "BitGoose AI 编辑部",
+            "name": author,
             "description": bg_core::brand::AI_DISCLOSURE,
-            "url": format!("{}/flock", base.trim_end_matches('/')),
+            "url": format!("{}{edition_prefix}/flock", base.trim_end_matches('/')),
         },
         "publisher": {
             "@type": "Organization",
@@ -760,7 +785,7 @@ pub async fn get_story(slug: String) -> Result<Option<StoryPage>, ServerFnError>
             .as_ref()
             .map(|a| render_body(&a.body_md))
             .unwrap_or_default(),
-        category_label: story.category.label().into(),
+        category_label: category_label.into(),
         published_at: published.format("%B %-d, %Y at %H:%M UTC").to_string(),
         ago: ago(published),
         reading_time_min: article
@@ -1007,7 +1032,9 @@ pub async fn get_flyway(language: String) -> Result<FlywayPage, ServerFnError> {
     let language = bg_core::domain::EditorialLanguage::from_str(&language)
         .unwrap_or(bg_core::domain::EditorialLanguage::En);
 
-    let rows = bg_db::stories::flyway(db, DAYS).await.map_err(e)?;
+    let rows = bg_db::stories::flyway_for_language(db, language, DAYS)
+        .await
+        .map_err(e)?;
     let mut by_cat: BTreeMap<String, BTreeMap<chrono::NaiveDate, i64>> = BTreeMap::new();
     for (cat, day, n) in rows {
         *by_cat.entry(cat).or_default().entry(day).or_insert(0) += n;
@@ -1027,11 +1054,7 @@ pub async fn get_flyway(language: String) -> Result<FlywayPage, ServerFnError> {
                 })
                 .collect();
             let label = bg_core::domain::Category::from_str(&cat)
-                .map(|c| match language {
-                    bg_core::domain::EditorialLanguage::Zh => c.label_zh().to_string(),
-                    bg_core::domain::EditorialLanguage::En => c.label().to_string(),
-                    bg_core::domain::EditorialLanguage::Fr => c.label_fr().to_string(),
-                })
+                .map(|c| category_label(c, language).to_string())
                 .unwrap_or_else(|_| cat.clone());
             CategoryTrend {
                 category: cat,
@@ -1043,7 +1066,7 @@ pub async fn get_flyway(language: String) -> Result<FlywayPage, ServerFnError> {
         .collect();
     categories.sort_by_key(|c| std::cmp::Reverse(c.total));
 
-    let entities = bg_db::entities::trending(db, DAYS, 14)
+    let entities = bg_db::entities::trending_for_language(db, language, DAYS, 14)
         .await
         .unwrap_or_default()
         .into_iter()

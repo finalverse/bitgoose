@@ -32,6 +32,181 @@ macro_rules! loaded {
     };
 }
 
+fn language_prefix(language: &str) -> &'static str {
+    match language {
+        "zh" => "/zh",
+        "zh-hant" => "/zh-hant",
+        "fr" => "/fr",
+        "es" => "/es",
+        "ja" => "/ja",
+        "ko" => "/ko",
+        _ => "",
+    }
+}
+
+fn language_from_path(path: &str) -> &'static str {
+    if path == "/zh-hant" || path.starts_with("/zh-hant/") {
+        "zh-hant"
+    } else if path == "/zh" || path.starts_with("/zh/") {
+        "zh"
+    } else if path == "/fr" || path.starts_with("/fr/") {
+        "fr"
+    } else if path == "/es" || path.starts_with("/es/") {
+        "es"
+    } else if path == "/ja" || path.starts_with("/ja/") {
+        "ja"
+    } else if path == "/ko" || path.starts_with("/ko/") {
+        "ko"
+    } else {
+        "en"
+    }
+}
+
+fn site_name(language: &str) -> &'static str {
+    match language {
+        "zh" => "BitGoose 中文",
+        "zh-hant" => "BitGoose 繁中",
+        "fr" => "BitGoose Français",
+        "es" => "BitGoose Español",
+        "ja" => "BitGoose 日本語",
+        "ko" => "BitGoose 한국어",
+        _ => "BitGoose",
+    }
+}
+
+fn topic_label(language: &str) -> &'static str {
+    match language {
+        "zh" => "热点专题",
+        "zh-hant" => "焦點專題",
+        "fr" => "Sujets spéciaux",
+        "es" => "Temas especiales",
+        "ja" => "注目特集",
+        "ko" => "핵심 특집",
+        _ => "Special topics",
+    }
+}
+
+fn live_label(language: &str) -> &'static str {
+    match language {
+        "zh" => "持续追踪",
+        "zh-hant" => "持續追蹤",
+        "fr" => "SUIVI",
+        "es" => "SEGUIMIENTO",
+        "ja" => "継続追跡",
+        "ko" => "지속 추적",
+        _ => "LIVE",
+    }
+}
+
+fn topic_intro(language: &str, pinned: bool, sources: i32) -> String {
+    match (language, pinned) {
+        ("en", true) => {
+            "Permanent watch · continuously refreshed from first-party and independent sources. "
+                .into()
+        }
+        ("zh-hant", true) => "長期追蹤 · 持續匯入一手文件與獨立報道。 ".into(),
+        ("fr", true) => {
+            "Suivi permanent · actualisé à partir de sources primaires et indépendantes. ".into()
+        }
+        ("es", true) => {
+            "Seguimiento permanente · actualizado con fuentes primarias e independientes. ".into()
+        }
+        ("ja", true) => "継続追跡 · 一次資料と独立報道から随時更新。 ".into(),
+        ("ko", true) => "지속 추적 · 1차 자료와 독립 보도를 계속 반영합니다. ".into(),
+        (_, true) => "长期追踪 · 持续汇入一手文件与独立报道。 ".into(),
+        ("en", false) => {
+            format!("Opened after {sources} independent outlets converged within two days. ")
+        }
+        ("zh-hant", false) => format!("因兩日內 {sources} 個獨立來源集中報道而建立。 "),
+        ("fr", false) => {
+            format!("Ouvert après la convergence de {sources} médias indépendants en deux jours. ")
+        }
+        ("es", false) => {
+            format!("Abierto tras converger {sources} medios independientes en dos días. ")
+        }
+        ("ja", false) => format!("2日間に独立した{sources}媒体の報道が集中したため開設。 "),
+        ("ko", false) => {
+            format!("이틀 동안 독립 매체 {sources}곳의 보도가 집중되어 개설했습니다. ")
+        }
+        _ => format!("因两日内 {sources} 家独立来源集中报道而建立。 "),
+    }
+}
+
+fn topic_story_count(language: &str, stories: usize) -> String {
+    match language {
+        "en" => format!("{stories} BitGoose stories collected."),
+        "zh-hant" => format!("已收錄 {stories} 篇BitGoose 繁中報道。"),
+        "fr" => format!("{stories} articles BitGoose rassemblés."),
+        "es" => format!("{stories} artículos de BitGoose reunidos."),
+        "ja" => format!("BitGooseの記事を{stories}本収録。"),
+        "ko" => format!("BitGoose 기사 {stories}건을 모았습니다."),
+        "zh" => format!("已收录 {stories} 篇 BitGoose 中文报道。"),
+        _ => format!("{stories} BitGoose stories collected."),
+    }
+}
+
+fn front_copy(language: &str, beat: Option<&str>) -> (&'static str, &'static str) {
+    match (language, beat) {
+        ("en", Some("ai")) => ("AI — BitGoose", "Frontier AI: models, research, compute and policy, with every claim showing its sources."),
+        ("en", Some("crypto")) => ("Crypto — BitGoose", "Crypto markets, protocols and policy, with every claim showing its sources."),
+        ("en", Some("markets")) => ("Markets — BitGoose", "Capital markets, trade and macroeconomics, grounded in sources and data."),
+        ("en", Some("tech")) => ("Tech — BitGoose", "Chips, platforms, energy and frontier technology, with their political and social consequences."),
+        ("en", Some("world")) => ("World — BitGoose", "Politics, diplomacy, conflict and the decisions shaping nations."),
+        ("en", Some("science")) => ("Science — BitGoose", "Science, health, climate, energy and space, grounded in checkable evidence."),
+        ("en", Some("culture")) => ("Culture — BitGoose", "Culture, media and sport through the events people are actually discussing."),
+        ("en", _) => ("BitGoose — The autonomous AI newsroom", "Crypto markets, artificial intelligence and frontier technology reported by autonomous agents, with every claim linked to evidence."),
+        ("zh-hant", Some("world")) => ("國際與政治 — BitGoose 繁中", "為香港、台灣及全球繁體中文讀者追蹤外交、戰爭、選舉與法治。"),
+        ("zh-hant", Some("markets")) => ("財經 — BitGoose 繁中", "市場、貿易、產業與政策，資料和來源均可追溯。"),
+        ("zh-hant", Some("tech")) => ("科技 — BitGoose 繁中", "晶片、平台、能源與前沿科技，以及其制度與社會影響。"),
+        ("zh-hant", Some("ai")) => ("人工智能 — BitGoose 繁中", "模型、研究、算力、安全與政策，清楚區分事實和推論。"),
+        ("zh-hant", Some("crypto")) => ("數碼資產 — BitGoose 繁中", "數碼資產市場、監管與安全。"),
+        ("zh-hant", Some("science")) => ("科學與健康 — BitGoose 繁中", "科學、健康、氣候、能源與太空，以可核實證據為本。"),
+        ("zh-hant", Some("culture")) => ("文化 — BitGoose 繁中", "香港、台灣與全球文化、媒體及體育動態。"),
+        ("zh-hant", _) => ("BitGoose 繁體中文", "面向香港、台灣與全球繁體中文讀者，獨立追蹤加密市場、人工智能與前沿科技。"),
+        ("fr", Some("ai")) => ("IA — BitGoose Français", "Modèles, recherche, calcul, sécurité et politiques de l’intelligence artificielle."),
+        ("fr", Some("crypto")) => ("Crypto — BitGoose Français", "Marchés, protocoles, réglementation et sécurité des actifs numériques."),
+        ("fr", Some("markets")) => ("Marchés — BitGoose Français", "Marchés, macroéconomie et entreprises, avec des sources vérifiables."),
+        ("fr", Some("tech")) => ("Technologie — BitGoose Français", "Semi-conducteurs, plateformes et technologies de pointe."),
+        ("fr", Some("world")) => ("Monde — BitGoose Français", "Les événements mondiaux qui influencent la technologie et les marchés."),
+        ("fr", Some("science")) => ("Sciences — BitGoose Français", "Recherche et sciences fondées sur des preuves vérifiables."),
+        ("fr", Some("culture")) => ("Culture — BitGoose Français", "Culture numérique, médias et usages technologiques."),
+        ("fr", _) => ("BitGoose Français", "Une rédaction autonome consacrée à l’IA, la crypto et aux technologies de pointe."),
+        ("es", Some("ai")) => ("IA — BitGoose Español", "Modelos, investigación, cómputo, seguridad y política de inteligencia artificial."),
+        ("es", Some("crypto")) => ("Cripto — BitGoose Español", "Mercados, protocolos, regulación y seguridad de los activos digitales."),
+        ("es", Some("markets")) => ("Mercados — BitGoose Español", "Mercados, macroeconomía y empresas con fuentes verificables."),
+        ("es", Some("tech")) => ("Tecnología — BitGoose Español", "Semiconductores, plataformas y tecnología de frontera."),
+        ("es", Some("world")) => ("Mundo — BitGoose Español", "Acontecimientos globales que mueven la tecnología y los mercados."),
+        ("es", Some("science")) => ("Ciencia — BitGoose Español", "Ciencia e investigación basadas en evidencia verificable."),
+        ("es", Some("culture")) => ("Cultura — BitGoose Español", "Cultura digital, medios y usos de la tecnología."),
+        ("es", _) => ("BitGoose Español", "Una redacción autónoma dedicada a la IA, las criptomonedas y la tecnología de frontera."),
+        ("ja", Some("world")) => ("国際・政治 — BitGoose", "外交、戦争、選挙、法の支配を一次資料と複数の報道から追跡します。"),
+        ("ja", Some("markets")) => ("経済 — BitGoose", "市場、通商、企業、マクロ政策をデータと根拠から読み解きます。"),
+        ("ja", Some("tech")) => ("テクノロジー — BitGoose", "半導体、プラットフォーム、エネルギーと先端技術を追います。"),
+        ("ja", Some("ai")) => ("AI — BitGoose", "モデル、研究、計算資源、安全性と政策を検証可能な形で報じます。"),
+        ("ja", Some("crypto")) => ("デジタル資産 — BitGoose", "デジタル資産の市場、規制、安全保障を追います。"),
+        ("ja", Some("science")) => ("科学・健康 — BitGoose", "科学、医療、気候、エネルギー、宇宙を根拠に基づいて報じます。"),
+        ("ja", Some("culture")) => ("文化 — BitGoose", "文化、メディア、スポーツの注目ニュースを届けます。"),
+        ("ja", _) => ("BitGoose 日本語版", "暗号資産、AI、先端技術を日本語で独自編成するAIエージェントニュースルーム。"),
+        ("ko", Some("world")) => ("국제·정치 — BitGoose", "외교, 전쟁, 선거와 법치를 복수 출처와 1차 자료로 추적합니다."),
+        ("ko", Some("markets")) => ("경제 — BitGoose", "시장, 무역, 기업과 거시정책을 데이터와 근거로 분석합니다."),
+        ("ko", Some("tech")) => ("기술 — BitGoose", "반도체, 플랫폼, 에너지와 첨단 기술의 영향을 추적합니다."),
+        ("ko", Some("ai")) => ("AI — BitGoose", "모델, 연구, 컴퓨팅, 안전과 정책을 검증 가능한 방식으로 보도합니다."),
+        ("ko", Some("crypto")) => ("디지털 자산 — BitGoose", "디지털 자산 시장, 규제와 보안을 추적합니다."),
+        ("ko", Some("science")) => ("과학·건강 — BitGoose", "과학, 건강, 기후, 에너지와 우주를 근거 중심으로 다룹니다."),
+        ("ko", Some("culture")) => ("문화 — BitGoose", "문화, 미디어와 스포츠의 주요 이슈를 전합니다."),
+        ("ko", _) => ("BitGoose 한국어판", "가상자산, AI와 첨단 기술을 독립 편집하는 AI 에이전트 뉴스룸입니다."),
+        ("zh", Some("world")) => ("国际与政治 — BitGoose 中文", "追踪全球政治、外交、战争、选举与法治，每项主张均展示证据。"),
+        ("zh", Some("markets")) => ("财经 — BitGoose 中文", "资本市场、宏观政策、贸易与企业要闻，以证据与数据为基础。"),
+        ("zh", Some("tech")) => ("科技 — BitGoose 中文", "芯片、平台、能源与前沿技术，以及它们带来的制度和社会影响。"),
+        ("zh", Some("ai")) => ("人工智能 — BitGoose 中文", "模型、研究、算力、安全与政策，每项主张均可追溯。"),
+        ("zh", Some("crypto")) => ("数字资产 — BitGoose 中文", "数字资产市场、监管与安全，作为完整新闻版图的一部分。"),
+        ("zh", Some("science")) => ("科学与健康 — BitGoose 中文", "科学、健康、气候、能源与太空，严格区分证据与推断。"),
+        ("zh", Some("culture")) => ("文化 — BitGoose 中文", "文化、媒体与体育，关注传统、共同体与社会变迁。"),
+        ("zh", _) => ("BitGoose 中文 — AI 自主新闻编辑部", "面向简体中文读者，独立追踪加密市场、人工智能与前沿科技热点。"),
+        _ => ("BitGoose", "The autonomous AI newsroom."),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // home
 // ---------------------------------------------------------------------------
@@ -52,13 +227,58 @@ pub fn HomeEn() -> impl IntoView {
     })
 }
 
-#[component]
-pub fn HomeFr() -> impl IntoView {
-    Front(FrontProps {
-        beat: None,
-        language: "fr",
-    })
+macro_rules! edition_front {
+    ($name:ident, $language:literal, $beat:expr) => {
+        #[component]
+        pub fn $name() -> impl IntoView {
+            Front(FrontProps {
+                beat: $beat,
+                language: $language,
+            })
+        }
+    };
 }
+
+edition_front!(HomeZhHant, "zh-hant", None);
+edition_front!(HomeFr, "fr", None);
+edition_front!(HomeEs, "es", None);
+edition_front!(HomeJa, "ja", None);
+edition_front!(HomeKo, "ko", None);
+edition_front!(DeskAiZhHant, "zh-hant", Some("ai"));
+edition_front!(DeskAiFr, "fr", Some("ai"));
+edition_front!(DeskAiEs, "es", Some("ai"));
+edition_front!(DeskAiJa, "ja", Some("ai"));
+edition_front!(DeskAiKo, "ko", Some("ai"));
+edition_front!(DeskCryptoZhHant, "zh-hant", Some("crypto"));
+edition_front!(DeskCryptoFr, "fr", Some("crypto"));
+edition_front!(DeskCryptoEs, "es", Some("crypto"));
+edition_front!(DeskCryptoJa, "ja", Some("crypto"));
+edition_front!(DeskCryptoKo, "ko", Some("crypto"));
+edition_front!(DeskMarketsZhHant, "zh-hant", Some("markets"));
+edition_front!(DeskMarketsFr, "fr", Some("markets"));
+edition_front!(DeskMarketsEs, "es", Some("markets"));
+edition_front!(DeskMarketsJa, "ja", Some("markets"));
+edition_front!(DeskMarketsKo, "ko", Some("markets"));
+edition_front!(DeskTechZhHant, "zh-hant", Some("tech"));
+edition_front!(DeskTechFr, "fr", Some("tech"));
+edition_front!(DeskTechEs, "es", Some("tech"));
+edition_front!(DeskTechJa, "ja", Some("tech"));
+edition_front!(DeskTechKo, "ko", Some("tech"));
+edition_front!(DeskWorldZhHant, "zh-hant", Some("world"));
+edition_front!(DeskWorldFr, "fr", Some("world"));
+edition_front!(DeskWorldEs, "es", Some("world"));
+edition_front!(DeskWorldJa, "ja", Some("world"));
+edition_front!(DeskWorldKo, "ko", Some("world"));
+edition_front!(DeskScienceZhHant, "zh-hant", Some("science"));
+edition_front!(DeskScienceFr, "fr", Some("science"));
+edition_front!(DeskScienceEs, "es", Some("science"));
+edition_front!(DeskScienceJa, "ja", Some("science"));
+edition_front!(DeskScienceKo, "ko", Some("science"));
+edition_front!(DeskCultureZhHant, "zh-hant", Some("culture"));
+edition_front!(DeskCultureFr, "fr", Some("culture"));
+edition_front!(DeskCultureEs, "es", Some("culture"));
+edition_front!(DeskCultureJa, "ja", Some("culture"));
+edition_front!(DeskCultureKo, "ko", Some("culture"));
 
 /// The AI desk.
 #[component]
@@ -179,26 +399,6 @@ pub fn DeskCultureEn() -> impl IntoView {
     })
 }
 
-macro_rules! french_desk {
-    ($name:ident, $beat:literal) => {
-        #[component]
-        pub fn $name() -> impl IntoView {
-            Front(FrontProps {
-                beat: Some($beat),
-                language: "fr",
-            })
-        }
-    };
-}
-
-french_desk!(DeskAiFr, "ai");
-french_desk!(DeskCryptoFr, "crypto");
-french_desk!(DeskMarketsFr, "markets");
-french_desk!(DeskTechFr, "tech");
-french_desk!(DeskWorldFr, "world");
-french_desk!(DeskScienceFr, "science");
-french_desk!(DeskCultureFr, "culture");
-
 /// The front page, blended or for one desk.
 ///
 /// One component rather than three: a desk page *is* the front page with a
@@ -209,56 +409,12 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
         move || (beat, language),
         |(b, lang)| get_front_page(b.map(|s| s.to_string()), lang.to_string()),
     );
-    let english = language == "en";
-    let (title, blurb) = match (language, beat) {
-        ("en", Some("ai")) => (
-            "AI — BitGoose",
-            "Frontier AI: models, research, compute and policy, with every claim showing its sources.",
-        ),
-        ("en", Some("crypto")) => (
-            "Crypto — BitGoose",
-            "Crypto markets, protocols and policy, with every claim showing its sources.",
-        ),
-        ("en", Some("markets")) => (
-            "Markets — BitGoose",
-            "Capital markets: equities, rates, macro and earnings, with every claim showing \
-             its sources.",
-        ),
-        ("en", Some("tech")) => (
-            "Tech — BitGoose",
-            "High technology: chips, platforms, space and energy, with every claim showing \
-             its sources.",
-        ),
-        ("en", Some("world")) => ("World — BitGoose", "Politics, diplomacy, conflict and the decisions shaping nations."),
-        ("en", Some("science")) => ("Science — BitGoose", "Science, health, climate, energy and space, grounded in checkable evidence."),
-        ("en", Some("culture")) => ("Culture — BitGoose", "Culture, media and sport through the events people are actually discussing."),
-        ("en", _) => ("BitGoose — The AI-era newsroom", "Independent AI, crypto, markets and technology reporting by autonomous agents, with every claim linked to evidence."),
-        ("zh", Some("world")) => ("国际与政治 — BitGoose 中文", "追踪全球政治、外交、战争、选举与法治，每项主张均展示证据。"),
-        ("zh", Some("markets")) => ("财经 — BitGoose 中文", "资本市场、宏观政策、贸易与企业要闻，以证据与数据为基础。"),
-        ("zh", Some("tech")) => ("科技 — BitGoose 中文", "芯片、平台、能源与前沿技术，以及它们带来的制度和社会影响。"),
-        ("zh", Some("ai")) => ("人工智能 — BitGoose 中文", "模型、研究、算力、安全与政策，每项主张均可追溯。"),
-        ("zh", Some("crypto")) => ("数字资产 — BitGoose 中文", "数字资产市场、监管与安全，由中文编辑频道独立编发。"),
-        ("zh", Some("science")) => ("科学与健康 — BitGoose 中文", "科学、健康、气候、能源与太空，严格区分证据与推断。"),
-        ("zh", Some("culture")) => ("文化 — BitGoose 中文", "文化、媒体与体育，关注真实事件与社会趋势。"),
-        ("zh", _) => ("BitGoose 中文 — AI 自主新闻编辑部", "面向中文读者独立选题、独立编发的 AI、数字资产、市场与科技新闻频道。"),
-        ("fr", Some("ai")) => ("IA — BitGoose Français", "Modèles, recherche, calcul, sécurité et politiques de l’intelligence artificielle."),
-        ("fr", Some("crypto")) => ("Crypto — BitGoose Français", "Marchés, protocoles, réglementation et sécurité des actifs numériques."),
-        ("fr", Some("markets")) => ("Marchés — BitGoose Français", "Actions, taux, macroéconomie et entreprises, avec des sources vérifiables."),
-        ("fr", Some("tech")) => ("Technologie — BitGoose Français", "Semi-conducteurs, plateformes et technologies de pointe."),
-        ("fr", Some("world")) => ("Monde — BitGoose Français", "Politique, diplomatie, conflits et décisions qui façonnent les nations."),
-        ("fr", Some("science")) => ("Sciences — BitGoose Français", "Santé, climat, énergie et espace, fondés sur des preuves vérifiables."),
-        ("fr", Some("culture")) => ("Culture — BitGoose Français", "Culture, médias et sport à travers les événements qui comptent."),
-        ("fr", _) => ("BitGoose Français — La rédaction autonome", "Une édition française indépendante consacrée à l’IA, la crypto, aux marchés et à la technologie."),
-        _ => ("BitGoose", "The AI-era newsroom."),
-    };
+    let (title, blurb) = front_copy(language, beat);
 
     let path = match beat {
-        Some(b) if language == "zh" => format!("/zh/{b}"),
-        Some(b) if language == "fr" => format!("/fr/{b}"),
-        Some(b) => format!("/{b}"),
-        None if language == "zh" => "/zh".to_string(),
-        None if language == "fr" => "/fr".to_string(),
-        None => "/".to_string(),
+        Some(b) => format!("{}/{b}", language_prefix(language)),
+        None if language == "en" => "/".to_string(),
+        None => language_prefix(language).to_string(),
     };
     view! {
         <Title text=title />
@@ -270,48 +426,74 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
         {loaded!(
             data,
             |fp| view! {
-                {fp.honk.clone().map(|h| view! { <HonkBar story=h language /> })}
-                // Special topics, when there are any. Placed under the honk
-                // and above the lead: a subject seven newsrooms converged on
-                // outranks any single story about it, including ours.
+                {fp.honk.clone().map(|h| view! { <HonkBar story=h /> })}
+                // Special topics are the front-page radar: persistent watches
+                // and fast-rising subjects belong above any individual story.
                 {(!fp.gaggles.is_empty())
                     .then(|| {
                         let gs = fp.gaggles.clone();
                         view! {
-                            // The band spans the viewport; its contents sit
-                            // inside `.shell` like the honk bar above it.
-                            // Without that the label starts at x=0 and the
-                            // first characters fall outside the gutter.
                             <div class="gaggle-band">
-                                <div class="shell gaggle-strip">
-                                    <span class="gaggle-strip-label">{match language { "zh" => "新闻专题", "fr" => "Sujets spéciaux", _ => "Special topics" }}</span>
-                                {gs
-                                    .into_iter()
-                                    .map(|g| {
-                                        view! {
-                                            <a class="gaggle-chip" href=if english {
-                                                format!("/gaggle/{}", g.slug)
-                                            } else if language == "fr" {
-                                                format!("/fr/gaggle/{}", g.slug)
-                                            } else {
-                                                format!("/zh/gaggle/{}", g.slug)
-                                            }>
-                                                <span class="gaggle-chip-title">{g.title.clone()}</span>
-                                                <span class="gaggle-chip-meta">
-                                                    {if g.pinned {
-                                                        match language { "zh" => "持续追踪".to_string(), "fr" => "SUIVI".to_string(), _ => "LIVE".to_string() }
-                                                    } else {
-                                                        match language {
+                                <div class="shell topic-radar">
+                                    <div class="topic-radar-head">
+                                        <div>
+                                            <span class="gaggle-strip-label">{topic_label(language)}</span>
+                                            <strong>{match language {
+                                                "zh" => "热点正在发生",
+                                                "zh-hant" => "焦點正在發生",
+                                                "fr" => "L’actualité en mouvement",
+                                                "es" => "Noticias en movimiento",
+                                                "ja" => "いま動いているニュース",
+                                                "ko" => "지금 움직이는 뉴스",
+                                                _ => "News in motion",
+                                            }}</strong>
+                                        </div>
+                                        <a href=format!("{}/flyway", language_prefix(language))>
+                                            {match language { "zh" => "查看全部 →", "zh-hant" => "查看全部 →", "fr" => "Tout voir →", "es" => "Ver todo →", "ja" => "すべて見る →", "ko" => "전체 보기 →", _ => "View all →" }}
+                                        </a>
+                                    </div>
+                                    <div class="topic-radar-grid">
+                                        {gs.into_iter().map(|g| {
+                                            let heat = (g.sources * 11 + g.stories * 7).clamp(12, 100);
+                                            view! {
+                                                <a class="topic-radar-card" href=format!(
+                                                    "{}/gaggle/{}",
+                                                    language_prefix(language),
+                                                    g.slug,
+                                                )>
+                                                    <div class="topic-radar-status">
+                                                        <span class="hot-pulse"></span>
+                                                        <span>{if g.pinned { live_label(language).to_string() } else { topic_label(language).to_string() }}</span>
+                                                        <time>{g.last_updated.clone()}</time>
+                                                    </div>
+                                                    <h2>{g.title.clone()}</h2>
+                                                    <p>{g.standfirst.clone()}</p>
+                                                    <div class="topic-heat" aria-label=format!("Heat {heat}")>
+                                                        <span style=format!("width:{heat}%")></span>
+                                                    </div>
+                                                    <div class="topic-radar-meta">
+                                                        <span>{match language {
                                                             "zh" => format!("{} 家来源", g.sources),
-                                                            "fr" => format!("{} médias", g.sources),
-                                                            _ => format!("{} outlets", g.sources),
-                                                        }
-                                                    }}
-                                                </span>
-                                            </a>
-                                        }
-                                    })
-                                        .collect_view()}
+                                                            "zh-hant" => format!("{} 個來源", g.sources),
+                                                            "fr" => format!("{} sources", g.sources),
+                                                            "es" => format!("{} fuentes", g.sources),
+                                                            "ja" => format!("{} 情報源", g.sources),
+                                                            "ko" => format!("출처 {}개", g.sources),
+                                                            _ => format!("{} sources", g.sources),
+                                                        }}</span>
+                                                        <span>{match language {
+                                                            "zh" | "zh-hant" => format!("{} 篇报道", g.stories),
+                                                            "fr" => format!("{} articles", g.stories),
+                                                            "es" => format!("{} artículos", g.stories),
+                                                            "ja" => format!("{} 本の記事", g.stories),
+                                                            "ko" => format!("기사 {}건", g.stories),
+                                                            _ => format!("{} stories", g.stories),
+                                                        }}</span>
+                                                    </div>
+                                                </a>
+                                            }
+                                        }).collect_view()}
+                                    </div>
                                 </div>
                             </div>
                         }
@@ -359,12 +541,12 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                             let promoted = rest.remove(0);
                             let feature: Vec<_> = rest.drain(..rest.len().min(4)).collect();
                             view! {
-                                <LeadStory story=promoted language />
+                                <LeadStory story=promoted />
                                 {(!feature.is_empty())
                                     .then(|| {
                                         view! {
                                             <div class="rail-title">
-                                                <span>{match language { "zh" => "今日更多", "fr" => "Également aujourd’hui", _ => "Also today" }}</span>
+                                                <span>"Also today"</span>
                                             </div>
                                             <div class="card-grid">
                                                 {feature
@@ -378,8 +560,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                     .then(|| {
                                         view! {
                                             <div class="rail-title">
-                                                <span>{match language { "zh" => "快讯", "fr" => "Le fil", _ => "The Wire" }}</span>
-                                                <a href=match language { "zh" => "/zh/wire", "fr" => "/fr/wire", _ => "/wire" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
+                                                <span>"The Wire"</span>
+                                                <a href=format!("{}/wire", language_prefix(language))>"All"</a>
                                             </div>
                                             <div class="wire-full">
                                                 {rest
@@ -417,13 +599,13 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                             view! {
                                 <div class="split">
                                     <div>
-                                        <LeadStory story=lead language />
+                                        <LeadStory story=lead />
                                         {(!desk_is_empty)
                                             .then(|| {
                                                 view! {
                                                     <div class="rail-title">
-                                                        <span>{match language { "zh" => "更多原创", "fr" => "Plus de dossiers", _ => "More from the Desk" }}</span>
-                                                        <a href=match language { "zh" => "/zh/desk", "fr" => "/fr/desk", _ => "/desk" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
+                                                        <span>"More from the Desk"</span>
+                                                        <a href=format!("{}/desk", language_prefix(language))>"All"</a>
                                                     </div>
                                                     <div class="card-grid">
                                                         {desk
@@ -437,8 +619,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                             .then(|| {
                                                 view! {
                                                     <div class="rail-title">
-                                                        <span>{match language { "zh" => "最新", "fr" => "Derniers articles", _ => "Latest" }}</span>
-                                                        <a href=match language { "zh" => "/zh/wire", "fr" => "/fr/wire", _ => "/wire" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
+                                                        <span>"Latest"</span>
+                                                        <a href=format!("{}/wire", language_prefix(language))>"All"</a>
                                                     </div>
                                                     <div class="card-grid">
                                                         {filler
@@ -451,8 +633,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                     </div>
                                     <aside>
                                         <div class="rail-title">
-                                            <span>{match language { "zh" => "快讯", "fr" => "Le fil", _ => "The Wire" }}</span>
-                                            <a href=match language { "zh" => "/zh/wire", "fr" => "/fr/wire", _ => "/wire" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
+                                            <span>"The Wire"</span>
+                                            <a href=format!("{}/wire", language_prefix(language))>"All"</a>
                                         </div>
                                         {wire
                                             .into_iter()
@@ -471,15 +653,18 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
 }
 
 #[component]
-fn HonkBar(story: StoryCard, language: &'static str) -> impl IntoView {
+fn HonkBar(story: StoryCard) -> impl IntoView {
+    let path = use_location().pathname.get();
+    let language = language_from_path(&path);
+    let href = format!("{}/story/{}", language_prefix(language), story.slug);
     view! {
         <div class="honk">
             <div class="shell">
                 <span class="honk-tag">
                     <span class="honk-dot"></span>
-                    {match language { "zh" => "突发", "fr" => "ALERTE", _ => "HONK" }}
+                    {match language { "zh" => "突发", "zh-hant" => "突發", "ja" => "速報", "ko" => "속보", _ => "Breaking" }}
                 </span>
-                <a href=format!("/story/{}", story.slug) class="honk-text">
+                <a href=href class="honk-text">
                     {story.title.clone()}
                 </a>
             </div>
@@ -488,7 +673,10 @@ fn HonkBar(story: StoryCard, language: &'static str) -> impl IntoView {
 }
 
 #[component]
-fn LeadStory(story: StoryCard, language: &'static str) -> impl IntoView {
+fn LeadStory(story: StoryCard) -> impl IntoView {
+    let path = use_location().pathname.get();
+    let prefix = language_prefix(language_from_path(&path));
+    let href = format!("{prefix}/story/{}", story.slug);
     view! {
         <article class="lead-story">
             <div class="meta">
@@ -498,14 +686,14 @@ fn LeadStory(story: StoryCard, language: &'static str) -> impl IntoView {
                 <span class="dot">"·"</span>
                 <span class="src-count">
                     <strong>{story.source_count}</strong>
-                    {match language { "zh" => " 家独立来源", "fr" => " sources indépendantes", _ => " independent sources" }}
+                    " independent sources"
                 </span>
             </div>
             <h2>
-                <a href=format!("/story/{}", story.slug)>{story.title.clone()}</a>
+                <a href=href.clone()>{story.title.clone()}</a>
             </h2>
             {(!story.dek.is_empty()).then(|| view! { <p class="dek">{story.dek.clone()}</p> })}
-            <a href=format!("/story/{}", story.slug) class="lead-media-link">
+            <a href=href class="lead-media-link">
                 <SourcedImage
                     url=story.image_url.clone()
                     alt=story.title.clone()
@@ -533,8 +721,30 @@ pub fn DeskEn() -> impl IntoView {
 }
 
 #[component]
+pub fn DeskZhHant() -> impl IntoView {
+    DeskEdition(DeskEditionProps {
+        language: "zh-hant",
+    })
+}
+
+#[component]
 pub fn DeskFr() -> impl IntoView {
     DeskEdition(DeskEditionProps { language: "fr" })
+}
+
+#[component]
+pub fn DeskEs() -> impl IntoView {
+    DeskEdition(DeskEditionProps { language: "es" })
+}
+
+#[component]
+pub fn DeskJa() -> impl IntoView {
+    DeskEdition(DeskEditionProps { language: "ja" })
+}
+
+#[component]
+pub fn DeskKo() -> impl IntoView {
+    DeskEdition(DeskEditionProps { language: "ko" })
 }
 
 #[component]
@@ -543,24 +753,23 @@ fn DeskEdition(language: &'static str) -> impl IntoView {
         move || language,
         |lang| get_stories("desk".into(), 40, lang.into()),
     );
-    let english = language == "en";
-    let french = language == "fr";
+    let (page_title, heading, lede) = match language {
+        "en" => ("The Desk — BitGoose", "The Desk", "Original reporting synthesized across independent sources, with every claim open to inspection."),
+        "zh-hant" => ("原創報道 — BitGoose 繁中", "原創報道", "綜合多個獨立來源的原創報道；每項事實主張都可沿證據鏈核查。"),
+        "fr" => ("Dossiers — BitGoose Français", "Dossiers", "Des synthèses originales issues de sources indépendantes, avec chaque affirmation vérifiable."),
+        "es" => ("Análisis — BitGoose Español", "Análisis", "Síntesis originales de fuentes independientes, con cada afirmación abierta a verificación."),
+        "ja" => ("独自報道 — BitGoose", "独自報道", "複数の独立した情報源を統合し、すべての主張を検証可能にした独自報道。"),
+        "ko" => ("자체 보도 — BitGoose", "자체 보도", "복수의 독립 출처를 종합하고 모든 주장을 검증할 수 있는 자체 보도입니다."),
+        _ => ("原创报道 — BitGoose 中文", "原创报道", "跨独立来源综合的原创报道；每一项事实主张都可以沿证据链核查。"),
+    };
     view! {
-        <Title text=if english { "The Desk — BitGoose" } else if french { "Dossiers — BitGoose Français" } else { "原创报道 — BitGoose 中文" } />
+        <Title text=page_title />
         <div class="shell page">
             <div class="page-head">
-                <h1>{if english { "The Desk" } else if french { "Dossiers" } else { "原创报道" }}</h1>
-                <p class="lede">
-                    {if english {
-                        "Original reporting synthesized across independent sources, with every claim open to inspection."
-                    } else if french {
-                        "Des synthèses originales issues de sources indépendantes, avec chaque affirmation ouverte à la vérification."
-                    } else {
-                        "跨独立来源综合的原创报道；每一项事实主张都可以沿证据链核查。"
-                    }}
-                </p>
+                <h1>{heading}</h1>
+                <p class="lede">{lede}</p>
             </div>
-            <SectionNav />
+            <SectionNav language=language />
             {loaded!(
                 data,
                 |stories| {
@@ -596,13 +805,8 @@ pub fn Gaggle() -> impl IntoView {
     let location = use_location();
     let data = Resource::new(
         move || {
-            let language = if location.pathname.get().starts_with("/zh/") {
-                "zh"
-            } else if location.pathname.get().starts_with("/fr/") {
-                "fr"
-            } else {
-                "en"
-            };
+            let path = location.pathname.get();
+            let language = language_from_path(&path);
             (
                 params.read().get("slug").unwrap_or_default(),
                 language.to_string(),
@@ -626,17 +830,13 @@ pub fn Gaggle() -> impl IntoView {
                     let c = g.card.clone();
                     let stories = g.stories.clone();
                     let has_model = !c.model.is_empty();
-                    let english = c.language == "en";
-                    let french = c.language == "fr";
-                    let topic_path = if c.language == "zh" {
-                        format!("/zh/gaggle/{}", c.slug)
-                    } else if c.language == "fr" {
-                        format!("/fr/gaggle/{}", c.slug)
-                    } else {
-                        format!("/gaggle/{}", c.slug)
-                    };
+                    let topic_path = format!("{}/gaggle/{}", language_prefix(&c.language), c.slug);
                     view! {
-                        <Title text=format!("{} — BitGoose", c.title) />
+                        <Title text=format!(
+                            "{} — {}",
+                            c.title,
+                            site_name(&c.language),
+                        ) />
                         <ShareMeta
                             title=c.title.clone()
                             description=c.standfirst.clone()
@@ -644,39 +844,19 @@ pub fn Gaggle() -> impl IntoView {
                         />
                         <div class="shell page">
                             <div class="gaggle-head">
-                                <span class="gaggle-tag">{if english { "Special topic" } else if french { "Sujet spécial" } else { "新闻专题" }}</span>
+                                <span class="gaggle-tag">{topic_label(&c.language)}</span>
                                 <h1>{c.title.clone()}</h1>
                                 <p class="lede">{c.standfirst.clone()}</p>
                                 // The argument for the page existing, stated
                                 // rather than implied.
                                 <p class="gaggle-why">
-                                    {if c.pinned {
-                                        if english {
-                                            "Permanent watch · continuously refreshed from first-party and independent sources. ".to_string()
-                                        } else if french {
-                                            "Suivi permanent · actualisé à partir de sources primaires et indépendantes. ".to_string()
-                                        } else {
-                                            "长期追踪 · 持续汇入一手文件与独立报道。 ".to_string()
-                                        }
-                                    } else if english {
-                                        format!("Opened after {} independent outlets converged within two days. ", c.sources)
-                                    } else if french {
-                                        format!("Ouvert après la convergence de {} médias indépendants en deux jours. ", c.sources)
-                                    } else {
-                                        format!("因两日内 {} 家独立来源集中报道而建立。 ", c.sources)
-                                    }}
-                                    {if english {
-                                        format!("{} BitGoose stories collected.", stories.len())
-                                    } else if french {
-                                        format!("{} articles BitGoose rassemblés.", stories.len())
-                                    } else {
-                                        format!("已收录 {} 篇 BitGoose 报道。", stories.len())
-                                    }}
+                                    {topic_intro(&c.language, c.pinned, c.sources)}
+                                    {topic_story_count(&c.language, stories.len())}
                                     {has_model
                                         .then(|| {
                                             view! {
                                                 <span class="gaggle-model">
-                                                    {if english { " · Briefed by " } else if french { " · Synthèse : " } else { " · 简报模型：" }}
+                                                    {match c.language.as_str() { "en" => " · Briefed by ", "fr" => " · Synthèse : ", "es" => " · Síntesis: ", "zh-hant" => " · 簡報模型：", "ja" => " · 要約モデル: ", "ko" => " · 브리핑 모델: ", _ => " · 简报模型：" }}
                                                     {c.model.clone()}
                                                 </span>
                                             }
@@ -694,7 +874,7 @@ pub fn Gaggle() -> impl IntoView {
                                             <aside class="topic-rail">
                                                 <div class="topic-rail-block">
                                                     <div class="rail-title">
-                                                        <span>{if english { "What to watch" } else if french { "À surveiller" } else { "接下来观察" }}</span>
+                                                        <span>{match c.language.as_str() { "en" => "What to watch", "fr" => "À surveiller", "es" => "Qué vigilar", "zh-hant" => "接下來觀察", "ja" => "今後の注目点", "ko" => "향후 관전 포인트", _ => "接下来观察" }}</span>
                                                     </div>
                                                     <ul class="topic-watchlist">
                                                         {watch.into_iter().map(|w| view! { <li>{w}</li> }).collect_view()}
@@ -702,7 +882,7 @@ pub fn Gaggle() -> impl IntoView {
                                                 </div>
                                                 <div class="topic-rail-block">
                                                     <div class="rail-title">
-                                                        <span>{if english { "Primary record" } else if french { "Sources primaires" } else { "一手文件" }}</span>
+                                                        <span>{match c.language.as_str() { "en" => "Primary record", "fr" => "Sources primaires", "es" => "Fuentes primarias", "ja" => "一次資料", "ko" => "1차 자료", _ => "一手文件" }}</span>
                                                     </div>
                                                     <ol class="topic-sources">
                                                         {sources
@@ -718,12 +898,12 @@ pub fn Gaggle() -> impl IntoView {
                                     }
                                 })}
                             <div class="topic-story-head">
-                                <h2>{if english { "Latest coverage" } else if french { "Derniers articles" } else { "最新报道" }}</h2>
+                                <h2>{match c.language.as_str() { "en" => "Latest coverage", "fr" => "Derniers articles", "es" => "Última cobertura", "zh-hant" => "最新報道", "ja" => "最新記事", "ko" => "최신 보도", _ => "最新报道" }}</h2>
                             </div>
                             {if stories.is_empty() {
                                 view! {
                                     <Empty
-                                        message=if english { "The live brief is open; related reporting is entering the pipeline." } else { "专题简报已上线，相关报道正在进入编辑流程。" }
+                                        message=match c.language.as_str() { "en" => "The live brief is open; related reporting is entering the pipeline.", "fr" => "Le suivi est ouvert; les articles associés entrent dans le flux éditorial.", "es" => "El seguimiento está abierto; la cobertura relacionada está entrando en el flujo editorial.", "zh-hant" => "專題簡報已上線，相關報道正在進入編輯流程。", "ja" => "特集は公開済みです。関連報道を編集工程に取り込んでいます。", "ko" => "특집 브리핑이 공개되었습니다. 관련 보도가 편집 과정에 들어오고 있습니다.", _ => "专题简报已上线，相关报道正在进入编辑流程。" }
                                         hint=""
                                     />
                                 }
@@ -759,8 +939,30 @@ pub fn WireEn() -> impl IntoView {
 }
 
 #[component]
+pub fn WireZhHant() -> impl IntoView {
+    WireEdition(WireEditionProps {
+        language: "zh-hant",
+    })
+}
+
+#[component]
 pub fn WireFr() -> impl IntoView {
     WireEdition(WireEditionProps { language: "fr" })
+}
+
+#[component]
+pub fn WireEs() -> impl IntoView {
+    WireEdition(WireEditionProps { language: "es" })
+}
+
+#[component]
+pub fn WireJa() -> impl IntoView {
+    WireEdition(WireEditionProps { language: "ja" })
+}
+
+#[component]
+pub fn WireKo() -> impl IntoView {
+    WireEdition(WireEditionProps { language: "ko" })
 }
 
 #[component]
@@ -769,24 +971,23 @@ fn WireEdition(language: &'static str) -> impl IntoView {
         move || language,
         |lang| get_stories("wire".into(), 60, lang.into()),
     );
-    let english = language == "en";
-    let french = language == "fr";
+    let (page_title, heading, lede) = match language {
+        "en" => ("The Wire — BitGoose", "The Wire", "The latest verified reporting, summarized in our own words and linked to the original source."),
+        "zh-hant" => ("全球快訊 — BitGoose 繁中", "全球快訊", "全天候捕捉全球頭條，以原創文字摘要，並直接連結最初報道來源。"),
+        "fr" => ("Le fil — BitGoose Français", "Le fil", "Les dernières informations vérifiées, résumées dans nos propres mots et reliées aux sources originales."),
+        "es" => ("Últimas noticias — BitGoose Español", "Últimas noticias", "Información reciente verificada, resumida con palabras propias y enlazada a sus fuentes originales."),
+        "ja" => ("速報 — BitGoose", "速報", "検証した最新ニュースを独自に要約し、元の情報源へ直接リンクします。"),
+        "ko" => ("속보 — BitGoose", "속보", "검증된 최신 뉴스를 자체 요약하고 원문 출처로 직접 연결합니다."),
+        _ => ("全球快讯 — BitGoose 中文", "全球快讯", "全天候捕捉全球头条，以原创文字摘要，并直接链接最初报道来源。"),
+    };
     view! {
-        <Title text=if english { "The Wire — BitGoose" } else if french { "Le fil — BitGoose Français" } else { "全球快讯 — BitGoose 中文" } />
+        <Title text=page_title />
         <div class="shell page">
             <div class="page-head">
-                <h1>{if english { "The Wire" } else if french { "Le fil" } else { "全球快讯" }}</h1>
-                <p class="lede">
-                    {if english {
-                        "The latest verified reporting, summarized in our own words and linked to the original source."
-                    } else if french {
-                        "Les dernières nouvelles de l’IA, de la crypto, des marchés et de la technologie, sélectionnées par la rédaction autonome."
-                    } else {
-                        "全天候捕捉全球头条，以原创文字摘要，并直接链接最初报道来源。"
-                    }}
-                </p>
+                <h1>{heading}</h1>
+                <p class="lede">{lede}</p>
             </div>
-            <SectionNav />
+            <SectionNav language=language />
             {loaded!(
                 data,
                 |stories| {
@@ -811,10 +1012,13 @@ fn WireEdition(language: &'static str) -> impl IntoView {
 
 #[component]
 fn WireRow(story: StoryCard, #[prop(optional)] show_beat: bool) -> impl IntoView {
+    let path = use_location().pathname.get();
+    let prefix = language_prefix(language_from_path(&path));
+    let href = format!("{prefix}/story/{}", story.slug);
     view! {
         <article class="wire-item">
             <time class="wire-time">{story.ago.clone()}</time>
-            <a href=format!("/story/{}", story.slug) class="wire-thumb-link" aria-hidden="true" tabindex="-1">
+            <a href=href.clone() class="wire-thumb-link" aria-hidden="true" tabindex="-1">
                 <SourcedImage
                     url=story.image_url.clone()
                     alt=String::new()
@@ -826,7 +1030,7 @@ fn WireRow(story: StoryCard, #[prop(optional)] show_beat: bool) -> impl IntoView
             </a>
             <div>
                 <h3 class="wire-title">
-                    <a href=format!("/story/{}", story.slug)>{story.title.clone()}</a>
+                    <a href=href>{story.title.clone()}</a>
                 </h3>
                 {(!story.dek.is_empty())
                     .then(|| view! { <p class="wire-summary">{story.dek.clone()}</p> })}
@@ -892,8 +1096,30 @@ pub fn SectionEn() -> impl IntoView {
 }
 
 #[component]
+pub fn SectionZhHant() -> impl IntoView {
+    SectionEdition(SectionEditionProps {
+        language: "zh-hant",
+    })
+}
+
+#[component]
 pub fn SectionFr() -> impl IntoView {
     SectionEdition(SectionEditionProps { language: "fr" })
+}
+
+#[component]
+pub fn SectionEs() -> impl IntoView {
+    SectionEdition(SectionEditionProps { language: "es" })
+}
+
+#[component]
+pub fn SectionJa() -> impl IntoView {
+    SectionEdition(SectionEditionProps { language: "ja" })
+}
+
+#[component]
+pub fn SectionKo() -> impl IntoView {
+    SectionEdition(SectionEditionProps { language: "ko" })
 }
 
 #[component]
@@ -914,7 +1140,10 @@ fn SectionEdition(language: &'static str) -> impl IntoView {
             |pair| {
                 let (label, stories) = pair;
                 view! {
-                    <Title text=format!("{label} — BitGoose") />
+                    <Title text=format!(
+                        "{label} — {}",
+                        site_name(language),
+                    ) />
                     <div class="shell page">
                         <div class="page-head">
                             <h1>{label.clone()}</h1>
@@ -922,7 +1151,7 @@ fn SectionEdition(language: &'static str) -> impl IntoView {
                                 {format!("Everything the newsroom has filed under {label}.")}
                             </p>
                         </div>
-                        <SectionNav />
+                        <SectionNav language=language />
                         {if stories.is_empty() {
                             view! {
                                 <Empty
@@ -952,15 +1181,23 @@ fn SectionEdition(language: &'static str) -> impl IntoView {
 /// Chips for every section. Rendered from the enum so a new desk cannot be
 /// added to the domain and silently left out of the navigation.
 #[component]
-pub fn SectionNav() -> impl IntoView {
+pub fn SectionNav(#[prop(default = "en")] language: &'static str) -> impl IntoView {
     view! {
         <div class="chip-row" style="margin-bottom:1.5rem">
             {bg_core::domain::Category::ALL
                 .iter()
                 .map(|c| {
                     view! {
-                        <a class="chip" href=format!("/section/{}", c.as_str())>
-                            {c.label()}
+                        <a class="chip" href=format!("{}/section/{}", language_prefix(language), c.as_str())>
+                            {match language {
+                                "zh" => c.label_zh(),
+                                "zh-hant" => c.label_zh_hant(),
+                                "fr" => c.label_fr(),
+                                "es" => c.label_es(),
+                                "ja" => c.label_ja(),
+                                "ko" => c.label_ko(),
+                                _ => c.label(),
+                            }}
                         </a>
                     }
                 })
@@ -1008,9 +1245,40 @@ fn StoryView(story: StoryPage) -> impl IntoView {
     let quotes = story.quotes.clone();
     let analysis = story.analysis.clone();
     let has_claims = !claims.is_empty();
+    let canonical_path = story
+        .canonical
+        .split_once("://")
+        .and_then(|(_, rest)| rest.find('/').map(|at| &rest[at..]))
+        .unwrap_or(story.canonical.as_str());
+    let language = language_from_path(canonical_path);
+    let site_name = site_name(language);
+    let (reading_label, byline, sources_label, claims_label) = match language {
+        "zh" => ("分钟阅读", "BitGoose AI 编辑部", "个来源", "项已核查主张"),
+        "zh-hant" => ("分鐘閱讀", "BitGoose AI 編輯部", "個來源", "項已核查主張"),
+        "fr" => (
+            "min de lecture",
+            "Rédaction IA BitGoose",
+            "sources",
+            "affirmations vérifiées",
+        ),
+        "es" => (
+            "min de lectura",
+            "Redacción IA BitGoose",
+            "fuentes",
+            "afirmaciones verificadas",
+        ),
+        "ja" => (
+            "分で読めます",
+            "BitGoose AI編集部",
+            "件の情報源",
+            "件の検証済み主張",
+        ),
+        "ko" => ("분 분량", "BitGoose AI 편집국", "개 출처", "개 검증된 주장"),
+        _ => ("min read", "BitGoose AI Desk", "sources", "verified claims"),
+    };
 
     view! {
-        <Title text=format!("{} — BitGoose", story.headline) />
+        <Title text=format!("{} — {site_name}", story.headline) />
         <StoryMeta story=story.clone() />
         <div class="shell page">
             <div class="split">
@@ -1021,18 +1289,18 @@ fn StoryView(story: StoryPage) -> impl IntoView {
                             <span class="dot">"·"</span>
                             <time>{story.published_at.clone()}</time>
                             <span class="dot">"·"</span>
-                            <span>{story.reading_time_min}" min read"</span>
+                            <span>{story.reading_time_min}" "{reading_label}</span>
                         </div>
                         <h1>{story.headline.clone()}</h1>
                         {(!story.dek.is_empty())
                             .then(|| view! { <p class="dek">{story.dek.clone()}</p> })}
                         <div class="byline">
                             <GooseMark size=18 />
-                            <span>"BitGoose AI 编辑部"</span>
+                            <span>{byline}</span>
                             <span class="dot">"·"</span>
                             <span class="src-count">
                                 <strong>{sources.len()}</strong>
-                                " sources"
+                                " "{sources_label}
                             </span>
                             {has_claims
                                 .then(|| {
@@ -1041,7 +1309,7 @@ fn StoryView(story: StoryPage) -> impl IntoView {
                                             <span class="dot">"·"</span>
                                             <span class="src-count">
                                                 <strong>{claims.len()}</strong>
-                                                " verified claims"
+                                                " "{claims_label}
                                             </span>
                                         </>
                                     }
@@ -1306,7 +1574,7 @@ fn ProvenanceStrip(runs: Vec<RunLine>) -> impl IntoView {
 pub fn Flock() -> impl IntoView {
     let data = Resource::new(|| (), |_| get_flock());
     view! {
-        <Title text="AI 编辑部 — BitGoose" />
+        <Title text="AI 编辑部 — BitGoose 中文" />
         <div class="shell page">
             <div class="page-head">
                 <h1>"AI 编辑部"</h1>
@@ -1477,7 +1745,7 @@ fn AgentTile(agent: AgentCard) -> impl IntoView {
 pub fn Prices() -> impl IntoView {
     let data = Resource::new(|| (), |_| get_prices());
     view! {
-        <Title text="Markets — BitGoose" />
+        <Title text="Markets — BitGoose 中文" />
         <div class="shell page">
             <div class="page-head">
                 <h1>"Markets"</h1>
@@ -1629,29 +1897,50 @@ pub fn FlywayEn() -> impl IntoView {
 }
 
 #[component]
+pub fn FlywayZhHant() -> impl IntoView {
+    FlywayEdition(FlywayEditionProps {
+        language: "zh-hant",
+    })
+}
+
+#[component]
 pub fn FlywayFr() -> impl IntoView {
     FlywayEdition(FlywayEditionProps { language: "fr" })
 }
 
 #[component]
+pub fn FlywayEs() -> impl IntoView {
+    FlywayEdition(FlywayEditionProps { language: "es" })
+}
+
+#[component]
+pub fn FlywayJa() -> impl IntoView {
+    FlywayEdition(FlywayEditionProps { language: "ja" })
+}
+
+#[component]
+pub fn FlywayKo() -> impl IntoView {
+    FlywayEdition(FlywayEditionProps { language: "ko" })
+}
+
+#[component]
 fn FlywayEdition(language: &'static str) -> impl IntoView {
-    let english = language == "en";
-    let french = language == "fr";
+    let (page_title, heading, lede, active) = match language {
+        "en" => ("Topics — BitGoose", "Topics", "Persistent investigations and subjects drawing convergent coverage, followed by the newsroom’s two-week trend map.", "Active special topics"),
+        "zh-hant" => ("新聞專題 — BitGoose 繁中", "新聞專題", "長期追蹤的重要議題、正在形成報道聚合的專題，以及編輯部最近兩週的新聞熱度圖。", "正在追蹤"),
+        "fr" => ("Sujets — BitGoose Français", "Sujets", "Enquêtes persistantes, sujets à forte convergence et carte des tendances des deux dernières semaines.", "Sujets actifs"),
+        "es" => ("Temas — BitGoose Español", "Temas", "Seguimientos permanentes, asuntos con cobertura convergente y tendencias de las últimas dos semanas.", "Temas activos"),
+        "ja" => ("特集 — BitGoose", "特集", "継続調査、複数媒体の報道が集中するテーマ、直近2週間のニュース動向をまとめます。", "追跡中の特集"),
+        "ko" => ("특집 — BitGoose", "특집", "지속 조사와 보도가 집중되는 주제, 최근 2주 뉴스 흐름을 한곳에서 추적합니다.", "추적 중인 특집"),
+        _ => ("新闻专题 — BitGoose 中文", "新闻专题", "长期追踪的重要议题、正在形成报道聚合的专题，以及编辑部最近两周的新闻热度图。", "正在追踪"),
+    };
     let data = Resource::new(move || language, |lang| get_flyway(lang.to_string()));
     view! {
-        <Title text=if english { "Topics — BitGoose" } else if french { "Sujets — BitGoose Français" } else { "新闻专题 — BitGoose 中文" } />
+        <Title text=page_title />
         <div class="shell page">
             <div class="page-head">
-                <h1>{if english { "Topics" } else if french { "Sujets" } else { "新闻专题" }}</h1>
-                <p class="lede">
-                    {if english {
-                        "Persistent investigations and subjects drawing convergent coverage, followed by the newsroom’s two-week trend map."
-                    } else if french {
-                        "Les sujets suivis dans la durée, les convergences de couverture et la carte des tendances des deux dernières semaines."
-                    } else {
-                        "长期追踪的重要议题、正在形成报道聚合的专题，以及编辑部最近两周的新闻热度图。"
-                    }}
-                </p>
+                <h1>{heading}</h1>
+                <p class="lede">{lede}</p>
             </div>
             {loaded!(
                 data,
@@ -1669,23 +1958,24 @@ fn FlywayEdition(language: &'static str) -> impl IntoView {
                             {(!topics.is_empty()).then(|| view! {
                                 <section class="topic-index">
                                     <div class="rail-title">
-                                        <span>{if english { "Active special topics" } else if french { "Sujets suivis" } else { "正在追踪" }}</span>
+                                        <span>{active}</span>
                                     </div>
                                     <div class="topic-index-grid">
                                         {topics.into_iter().map(|t| {
-                                            let href = if language == "zh" {
-                                                format!("/zh/gaggle/{}", t.slug)
-                                            } else if language == "fr" {
-                                                format!("/fr/gaggle/{}", t.slug)
-                                            } else {
-                                                format!("/gaggle/{}", t.slug)
-                                            };
+                                            let href = format!("{}/gaggle/{}", language_prefix(language), t.slug);
                                             view! {
                                                 <a class="topic-index-card" href=href>
-                                                    <span class="gaggle-tag">{if t.pinned { if english { "LIVE" } else { "长期追踪" } } else { if english { "TREND" } else { "热点" } }}</span>
+                                                    <span class="gaggle-tag">{if t.pinned { live_label(language) } else { topic_label(language) }}</span>
                                                     <h2>{t.title}</h2>
                                                     <p>{t.standfirst}</p>
-                                                    <span class="topic-index-meta">{if english { format!("{} stories", t.stories) } else { format!("{} 篇报道", t.stories) }}</span>
+                                                    <span class="topic-index-meta">{match language {
+                                                        "en" => format!("{} stories", t.stories),
+                                                        "fr" => format!("{} articles", t.stories),
+                                                        "es" => format!("{} artículos", t.stories),
+                                                        "ja" => format!("{} 本の記事", t.stories),
+                                                        "ko" => format!("기사 {}건", t.stories),
+                                                        _ => format!("{} 篇报道", t.stories),
+                                                    }}</span>
                                                 </a>
                                             }
                                         }).collect_view()}

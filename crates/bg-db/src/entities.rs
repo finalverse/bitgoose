@@ -85,12 +85,22 @@ pub async fn link_story(db: &Db, entity: EntityId, story: StoryId, salience: f32
 
 /// Entities most covered in a window — the `/flyway` "who is in the news" rail.
 pub async fn trending(db: &Db, days: i32, limit: i64) -> Result<Vec<(Entity, i64)>> {
+    trending_for_language(db, bg_core::domain::EditorialLanguage::En, days, limit).await
+}
+
+pub async fn trending_for_language(
+    db: &Db,
+    language: bg_core::domain::EditorialLanguage,
+    days: i32,
+    limit: i64,
+) -> Result<Vec<(Entity, i64)>> {
     let rows = crate::sql(format!(
         "SELECT {}, count(m.story_id) AS n
          FROM entities e
          JOIN entity_mentions m ON m.entity_id = e.id
          JOIN stories s ON s.id = m.story_id
-         WHERE s.status = 'published' AND s.published_at > now() - make_interval(days => $1)
+         WHERE s.status = 'published' AND s.editorial_language = $3
+           AND s.published_at > now() - make_interval(days => $1)
          GROUP BY e.id
          ORDER BY n DESC, e.name
          LIMIT $2",
@@ -101,6 +111,7 @@ pub async fn trending(db: &Db, days: i32, limit: i64) -> Result<Vec<(Entity, i64
     ))
     .bind(days)
     .bind(limit)
+    .bind(language.as_str())
     .fetch_all(&db.pool)
     .await?;
     rows.iter()

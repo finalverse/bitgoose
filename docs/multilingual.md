@@ -1,115 +1,62 @@
-# Multi-lingual BitGoose — a plan
+# BitGoose global editions
 
-Status: **plan, not yet built.** The groundwork (language tag normalisation) is
-in. Everything below is a decision record so the build is a series of small
-steps rather than one large guess.
+Status: **implemented.** BitGoose operates seven independent editorial editions:
 
-## Where we start
+| Edition | Path | Editorial language |
+|---|---|---|
+| English | `/` | `en` |
+| 简体中文 | `/zh` | `zh` |
+| 繁體中文 | `/zh-hant` | `zh-hant` |
+| Français | `/fr` | `fr` |
+| Español | `/es` | `es` |
+| 日本語 | `/ja` | `ja` |
+| 한국어 | `/ko` | `ko` |
 
-The corpus is 100% English: 1,396 items, spelled `en-us`, `en` and `en-US` —
-three tags for one language, which is why `text::normalize_lang` now exists. A
-per-language surface built on the raw value would have missed most of its own
-rows.
+These are native newsrooms, not translated mirrors. Each edition has its own
+source queue, story selection, headlines, topic clusters and analysis. A story
+published in one edition need not exist in another.
 
-`lang` was stored and read by nothing. That is the first thing to change, and
-it is cheap.
+## Editorial architecture
 
-## The decision that shapes everything else
+- The source's configured language is authoritative at ingest. Language tags
+  are normalized at the boundary, with Traditional Chinese kept separate from
+  Simplified Chinese.
+- Scheduling is language-aware and source-fair. English receives two slots per
+  round; every other active edition receives one, preventing a high-volume
+  English feed from starving a smaller newsroom.
+- Story, topic, trend, entity and flyway queries are filtered by editorial
+  language. Cross-language topic membership is rejected during migration.
+- Trend detection handles Latin text, CJK text and Hangul without a model. A
+  trend needs convergence from independent publishers; several feeds owned by
+  one publisher count once.
+- Every edition continuously tracks Bitcoin policy and institutional adoption,
+  the frontier AI race, and AI chips/compute supply. Fast-moving clusters are
+  promoted into additional language-local topics automatically.
 
-There are two products here and they are not the same:
+## Sources
 
-**(a) Translate BitGoose into other languages.** One newsroom, many renderings.
-The Chinese reader gets our English-sourced analysis in Chinese.
+The global roster combines primary documents and local specialist reporting.
+The Japanese edition includes CoinPost, ITmedia and あたらしい経済; Korean
+includes AI Times, Blockmedia and TokenPost; Traditional Chinese includes
+ABMedia, iThome and RTHK; Spanish includes Xataka, Genbeta, Hipertextual,
+DiarioBitcoin, BeInCrypto Español and The Cryptonomist Español. Google News
+queries provide discovery for AI, crypto and technology in each language, but
+all links from the same Google News publisher are collapsed for independence
+scoring.
 
-**(b) Report in other languages from sources in those languages.** A Chinese
-desk reading Chinese sources, whose stories may never exist in English.
+## AI newsroom rules
 
-(a) is a translation feature. (b) is a second newsroom.
+`prompts/master-system.md` is the binding house prompt for every agent and
+language. It requires source attribution, explicit separation of fact and
+analysis, careful treatment of market claims, and original synthesis rather
+than republishing copyrighted articles. Model output must be native to the
+edition and may not be a mechanical translation of another edition.
 
-**Recommendation: (b), starting narrow.** (a) is cheaper and worse — it makes
-BitGoose a machine-translated mirror of an anglophone view, competing with
-Google Translate on someone else's reporting. (b) is the only version that
-produces something a reader cannot get elsewhere: Chinese and Japanese crypto
-and AI coverage that English-language outlets do not carry, run through the same
-claim graph and the same corroboration standard.
+## Operations
 
-The Skein's whole argument is that a claim shows its sources. That argument
-travels; a translation layer does not.
-
-## Why this is now feasible
-
-Until v0.12.0 a source had to publish RSS. Most non-English outlets that matter
-here do not, or publish a truncated one. `bg-ingest::crawl` reads index pages
-directly, so the source roster is no longer limited to publishers who chose to
-emit XML.
-
-## Order of work
-
-**1. Make `lang` real** (small, no model cost)
-- Store the normalised tag — done at ingest
-- Backfill the existing corpus
-- Filter every surface by language; default to the reader's `Accept-Language`,
-  overridable and remembered
-- `hreflang` on every page, so search engines see one story in N languages
-  rather than N duplicate pages
-
-**2. Language-aware relevance** (small)
-`bg-ingest::relevance` routes by English keywords. A Chinese headline about
-比特币 matches nothing and is dropped before it reaches triage. The term tables
-need a per-language set; this is a data problem, not a model one.
-
-**3. Trend detection per language** (small)
-`bg-core::trends` extracts capitalised runs, which is an assumption about
-*English orthography*. Chinese and Japanese have no capitalisation and no spaces
-— the extractor returns nothing. Options, cheapest first:
-- CJK: n-gram frequency over character bigrams/trigrams, scored the same way
-  (independent-source convergence). No model, no dictionary.
-- A per-language stopword list, as English has.
-Convergence scoring itself is language-neutral and does not change.
-
-**4. Sources** (data)
-Candidate first languages, chosen for depth of coverage in this beat:
-- **Chinese** — 链闻/ChainNews, 巴比特, 36氪 (tech). Check robots.txt first;
-  several are crawl-friendly, some are not.
-- **Japanese** — CoinPost, ITmedia.
-- **Korean** — 코인데스크코리아 (CoinDesk Korea is a separate newsroom).
-Each needs the robots check and a trust score before it goes in.
-
-**5. The Flock, per language** (model cost — the expensive step)
-Gosling, Herald and the Skein all write. Their prompts are English and their
-output must match the source language, not the prompt language.
-- The house style prompt needs a language directive per run
-- The grounding gate and verbatim quote check are language-neutral already —
-  `contains_verbatim` normalises typography, not script, so it works on CJK
-  unchanged
-- **Cost**: this multiplies token spend by the number of active languages. On
-  200,000 tokens/day it is not affordable for even one more language without a
-  paid tier. This step is gated on that, and should be stated plainly rather
-  than discovered halfway.
-
-**6. Cross-language corroboration** (the actually interesting part)
-Two outlets in two languages reporting the same event is *stronger* evidence
-than two in one — they share no editor, no wire, no press release cycle. The
-Curator clusters on lexical similarity, which cannot see across scripts.
-Doing this properly needs embeddings (`BG_EMBED_PROVIDER` exists and is off).
-This is the feature that would make BitGoose genuinely different, and it is
-last because it depends on all of the above.
-
-## What not to do
-
-- **Do not machine-translate our own analysis and present it as native.** A
-  translated Skein forecast reads as authored in the target language and is not.
-  If a translation is shown, it says so.
-- **Do not mix languages on one surface.** A reader wants a newsroom, not a
-  multilingual pile.
-- **Do not let a language desk lower the corroboration bar** because it has
-  fewer sources. Three Chinese outlets is three outlets; two is single-sourced
-  in any language.
-
-## Open questions for the operator
-
-1. Which language first? Recommendation: **Chinese** — largest non-English
-   crypto readership and a genuine information gap.
-2. Paid inference tier? Step 5 is blocked without it.
-3. Do we want (a) as an interim — English stories with a translated summary —
-   or wait for (b)? I would wait; a mirror is not worth the tokens.
+The worker refreshes all seven editions on every topic cycle. Ingest remains
+conditional and polite (ETag/Last-Modified, robots checks and per-host pacing).
+Adding a new language requires the same complete path: domain enum, normalized
+ingest, local sources, relevance/trend coverage, scheduler slot, prompt output
+contract, language-filtered queries, routes, navigation, SEO locale, durable
+topics and migration coverage.

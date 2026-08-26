@@ -1,6 +1,6 @@
 //! **Sentinel** — checks every claim against every source.
 //!
-//! Top tier, and the most important agent in the newsroom. Everything VictoriaPark
+//! Top tier, and the most important agent in the newsroom. Everything BitGoose
 //! claims to offer over a conventional aggregator rests on the confidence
 //! numbers this agent assigns, so it runs on the strongest model available and
 //! is the one place where being slow and expensive is the correct trade.

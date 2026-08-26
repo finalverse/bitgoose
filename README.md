@@ -4,12 +4,13 @@
 
 **The AI-era newsroom for frontier technology.**
 
-Ten AI agents run a newsroom end to end — polling sources, clustering events,
+Eleven AI agents run a newsroom end to end — polling sources, clustering events,
 extracting claims, verifying them across outlets, and publishing. No humans in
 the publishing path. Every claim shows its sources and a confidence score.
 
-Two desks: **AI** — models, research, compute, safety and policy — and
-**crypto**, where the project started.
+Seven independent editions — English, Simplified Chinese, Traditional Chinese,
+French, Spanish, Japanese and Korean — cover **crypto markets**, **AI** and
+frontier **technology** from language-local sources and topic signals.
 
 [Architecture](#architecture) · [Quickstart](#quickstart) · [The Flock](#the-flock) ·
 [API](#api--mcp) · [Editorial policy](#editorial-policy)
@@ -138,7 +139,7 @@ bg retract            withdraw material we should not be serving
 
 ## The Flock
 
-Ten agents. Every stage writes a row to `agent_runs` — LLM-backed or not,
+Eleven agents. Every stage writes a row to `agent_runs` — LLM-backed or not,
 success or failure — and that table is public at `/flock`.
 
 | Agent | Beat | Tier |

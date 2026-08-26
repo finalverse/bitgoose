@@ -119,14 +119,22 @@ fn tracked_schema() -> serde_json::Value {
 pub async fn refresh(ctx: &Ctx) -> Result<usize> {
     let tracked = bg_db::gaggles::refresh_tracked(&ctx.db).await?;
     let mut refreshed = tracked;
-    for language in [
-        EditorialLanguage::En,
-        EditorialLanguage::Zh,
-        EditorialLanguage::Fr,
-    ] {
+    for language in editions() {
         refreshed += refresh_language(ctx, language).await?;
     }
     Ok(refreshed)
+}
+
+const fn editions() -> [EditorialLanguage; 7] {
+    [
+        EditorialLanguage::En,
+        EditorialLanguage::Zh,
+        EditorialLanguage::ZhHant,
+        EditorialLanguage::Fr,
+        EditorialLanguage::Es,
+        EditorialLanguage::Ja,
+        EditorialLanguage::Ko,
+    ]
 }
 
 async fn refresh_language(ctx: &Ctx, language: EditorialLanguage) -> Result<usize> {
@@ -178,11 +186,7 @@ async fn refresh_language(ctx: &Ctx, language: EditorialLanguage) -> Result<usiz
 pub async fn run(ctx: &Ctx, max_new: usize) -> Result<usize> {
     let briefed = refresh_tracked_briefs(ctx, max_new.min(1)).await?;
     let mut total = briefed;
-    for language in [
-        EditorialLanguage::En,
-        EditorialLanguage::Zh,
-        EditorialLanguage::Fr,
-    ] {
+    for language in editions() {
         total += run_language(ctx, max_new, language).await?;
     }
     Ok(total)

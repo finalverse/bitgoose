@@ -343,7 +343,8 @@ mod tests {
     }
 }
 
-/// Normalise a language tag to its primary subtag, lowercased.
+/// Normalise a language tag while preserving the editorially meaningful split
+/// between Simplified and Traditional Chinese.
 ///
 /// Feeds spell the same language three ways — the live corpus holds `en-us`,
 /// `en` and `en-US` for 1,396 English items — so any filter or per-language
@@ -354,17 +355,22 @@ mod tests {
 /// Unparseable input yields `und` (BCP-47 "undetermined") rather than a guess:
 /// mislabelling something as English is worse than admitting we do not know.
 pub fn normalize_lang(tag: &str) -> String {
-    let primary = tag
-        .trim()
-        .split(['-', '_'])
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let normalized = tag.trim().to_ascii_lowercase().replace('_', "-");
+    let primary = normalized.split('-').next().unwrap_or("").to_string();
     // Two- and three-letter codes only; anything else is not a language tag.
     if (2..=3).contains(&primary.chars().count())
         && primary.chars().all(|c| c.is_ascii_alphabetic())
     {
-        primary
+        if primary == "zh"
+            && (normalized.contains("hant")
+                || normalized.contains("-tw")
+                || normalized.contains("-hk")
+                || normalized.contains("-mo"))
+        {
+            "zh-hant".to_string()
+        } else {
+            primary
+        }
     } else {
         "und".to_string()
     }
@@ -384,7 +390,10 @@ mod lang_tests {
     #[test]
     fn other_languages_keep_their_own_identity() {
         assert_eq!(normalize_lang("zh-Hans"), "zh");
+        assert_eq!(normalize_lang("zh-TW"), "zh-hant");
+        assert_eq!(normalize_lang("zh_Hant"), "zh-hant");
         assert_eq!(normalize_lang("ja"), "ja");
+        assert_eq!(normalize_lang("ko-KR"), "ko");
         assert_eq!(normalize_lang("pt-BR"), "pt");
     }
 

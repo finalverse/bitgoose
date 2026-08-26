@@ -166,6 +166,107 @@ const STOP: &[&str] = &[
     "prices",
 ];
 
+const CJK_STOP: &[&str] = &[
+    "最新",
+    "消息",
+    "新闻",
+    "报道",
+    "现场",
+    "视频",
+    "官方",
+    "发布",
+    "表示",
+    "回应",
+    "关于",
+    "关注",
+    "进行",
+    "发生",
+    "宣布",
+    "今日",
+    "今天",
+    "目前",
+    "记者",
+    "速報",
+    "発表",
+    "明らか",
+    "ニュース",
+    "관련",
+    "발표",
+    "소식",
+    "오늘",
+    "기자",
+    "정부",
+    "당국",
+];
+
+fn is_han_or_kana(c: char) -> bool {
+    matches!(c as u32,
+        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0x3040..=0x30FF | 0x31F0..=0x31FF)
+}
+
+fn is_hangul(c: char) -> bool {
+    matches!(c as u32, 0x1100..=0x11FF | 0x3130..=0x318F | 0xAC00..=0xD7AF)
+}
+
+/// Script-aware candidates for editions whose headlines do not signal named
+/// things with capital letters or even spaces.
+///
+/// This is intentionally a frequency detector, not a word segmenter. Long CJK
+/// runs yield overlapping 2–5-character phrases; the independent-source gate
+/// and historical spike comparison decide which phrases are meaningful. A
+/// single hot-list platform can therefore suggest a lead, but cannot create a
+/// special topic on its own.
+fn non_latin_topics(headline: &str) -> Vec<String> {
+    let mut segments: Vec<(String, bool)> = Vec::new();
+    let mut current = String::new();
+    let mut current_hangul = false;
+    for c in headline.chars().chain(std::iter::once(' ')) {
+        let hangul = is_hangul(c);
+        let usable = is_han_or_kana(c) || hangul;
+        if usable && (current.is_empty() || hangul == current_hangul) {
+            current.push(c);
+            current_hangul = hangul;
+        } else {
+            if !current.is_empty() {
+                segments.push((std::mem::take(&mut current), current_hangul));
+            }
+            if usable {
+                current.push(c);
+                current_hangul = hangul;
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for (segment, hangul) in segments {
+        let chars: Vec<char> = segment.chars().collect();
+        if chars.len() < 2 {
+            continue;
+        }
+        let candidates: Vec<String> = if chars.len() <= 10 {
+            vec![segment]
+        } else {
+            let lengths: &[usize] = if hangul { &[3, 4, 5] } else { &[2, 3, 4, 5] };
+            lengths
+                .iter()
+                .flat_map(|&n| {
+                    chars
+                        .windows(n)
+                        .map(|w| w.iter().collect::<String>())
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        for candidate in candidates {
+            if !CJK_STOP.contains(&candidate.as_str()) && seen.insert(candidate.clone()) {
+                out.push(candidate);
+            }
+        }
+    }
+    out
+}
+
 /// A candidate topic pulled from a headline, ignoring corpus knowledge.
 ///
 /// Capitalised runs, because in English headlines those are the named things —
@@ -243,6 +344,7 @@ pub fn topics_known(headline: &str, known: &HashSet<String>) -> Vec<String> {
         }
     }
     flush(&mut run, &mut out);
+    out.extend(non_latin_topics(headline));
     out
 }
 
@@ -400,6 +502,30 @@ mod tests {
     }
 
     #[test]
+    fn chinese_headlines_converge_without_spaces_or_capitals() {
+        let items = vec![
+            ("霍尔木兹海峡航运风险上升".into(), "weibo".into()),
+            ("油轮绕行霍尔木兹海峡成本增加".into(), "baidu".into()),
+            ("霍尔木兹海峡局势影响国际油价".into(), "netease".into()),
+            ("美伊对峙令霍尔木兹海峡受关注".into(), "cna".into()),
+            ("霍尔木兹海峡通航仍在继续".into(), "rthk".into()),
+        ];
+        let ranked = rank(&items, 5);
+        assert!(
+            ranked.iter().any(|h| h.topic.contains("霍尔木兹")),
+            "CJK convergence was invisible: {ranked:?}"
+        );
+    }
+
+    #[test]
+    fn one_chinese_platform_cannot_manufacture_a_topic() {
+        let items = (0..12)
+            .map(|i| (format!("俄乌停火谈判进展{i}"), "one-platform".into()))
+            .collect::<Vec<_>>();
+        assert!(rank(&items, 3).is_empty());
+    }
+
+    #[test]
     fn one_outlet_repeating_itself_is_not_a_trend() {
         // The distinction the whole metric exists to draw.
         let same_outlet: Vec<(String, String)> = (0..8)
@@ -491,10 +617,9 @@ mod tests {
 
 /// A subject's heat now, measured against its own normal.
 ///
-/// Raw convergence answers "what is most covered", which on a crypto and AI
-/// site is permanently Bitcoin and OpenAI. That is not a *special* topic — it
-/// is the beat. The first gaggle this opened was "bitcoin, 7 sources", which is
-/// simply Tuesday.
+/// Raw convergence answers "what is most covered", which on any broad news
+/// site is permanently the most active leaders and institutions. That is not a
+/// *special* topic — it is the daily beat.
 ///
 /// What makes a topic special is departure from its own baseline. Bitcoin at
 /// seven sources is unremarkable; a bill nobody had written about last week at

@@ -492,14 +492,24 @@ pub async fn source_refs(db: &Db, id: StoryId) -> Result<Vec<bg_core::domain::So
 
 /// Narrative trend data for `/flyway`: coverage volume per category per day.
 pub async fn flyway(db: &Db, days: i32) -> Result<Vec<(String, chrono::NaiveDate, i64)>> {
+    flyway_for_language(db, EditorialLanguage::En, days).await
+}
+
+pub async fn flyway_for_language(
+    db: &Db,
+    language: EditorialLanguage,
+    days: i32,
+) -> Result<Vec<(String, chrono::NaiveDate, i64)>> {
     let rows = sqlx::query(
         "SELECT category, published_at::date AS day, count(*) AS n
          FROM stories
-         WHERE status = 'published' AND published_at > now() - make_interval(days => $1)
+         WHERE status = 'published' AND editorial_language = $2
+           AND published_at > now() - make_interval(days => $1)
          GROUP BY category, day
          ORDER BY day ASC, n DESC",
     )
     .bind(days)
+    .bind(language.as_str())
     .fetch_all(&db.pool)
     .await?;
     Ok(rows

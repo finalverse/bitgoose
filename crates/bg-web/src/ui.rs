@@ -6,6 +6,63 @@ use leptos_meta::Html;
 use leptos_router::components::A;
 use leptos_router::hooks::use_location;
 
+fn edition_code(path: &str) -> &'static str {
+    if path == "/zh-hant" || path.starts_with("/zh-hant/") {
+        "zh-hant"
+    } else if path == "/zh" || path.starts_with("/zh/") {
+        "zh"
+    } else if path == "/fr" || path.starts_with("/fr/") {
+        "fr"
+    } else if path == "/es" || path.starts_with("/es/") {
+        "es"
+    } else if path == "/ja" || path.starts_with("/ja/") {
+        "ja"
+    } else if path == "/ko" || path.starts_with("/ko/") {
+        "ko"
+    } else {
+        "en"
+    }
+}
+
+/// Resolve an edition from either a route path or an absolute canonical URL.
+/// English deliberately lives at the root, so an unprefixed path is English.
+fn edition_from_url(url: &str) -> &'static str {
+    let path = url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.find('/').map(|at| &rest[at..]))
+        .unwrap_or(url);
+    edition_code(path)
+}
+
+fn edition_prefix(language: &str) -> &'static str {
+    match language {
+        "zh" => "/zh",
+        "zh-hant" => "/zh-hant",
+        "fr" => "/fr",
+        "es" => "/es",
+        "ja" => "/ja",
+        "ko" => "/ko",
+        _ => "",
+    }
+}
+
+fn switch_edition(path: &str, target: &str) -> String {
+    let current = edition_code(path);
+    let rest = if current == "en" {
+        path
+    } else {
+        path.strip_prefix(edition_prefix(current)).unwrap_or(path)
+    };
+    let rest = if rest.is_empty() { "/" } else { rest };
+    if target == "en" {
+        rest.to_string()
+    } else if rest == "/" {
+        edition_prefix(target).to_string()
+    } else {
+        format!("{}{}", edition_prefix(target), rest)
+    }
+}
+
 /// BitGoose's gate-and-beacon mark.
 #[component]
 pub fn GooseMark(#[prop(default = 26)] size: u32) -> impl IntoView {
@@ -25,63 +82,23 @@ pub fn GooseMark(#[prop(default = 26)] size: u32) -> impl IntoView {
 pub fn Masthead() -> impl IntoView {
     let location = use_location();
     let pathname = location.pathname;
-    let language = Memo::new(move |_| {
-        let path = pathname.get();
-        if path == "/zh" || path.starts_with("/zh/") {
-            "zh"
-        } else if path == "/fr" || path.starts_with("/fr/") {
-            "fr"
-        } else {
-            "en"
-        }
-    });
-    let edition_href = move |path: &'static str| {
-        move || match language.get() {
-            "zh" => format!("/zh{path}"),
-            "fr" => format!("/fr{path}"),
-            _ => path.to_string(),
-        }
-    };
-    let switch_href = move |target: &'static str| {
-        move || {
-            let path = pathname.get();
-            let rest = if path == "/zh" || path == "/fr" {
-                ""
-            } else if let Some(rest) = path.strip_prefix("/zh/") {
-                rest
-            } else if let Some(rest) = path.strip_prefix("/fr/") {
-                rest
-            } else {
-                path.strip_prefix('/').unwrap_or(&path)
-            };
-            let prefix = match target {
-                "zh" => "/zh",
-                "fr" => "/fr",
-                _ => "",
-            };
-            if rest.is_empty() {
-                if prefix.is_empty() {
-                    "/".to_string()
-                } else {
-                    prefix.to_string()
-                }
-            } else {
-                format!("{prefix}/{rest}")
-            }
-        }
-    };
+    let language = Memo::new(move |_| edition_code(&pathname.get()));
+    let edition_href =
+        move |path: &'static str| move || format!("{}{path}", edition_prefix(language.get()));
+    let switch_href = move |target: &'static str| move || switch_edition(&pathname.get(), target);
     view! {
-        <Html
-            {..}
-            lang=move || match language.get() {
-                "zh" => "zh-CN",
-                "fr" => "fr",
-                _ => "en",
-            }
-        />
+        <Html {..} lang=move || match language.get() {
+            "zh" => "zh-CN",
+            "zh-hant" => "zh-Hant",
+            "fr" => "fr",
+            "es" => "es",
+            "ja" => "ja",
+            "ko" => "ko",
+            _ => "en",
+        } />
         <header class="masthead">
             <div class="shell">
-                <A href="/" attr:class="brand">
+                <A href=move || edition_prefix(language.get()).to_string() attr:class="brand">
                     <GooseMark size=34 />
                     <span>
                         <span class="brand-bit">"Bit"</span>
@@ -93,13 +110,13 @@ pub fn Masthead() -> impl IntoView {
                 // of decision from choosing a section — it changes what the
                 // whole site is about, not which slice of it you are reading.
                 <nav class="desks" aria-label="News desks">
-                    <A href=edition_href("/ai") attr:class="desk-link">{move || match language.get() { "zh" => "人工智能", "fr" => "IA", _ => "AI" }}</A>
-                    <A href=edition_href("/crypto") attr:class="desk-link">"Crypto"</A>
-                    <A href=edition_href("/markets") attr:class="desk-link">{move || match language.get() { "zh" => "市场", "fr" => "Marchés", _ => "Markets" }}</A>
-                    <A href=edition_href("/tech") attr:class="desk-link">{move || match language.get() { "zh" => "科技", "fr" => "Technologie", _ => "Tech" }}</A>
-                    <A href=edition_href("/world") attr:class="desk-link">{move || match language.get() { "zh" => "世界", "fr" => "Monde", _ => "World" }}</A>
-                    <A href=edition_href("/science") attr:class="desk-link">{move || match language.get() { "zh" => "科学", "fr" => "Sciences", _ => "Science" }}</A>
-                    <A href=edition_href("/culture") attr:class="desk-link">{move || match language.get() { "zh" => "文化", "fr" => "Culture", _ => "Culture" }}</A>
+                    <A href=edition_href("/ai") attr:class="desk-link">{move || match language.get() { "zh" | "zh-hant" => "人工智能", "fr" => "IA", "es" => "IA", _ => "AI" }}</A>
+                    <A href=edition_href("/crypto") attr:class="desk-link">{move || match language.get() { "zh" => "加密市场", "zh-hant" => "加密市場", "ja" => "暗号資産", "ko" => "가상자산", "es" => "Cripto", _ => "Crypto" }}</A>
+                    <A href=edition_href("/markets") attr:class="desk-link">{move || match language.get() { "zh" => "市场", "zh-hant" => "市場", "fr" => "Marchés", "es" => "Mercados", "ja" => "市場", "ko" => "시장", _ => "Markets" }}</A>
+                    <A href=edition_href("/tech") attr:class="desk-link">{move || match language.get() { "zh" | "zh-hant" => "科技", "fr" => "Technologie", "es" => "Tecnología", "ja" => "テクノロジー", "ko" => "기술", _ => "Tech" }}</A>
+                    <A href=edition_href("/world") attr:class="desk-link">{move || match language.get() { "zh" => "世界", "zh-hant" => "世界", "fr" => "Monde", "es" => "Mundo", "ja" => "国際", "ko" => "국제", _ => "World" }}</A>
+                    <A href=edition_href("/science") attr:class="desk-link">{move || match language.get() { "zh" => "科学", "zh-hant" => "科學", "fr" => "Sciences", "es" => "Ciencia", "ja" => "科学", "ko" => "과학", _ => "Science" }}</A>
+                    <A href=edition_href("/culture") attr:class="desk-link">{move || match language.get() { "zh" | "zh-hant" => "文化", "fr" => "Culture", "es" => "Cultura", "ja" => "文化", "ko" => "문화", _ => "Culture" }}</A>
                     // Seven desks fit across a laptop; the newsroom files under
                     // twenty-three categories, and the other sixteen were
                     // reachable only from a chip row part-way down /desk. A
@@ -111,7 +128,7 @@ pub fn Masthead() -> impl IntoView {
                     // for the first moments of every page load.
                     <details class="desk-more">
                         <summary class="desk-link" aria-label="All sections">
-                            {move || match language.get() { "zh" => "更多", "fr" => "Plus", _ => "More" }}
+                            {move || match language.get() { "zh" => "更多", "zh-hant" => "更多", "ja" => "その他", "ko" => "더보기", _ => "More" }}
                         </summary>
                         <div class="desk-more-panel">
                             {bg_core::domain::Category::ALL
@@ -120,15 +137,15 @@ pub fn Masthead() -> impl IntoView {
                                     view! {
                                         <a
                                             class="desk-more-link"
-                                            href=move || match language.get() {
-                                                "zh" => format!("/zh/section/{}", c.as_str()),
-                                                "fr" => format!("/fr/section/{}", c.as_str()),
-                                                _ => format!("/section/{}", c.as_str()),
-                                            }
+                                            href=move || format!("{}/section/{}", edition_prefix(language.get()), c.as_str())
                                         >
                                             {move || match language.get() {
                                                 "zh" => c.label_zh(),
+                                                "zh-hant" => c.label_zh_hant(),
                                                 "fr" => c.label_fr(),
+                                                "es" => c.label_es(),
+                                                "ja" => c.label_ja(),
+                                                "ko" => c.label_ko(),
                                                 _ => c.label(),
                                             }}
                                         </a>
@@ -139,16 +156,22 @@ pub fn Masthead() -> impl IntoView {
                     </details>
                 </nav>
                 <nav class="nav" aria-label="Sections">
-                    <A href=edition_href("/desk")>{move || match language.get() { "zh" => "原创", "fr" => "Dossiers", _ => "Desk" }}</A>
-                    <A href=edition_href("/wire")>{move || match language.get() { "zh" => "快讯", "fr" => "Fil", _ => "Wire" }}</A>
-                    <A href=edition_href("/flyway")>{move || match language.get() { "zh" => "专题", "fr" => "Sujets", _ => "Topics" }}</A>
-                    <A href="/flock">{move || match language.get() { "zh" => "AI 编辑部", "fr" => "Agents", _ => "The Flock" }}</A>
-                    <A href="/standards">{move || match language.get() { "zh" => "编辑标准", "fr" => "Normes", _ => "Standards" }}</A>
+                    <A href=edition_href("/desk")>{move || match language.get() { "zh" => "原创", "zh-hant" => "原創", "fr" => "Dossiers", "es" => "Análisis", "ja" => "独自報道", "ko" => "자체 보도", _ => "Desk" }}</A>
+                    <A href=edition_href("/wire")>{move || match language.get() { "zh" => "快讯", "zh-hant" => "快訊", "fr" => "Fil", "es" => "Últimas", "ja" => "速報", "ko" => "속보", _ => "Wire" }}</A>
+                    <A href=edition_href("/flyway")>{move || match language.get() { "zh" => "专题", "zh-hant" => "專題", "fr" => "Sujets", "es" => "Temas", "ja" => "特集", "ko" => "특집", _ => "Topics" }}</A>
+                    <A href=edition_href("/flock")>{move || match language.get() { "zh" => "AI 编辑部", "zh-hant" => "AI 編輯部", "ja" => "AI編集部", "ko" => "AI 편집국", _ => "Agents" }}</A>
+                    <A href=edition_href("/standards")>{move || match language.get() { "zh" => "编辑标准", "zh-hant" => "編輯標準", "ja" => "編集基準", "ko" => "편집 기준", _ => "Standards" }}</A>
                 </nav>
                 <div class="masthead-right">
-                    <A href=switch_href("en") attr:class="language-switch">"EN"</A>
-                    <A href=switch_href("zh") attr:class="language-switch">"中文"</A>
-                    <A href=switch_href("fr") attr:class="language-switch">"FR"</A>
+                    <nav class="edition-switcher" aria-label="Language editions">
+                        <A href=switch_href("en") attr:class=move || if language.get() == "en" { "language-switch active" } else { "language-switch" } >"EN"</A>
+                        <A href=switch_href("zh") attr:class=move || if language.get() == "zh" { "language-switch active" } else { "language-switch" } >"简中"</A>
+                        <A href=switch_href("zh-hant") attr:class=move || if language.get() == "zh-hant" { "language-switch active" } else { "language-switch" } >"繁中"</A>
+                        <A href=switch_href("fr") attr:class=move || if language.get() == "fr" { "language-switch active" } else { "language-switch" } >"FR"</A>
+                        <A href=switch_href("es") attr:class=move || if language.get() == "es" { "language-switch active" } else { "language-switch" } >"ES"</A>
+                        <A href=switch_href("ja") attr:class=move || if language.get() == "ja" { "language-switch active" } else { "language-switch" } >"日本語"</A>
+                        <A href=switch_href("ko") attr:class=move || if language.get() == "ko" { "language-switch active" } else { "language-switch" } >"한국어"</A>
+                    </nav>
                     <ThemeToggle />
                 </div>
             </div>
@@ -214,8 +237,8 @@ pub fn Footer() -> impl IntoView {
                             </span>
                         </div>
                         <p style="margin:0;max-width:26rem;line-height:1.6">
-                            "Three independently edited AI news channels for English, Chinese and
-                             French readers, covering AI, crypto, markets and technology."
+                            "Seven independently edited AI newsrooms covering crypto markets,
+                             artificial intelligence and frontier technology."
                         </p>
                     </div>
                     <div>
@@ -225,8 +248,7 @@ pub fn Footer() -> impl IntoView {
                             <li><A href="/crypto">"Crypto"</A></li>
                             <li><A href="/markets">"Markets"</A></li>
                             <li><A href="/tech">"Technology"</A></li>
-                            <li><A href="/zh">"中文频道"</A></li>
-                            <li><A href="/fr">"Édition française"</A></li>
+                            <li><A href="/flyway">"Topics"</A></li>
                         </ul>
                     </div>
                     <div>
@@ -372,11 +394,21 @@ pub fn ShareMeta(
     } else {
         (format!("{base}/og-default.png"), true)
     };
+    let edition = edition_from_url(&url);
+    let (site_name, locale, author) = match edition {
+        "zh" => ("BitGoose 中文", "zh_CN", "BitGoose AI 编辑部"),
+        "zh-hant" => ("BitGoose 繁中", "zh_TW", "BitGoose AI 編輯部"),
+        "fr" => ("BitGoose France", "fr_FR", "Rédaction IA BitGoose"),
+        "es" => ("BitGoose Español", "es_ES", "Redacción IA BitGoose"),
+        "ja" => ("BitGoose 日本語", "ja_JP", "BitGoose AI編集部"),
+        "ko" => ("BitGoose 한국어", "ko_KR", "BitGoose AI 편집국"),
+        _ => ("BitGoose", "en_US", "BitGoose AI Desk"),
+    };
     view! {
         <Meta name="description" content=description.clone() />
         <Meta property="og:type" content=kind />
-        <Meta property="og:site_name" content="BitGoose" />
-        <Meta property="og:locale" content="en" />
+        <Meta property="og:site_name" content=site_name />
+        <Meta property="og:locale" content=locale />
         <Meta property="og:title" content=title.clone() />
         <Meta property="og:description" content=description.clone() />
         <Meta property="og:url" content=url.clone() />
@@ -431,7 +463,7 @@ pub fn ShareMeta(
             })}
         {(kind == "article")
             .then(|| {
-                view! { <Meta property="article:author" content="BitGoose AI 编辑部" /> }
+                view! { <Meta property="article:author" content=author /> }
             })}
     }
 }
@@ -496,7 +528,7 @@ pub fn SkeinBlock(analysis: crate::model::AnalysisCard) -> impl IntoView {
                 <span class="analysis-mark">
                     <GooseMark size=16 />
                 </span>
-                <h2 id="analysis-h">"BitGoose 纵深"</h2>
+                <h2 id="analysis-h">"BitGoose 深度分析"</h2>
                 <span class="analysis-tag">"AI analysis"</span>
             </div>
 
@@ -890,7 +922,10 @@ pub fn SourcedImage(
 /// Story card, used across every listing.
 #[component]
 pub fn Card(story: StoryCard) -> impl IntoView {
-    let href = format!("/story/{}", story.slug);
+    let path = use_location().pathname.get();
+    let prefix = edition_prefix(edition_code(&path));
+    let href = format!("{prefix}/story/{}", story.slug);
+    let section_href = format!("{prefix}/section/{}", story.category);
     let is_wire = story.kind == "wire";
     view! {
         <article class="card">
@@ -905,7 +940,7 @@ pub fn Card(story: StoryCard) -> impl IntoView {
                 />
             </a>
             <div class="meta">
-                <a href=format!("/section/{}", story.category) class="kicker">
+                <a href=section_href class="kicker">
                     {story.category_label.clone()}
                 </a>
                 <span class="dot">"·"</span>

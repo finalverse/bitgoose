@@ -218,6 +218,90 @@ impl Category {
         }
     }
 
+    pub const fn label_zh_hant(&self) -> &'static str {
+        match self {
+            Self::Markets => "市場",
+            Self::Policy => "政策",
+            Self::Tech => "科技",
+            Self::Defi => "去中心化金融",
+            Self::Business => "商業",
+            Self::Security => "安全",
+            Self::Ai => "人工智能",
+            Self::Nft => "數位藏品",
+            Self::Gaming => "遊戲",
+            Self::Culture => "文化",
+            Self::Research => "研究",
+            Self::Models => "模型",
+            Self::Compute => "算力",
+            Self::Safety => "AI 安全",
+            Self::World => "國際",
+            Self::Politics => "政治",
+            Self::Health => "健康",
+            Self::Climate => "氣候",
+            Self::Space => "太空",
+            Self::Science => "科學",
+            Self::Sports => "體育",
+            Self::Entertainment => "文娛",
+            Self::Energy => "能源",
+        }
+    }
+
+    pub const fn label_ja(&self) -> &'static str {
+        match self {
+            Self::Markets => "マーケット",
+            Self::Policy => "政策",
+            Self::Tech => "テクノロジー",
+            Self::Defi => "DeFi",
+            Self::Business => "ビジネス",
+            Self::Security => "セキュリティ",
+            Self::Ai => "AI",
+            Self::Nft => "NFT",
+            Self::Gaming => "ゲーム",
+            Self::Culture => "カルチャー",
+            Self::Research => "研究",
+            Self::Models => "モデル",
+            Self::Compute => "コンピュート",
+            Self::Safety => "AI安全",
+            Self::World => "国際",
+            Self::Politics => "政治",
+            Self::Health => "健康",
+            Self::Climate => "気候",
+            Self::Space => "宇宙",
+            Self::Science => "科学",
+            Self::Sports => "スポーツ",
+            Self::Entertainment => "エンタメ",
+            Self::Energy => "エネルギー",
+        }
+    }
+
+    pub const fn label_ko(&self) -> &'static str {
+        match self {
+            Self::Markets => "시장",
+            Self::Policy => "정책",
+            Self::Tech => "기술",
+            Self::Defi => "탈중앙금융",
+            Self::Business => "비즈니스",
+            Self::Security => "보안",
+            Self::Ai => "AI",
+            Self::Nft => "NFT",
+            Self::Gaming => "게임",
+            Self::Culture => "문화",
+            Self::Research => "연구",
+            Self::Models => "모델",
+            Self::Compute => "컴퓨팅",
+            Self::Safety => "AI 안전",
+            Self::World => "국제",
+            Self::Politics => "정치",
+            Self::Health => "건강",
+            Self::Climate => "기후",
+            Self::Space => "우주",
+            Self::Science => "과학",
+            Self::Sports => "스포츠",
+            Self::Entertainment => "엔터테인먼트",
+            Self::Energy => "에너지",
+        }
+    }
+
     pub const fn label_fr(&self) -> &'static str {
         match self {
             Self::Markets => "Marchés",
@@ -243,6 +327,34 @@ impl Category {
             Self::Sports => "Sports",
             Self::Entertainment => "Divertissement",
             Self::Energy => "Énergie",
+        }
+    }
+
+    pub const fn label_es(&self) -> &'static str {
+        match self {
+            Self::Markets => "Mercados",
+            Self::Policy => "Política pública",
+            Self::Tech => "Tecnología",
+            Self::Defi => "Finanzas descentralizadas",
+            Self::Business => "Empresas",
+            Self::Security => "Seguridad",
+            Self::Ai => "Inteligencia artificial",
+            Self::Nft => "NFT",
+            Self::Gaming => "Videojuegos",
+            Self::Culture => "Cultura",
+            Self::Research => "Investigación",
+            Self::Models => "Modelos",
+            Self::Compute => "Computación",
+            Self::Safety => "Seguridad de IA",
+            Self::World => "Mundo",
+            Self::Politics => "Política",
+            Self::Health => "Salud",
+            Self::Climate => "Clima",
+            Self::Space => "Espacio",
+            Self::Science => "Ciencia",
+            Self::Sports => "Deportes",
+            Self::Entertainment => "Entretenimiento",
+            Self::Energy => "Energía",
         }
     }
 }
@@ -500,17 +612,33 @@ str_enum! {
     pub enum EditorialLanguage {
         En => "en",
         Zh => "zh",
+        ZhHant => "zh-hant",
         Fr => "fr",
+        Es => "es",
+        Ja => "ja",
+        Ko => "ko",
     }
 }
 
 impl EditorialLanguage {
     pub fn from_source_lang(lang: &str) -> Self {
-        let lang = lang.trim().to_ascii_lowercase();
-        if lang.starts_with("zh") {
+        let lang = lang.trim().to_ascii_lowercase().replace('_', "-");
+        if lang == "zh-hant"
+            || lang.starts_with("zh-tw")
+            || lang.starts_with("zh-hk")
+            || lang.starts_with("zh-mo")
+        {
+            Self::ZhHant
+        } else if lang.starts_with("zh") {
             Self::Zh
         } else if lang.starts_with("fr") {
             Self::Fr
+        } else if lang.starts_with("es") {
+            Self::Es
+        } else if lang.starts_with("ja") {
+            Self::Ja
+        } else if lang.starts_with("ko") {
+            Self::Ko
         } else {
             Self::En
         }
@@ -520,7 +648,11 @@ impl EditorialLanguage {
         match self {
             Self::En => "en",
             Self::Zh => "zh-CN",
+            Self::ZhHant => "zh-Hant",
             Self::Fr => "fr",
+            Self::Es => "es",
+            Self::Ja => "ja",
+            Self::Ko => "ko",
         }
     }
 }
