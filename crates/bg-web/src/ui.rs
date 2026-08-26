@@ -75,8 +75,8 @@ pub fn Masthead() -> impl IntoView {
                 <A href="/" attr:class="brand">
                     <GooseMark size=34 />
                     <span>
-                        <span class="brand-bit">"Victoria"</span>
-                        <span class="brand-goose">"Park"</span>
+                        <span class="brand-bit">"Bit"</span>
+                        <span class="brand-goose">"Goose"</span>
                     </span>
                 </A>
                 // The desk switcher sits ahead of the sections and is styled

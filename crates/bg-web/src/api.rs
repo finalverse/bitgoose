@@ -238,7 +238,12 @@ pub async fn get_front_page(
             title: w.title.clone(),
             dek: w.summary.clone(),
             category: w.category.as_str().into(),
-            category_label: w.category.label().into(),
+            category_label: match language {
+                bg_core::domain::EditorialLanguage::Zh => w.category.label_zh(),
+                bg_core::domain::EditorialLanguage::Fr => w.category.label_fr(),
+                bg_core::domain::EditorialLanguage::En => w.category.label(),
+            }
+            .into(),
             source_count: w.source_count,
             newsworthiness: w.newsworthiness,
             published_at: w.published_at.to_rfc3339(),
@@ -364,7 +369,12 @@ pub async fn get_stories(
                 title: w.title.clone(),
                 dek: w.summary.clone(),
                 category: w.category.as_str().into(),
-                category_label: w.category.label().into(),
+                category_label: match language {
+                    bg_core::domain::EditorialLanguage::Zh => w.category.label_zh(),
+                    bg_core::domain::EditorialLanguage::Fr => w.category.label_fr(),
+                    bg_core::domain::EditorialLanguage::En => w.category.label(),
+                }
+                .into(),
                 source_count: w.source_count,
                 newsworthiness: w.newsworthiness,
                 published_at: w.published_at.to_rfc3339(),

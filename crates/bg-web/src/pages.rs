@@ -270,7 +270,7 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
         {loaded!(
             data,
             |fp| view! {
-                {fp.honk.clone().map(|h| view! { <HonkBar story=h /> })}
+                {fp.honk.clone().map(|h| view! { <HonkBar story=h language /> })}
                 // Special topics, when there are any. Placed under the honk
                 // and above the lead: a subject seven newsrooms converged on
                 // outranks any single story about it, including ours.
@@ -359,12 +359,12 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                             let promoted = rest.remove(0);
                             let feature: Vec<_> = rest.drain(..rest.len().min(4)).collect();
                             view! {
-                                <LeadStory story=promoted />
+                                <LeadStory story=promoted language />
                                 {(!feature.is_empty())
                                     .then(|| {
                                         view! {
                                             <div class="rail-title">
-                                                <span>"Also today"</span>
+                                                <span>{match language { "zh" => "今日更多", "fr" => "Également aujourd’hui", _ => "Also today" }}</span>
                                             </div>
                                             <div class="card-grid">
                                                 {feature
@@ -378,8 +378,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                     .then(|| {
                                         view! {
                                             <div class="rail-title">
-                                                <span>"The Wire"</span>
-                                                <a href="/wire">"All"</a>
+                                                <span>{match language { "zh" => "快讯", "fr" => "Le fil", _ => "The Wire" }}</span>
+                                                <a href=match language { "zh" => "/zh/wire", "fr" => "/fr/wire", _ => "/wire" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
                                             </div>
                                             <div class="wire-full">
                                                 {rest
@@ -417,13 +417,13 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                             view! {
                                 <div class="split">
                                     <div>
-                                        <LeadStory story=lead />
+                                        <LeadStory story=lead language />
                                         {(!desk_is_empty)
                                             .then(|| {
                                                 view! {
                                                     <div class="rail-title">
-                                                        <span>"More from the Desk"</span>
-                                                        <a href="/desk">"All"</a>
+                                                        <span>{match language { "zh" => "更多原创", "fr" => "Plus de dossiers", _ => "More from the Desk" }}</span>
+                                                        <a href=match language { "zh" => "/zh/desk", "fr" => "/fr/desk", _ => "/desk" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
                                                     </div>
                                                     <div class="card-grid">
                                                         {desk
@@ -437,8 +437,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                             .then(|| {
                                                 view! {
                                                     <div class="rail-title">
-                                                        <span>"Latest"</span>
-                                                        <a href="/wire">"All"</a>
+                                                        <span>{match language { "zh" => "最新", "fr" => "Derniers articles", _ => "Latest" }}</span>
+                                                        <a href=match language { "zh" => "/zh/wire", "fr" => "/fr/wire", _ => "/wire" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
                                                     </div>
                                                     <div class="card-grid">
                                                         {filler
@@ -451,8 +451,8 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                     </div>
                                     <aside>
                                         <div class="rail-title">
-                                            <span>"The Wire"</span>
-                                            <a href="/wire">"All"</a>
+                                            <span>{match language { "zh" => "快讯", "fr" => "Le fil", _ => "The Wire" }}</span>
+                                            <a href=match language { "zh" => "/zh/wire", "fr" => "/fr/wire", _ => "/wire" }>{match language { "zh" => "全部", "fr" => "Tout", _ => "All" }}</a>
                                         </div>
                                         {wire
                                             .into_iter()
@@ -471,13 +471,13 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
 }
 
 #[component]
-fn HonkBar(story: StoryCard) -> impl IntoView {
+fn HonkBar(story: StoryCard, language: &'static str) -> impl IntoView {
     view! {
         <div class="honk">
             <div class="shell">
                 <span class="honk-tag">
                     <span class="honk-dot"></span>
-                    "突发"
+                    {match language { "zh" => "突发", "fr" => "ALERTE", _ => "HONK" }}
                 </span>
                 <a href=format!("/story/{}", story.slug) class="honk-text">
                     {story.title.clone()}
@@ -488,7 +488,7 @@ fn HonkBar(story: StoryCard) -> impl IntoView {
 }
 
 #[component]
-fn LeadStory(story: StoryCard) -> impl IntoView {
+fn LeadStory(story: StoryCard, language: &'static str) -> impl IntoView {
     view! {
         <article class="lead-story">
             <div class="meta">
@@ -498,7 +498,7 @@ fn LeadStory(story: StoryCard) -> impl IntoView {
                 <span class="dot">"·"</span>
                 <span class="src-count">
                     <strong>{story.source_count}</strong>
-                    " independent sources"
+                    {match language { "zh" => " 家独立来源", "fr" => " sources indépendantes", _ => " independent sources" }}
                 </span>
             </div>
             <h2>
