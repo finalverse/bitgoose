@@ -246,10 +246,49 @@ pub async fn mark_triaged(
 
 /// Triaged items not yet attached to a story — the clustering input.
 pub async fn unclustered(db: &Db, limit: i64) -> Result<Vec<RawItem>> {
+    let cols = COLS
+        .split(',')
+        .map(|c| format!("q.{}", c.trim()))
+        .collect::<Vec<_>>()
+        .join(", ");
     let rows = crate::sql(format!(
-        "SELECT {COLS} FROM raw_items
-         WHERE triaged AND story_id IS NULL AND aged_out_at IS NULL
-         ORDER BY published_at DESC LIMIT $1"
+        "SELECT {cols} FROM (
+           SELECT r.*,
+                  CASE
+                    WHEN lower(replace(r.lang, '_', '-')) IN ('zh-hant','zh-tw','zh-hk') THEN 'zh-hant'
+                    WHEN lower(r.lang) LIKE 'zh%' THEN 'zh'
+                    WHEN lower(r.lang) LIKE 'fr%' THEN 'fr'
+                    WHEN lower(r.lang) LIKE 'es%' THEN 'es'
+                    WHEN lower(r.lang) LIKE 'ja%' THEN 'ja'
+                    WHEN lower(r.lang) LIKE 'ko%' THEN 'ko'
+                    ELSE 'en'
+                  END AS edition,
+                  row_number() OVER (
+                    PARTITION BY CASE
+                      WHEN lower(replace(r.lang, '_', '-')) IN ('zh-hant','zh-tw','zh-hk') THEN 'zh-hant'
+                      WHEN lower(r.lang) LIKE 'zh%' THEN 'zh'
+                      WHEN lower(r.lang) LIKE 'fr%' THEN 'fr'
+                      WHEN lower(r.lang) LIKE 'es%' THEN 'es'
+                      WHEN lower(r.lang) LIKE 'ja%' THEN 'ja'
+                      WHEN lower(r.lang) LIKE 'ko%' THEN 'ko'
+                      ELSE 'en'
+                    END
+                    ORDER BY r.published_at DESC
+                  ) AS lang_rank
+             FROM raw_items r
+            WHERE r.triaged AND r.story_id IS NULL AND r.aged_out_at IS NULL
+         ) q
+         -- The clustering queue needs the same edition fairness as triage.
+         -- Otherwise a busy English hour can permanently starve a smaller
+         -- newsroom even after its items were successfully triaged.
+         ORDER BY CASE WHEN q.edition = 'en' THEN (q.lang_rank + 1) / 2 ELSE q.lang_rank END,
+                  CASE q.edition
+                    WHEN 'en' THEN 0 WHEN 'zh' THEN 1 WHEN 'zh-hant' THEN 2
+                    WHEN 'fr' THEN 3 WHEN 'es' THEN 4 WHEN 'ja' THEN 5
+                    WHEN 'ko' THEN 6 ELSE 7
+                  END,
+                  q.lang_rank, q.published_at DESC
+         LIMIT $1"
     ))
     .bind(limit)
     .fetch_all(&db.pool)
