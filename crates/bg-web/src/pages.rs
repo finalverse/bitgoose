@@ -98,6 +98,18 @@ fn live_label(language: &str) -> &'static str {
     }
 }
 
+fn gathering_message(language: &str) -> &'static str {
+    match language {
+        "zh" => "本频道正在持续汇集新闻；AI 编辑部每隔数分钟轮询一次本地来源。",
+        "zh-hant" => "本頻道正在持續彙集新聞；AI 編輯部每隔數分鐘輪詢一次本地來源。",
+        "fr" => "Cette édition se constitue en direct ; la rédaction consulte ses sources toutes les quelques minutes.",
+        "es" => "Esta edición se está reuniendo en directo; la redacción consulta sus fuentes cada pocos minutos.",
+        "ja" => "このニュースルームは現在記事を収集中です。編集部は数分ごとに情報源を確認します。",
+        "ko" => "이 뉴스룸은 현재 기사를 수집하고 있습니다. 편집국이 몇 분마다 현지 출처를 확인합니다.",
+        _ => "This desk is being gathered now — the newsroom polls its sources every few minutes.",
+    }
+}
+
 fn topic_intro(language: &str, pinned: bool, sources: i32) -> String {
     match (language, pinned) {
         ("en", true) => {
@@ -522,7 +534,7 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                 // happening and point somewhere useful, not
                                 // hand the reader a shell command.
                                 <Empty
-                                    message="This desk is being gathered now — the newsroom polls its sources every few minutes."
+                                    message=gathering_message(language)
                                     hint=""
                                 />
                             }

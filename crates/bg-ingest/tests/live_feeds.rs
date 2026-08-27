@@ -129,8 +129,9 @@ async fn real_feeds_ingest_end_to_end() {
     }
 
     // Every inserted item must be well formed.
-    let items = bg_db::items::untriaged(&db, 500).await.unwrap();
-    assert_eq!(items.len() as i64, bg_db::items::count(&db).await.unwrap());
+    let total = bg_db::items::count(&db).await.unwrap();
+    let items = bg_db::items::untriaged(&db, total).await.unwrap();
+    assert_eq!(items.len() as i64, total);
     for it in &items {
         assert!(
             !it.title.trim().is_empty(),
