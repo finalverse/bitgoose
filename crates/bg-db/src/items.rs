@@ -546,7 +546,8 @@ pub async fn record_extraction(
         Some(text) => {
             sqlx::query(
                 "UPDATE raw_items
-                    SET body_raw = $2, body_hash = encode(sha256($2::bytea), 'hex'),
+                    SET body_raw = $2,
+                        body_hash = encode(sha256(convert_to($2, 'UTF8')), 'hex'),
                         extracted_at = now(), extract_via = $3
                   WHERE id = $1",
             )

@@ -238,6 +238,34 @@ async fn the_whole_graph_round_trips() {
         "colliding slugs must be disambiguated"
     );
 
+    // Native-script headlines used to all collapse to the literal `story`.
+    // After 25 articles that exhausted the collision retry loop and stopped
+    // the entire Japanese/Chinese/Korean Curator pass.
+    let ja_one = stories::create_for_language(
+        &db,
+        "story",
+        StoryKind::Wire,
+        "生成AIの新モデルが公開",
+        Category::Ai,
+        Beat::Ai,
+        EditorialLanguage::Ja,
+    )
+    .await
+    .unwrap();
+    let ja_two = stories::create_for_language(
+        &db,
+        "story",
+        StoryKind::Wire,
+        "半導体各社が新しい供給計画を発表",
+        Category::Compute,
+        Beat::Ai,
+        EditorialLanguage::Ja,
+    )
+    .await
+    .unwrap();
+    assert_ne!(ja_one.slug, ja_two.slug);
+    assert!(ja_one.slug.starts_with("story-ja-"));
+
     items::attach_to_story(&db, i1, story.id, ItemRole::Seed)
         .await
         .unwrap();
@@ -507,6 +535,14 @@ async fn the_whole_graph_round_trips() {
         .is_none());
 
     // -- the private-body invariant -----------------------------------------
+    items::record_extraction(
+        &db,
+        i1,
+        Some(r#"A Windows path such as C:\news\source must hash as UTF-8 text."#),
+        "integration-test",
+    )
+    .await
+    .expect("UTF-8 source text with backslashes must hash without a bytea cast error");
     let body = items::body_for_analysis(&db, i1).await.unwrap();
     assert!(body.is_some(), "analysis paths can read source text");
     assert_eq!(

@@ -69,11 +69,32 @@ pub async fn create_for_language(
     beat: bg_core::domain::Beat,
     language: EditorialLanguage,
 ) -> Result<Story> {
+    // The ASCII slugger intentionally drops scripts it cannot transliterate.
+    // A pure CJK or Hangul headline therefore becomes `story`; after 25 such
+    // stories the ordinary collision loop is exhausted and the whole Curator
+    // pass stops. Keep URLs ASCII while giving every native-script headline a
+    // stable identity. Including the edition also prevents the same named
+    // event in Simplified and Traditional Chinese from claiming one URL.
+    let stable_base = if matches!(
+        language,
+        EditorialLanguage::Zh
+            | EditorialLanguage::ZhHant
+            | EditorialLanguage::Ja
+            | EditorialLanguage::Ko
+    ) {
+        format!(
+            "{base_slug}-{}-{:016x}",
+            language.as_str(),
+            bg_core::text::simhash64(title)
+        )
+    } else {
+        base_slug.to_string()
+    };
     for attempt in 0..25u32 {
         let slug = if attempt == 0 {
-            base_slug.to_string()
+            stable_base.clone()
         } else {
-            bg_core::slug::slug_with_suffix(base_slug, attempt + 1)
+            bg_core::slug::slug_with_suffix(&stable_base, attempt + 1)
         };
         let res = crate::sql(format!(
             "INSERT INTO stories (id, slug, kind, status, title, category, beat, editorial_language)
