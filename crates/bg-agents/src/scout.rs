@@ -224,6 +224,26 @@ pub async fn run(ctx: &Ctx) -> Result<ScoutReport> {
     .await
 }
 
+/// Refresh market data. Folded into Scout because it is the same job — reach
+/// out, fetch, normalize, store — and because a separate agent for it would
+/// clutter `/flock` without telling a reader anything new.
+pub async fn refresh_prices(ctx: &Ctx) -> Result<usize> {
+    stage(ctx, AgentRole::Scout, None, "prices", |_run| async move {
+        let crypto = bg_ingest::market::refresh(&ctx.db, &ctx.http).await;
+        // Equities in the same stage, from a different vendor. A crypto-only
+        // ticker tells a reader the newsroom covers crypto; BitGoose also runs
+        // Markets, Business and AI desks, and on most days Nasdaq and Nvidia
+        // are as much the story as Bitcoin is.
+        let equities = bg_ingest::market::refresh_equities(&ctx.db, &ctx.http).await;
+        let n = crypto + equities;
+        Ok(StageOutput::plain(
+            n,
+            format!("{crypto} crypto, {equities} equities"),
+        ))
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::topic_search_query;
@@ -243,24 +263,4 @@ mod tests {
         let query = topic_search_query(&["  ".into()], &["headline".into()]).unwrap();
         assert_eq!(query, "(headline) when:2d");
     }
-}
-
-/// Refresh market data. Folded into Scout because it is the same job — reach
-/// out, fetch, normalize, store — and because a separate agent for it would
-/// clutter `/flock` without telling a reader anything new.
-pub async fn refresh_prices(ctx: &Ctx) -> Result<usize> {
-    stage(ctx, AgentRole::Scout, None, "prices", |_run| async move {
-        let crypto = bg_ingest::market::refresh(&ctx.db, &ctx.http).await;
-        // Equities in the same stage, from a different vendor. A crypto-only
-        // ticker tells a reader the newsroom covers crypto; BitGoose also runs
-        // Markets, Business and AI desks, and on most days Nasdaq and Nvidia
-        // are as much the story as Bitcoin is.
-        let equities = bg_ingest::market::refresh_equities(&ctx.db, &ctx.http).await;
-        let n = crypto + equities;
-        Ok(StageOutput::plain(
-            n,
-            format!("{crypto} crypto, {equities} equities"),
-        ))
-    })
-    .await
 }
