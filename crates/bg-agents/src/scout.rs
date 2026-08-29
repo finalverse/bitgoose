@@ -25,6 +25,32 @@ pub struct ScoutReport {
     pub topics_searched: usize,
 }
 
+fn topic_search_query(anchor_terms: &[String], keywords: &[String]) -> Option<String> {
+    let normalize = |terms: &[String], limit: usize| {
+        let mut terms: Vec<String> = terms
+            .iter()
+            .take(limit)
+            .map(|term| term.trim().to_string())
+            .filter(|term| !term.is_empty())
+            .collect();
+        terms.sort();
+        terms.dedup();
+        terms
+    };
+    let anchors = normalize(anchor_terms, 4);
+    let signals = normalize(keywords, 5);
+    match (anchors.is_empty(), signals.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(format!("({}) when:2d", anchors.join(" OR "))),
+        (true, false) => Some(format!("({}) when:2d", signals.join(" OR "))),
+        (false, false) => Some(format!(
+            "({}) ({}) when:2d",
+            anchors.join(" OR "),
+            signals.join(" OR ")
+        )),
+    }
+}
+
 /// Poll every source that is due.
 /// Fetch article text for items that do not have it yet.
 ///
@@ -139,21 +165,10 @@ pub async fn run(ctx: &Ctx) -> Result<ScoutReport> {
                 }
             };
             if let Ok(base) = bg_db::sources::by_slug(&ctx.db, source_slug).await {
-                let mut terms: Vec<String> = topic
-                    .anchor_terms
-                    .iter()
-                    .take(4)
-                    .chain(topic.keywords.iter().take(5))
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                terms.sort();
-                terms.dedup();
-                if terms.is_empty() {
+                let Some(query) = topic_search_query(&topic.anchor_terms, &topic.keywords) else {
                     let _ = bg_db::gaggles::mark_searched(&ctx.db, topic.id).await;
                     continue;
-                }
-                let query = format!("({}) when:2d", terms.join(" OR "));
+                };
                 let mut search = base.clone();
                 search.beat = Some(if topic.slug.contains("bitcoin")
                     || topic.slug.contains("crypto")
@@ -207,6 +222,27 @@ pub async fn run(ctx: &Ctx) -> Result<ScoutReport> {
         Ok(StageOutput::plain(r, note))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::topic_search_query;
+
+    #[test]
+    fn topic_search_requires_an_anchor_and_a_signal() {
+        let query = topic_search_query(
+            &["Bitcoin".into(), "比特币".into()],
+            &["regulation".into(), "监管".into()],
+        )
+        .unwrap();
+        assert_eq!(query, "(Bitcoin OR 比特币) (regulation OR 监管) when:2d");
+    }
+
+    #[test]
+    fn topic_search_uses_available_group_when_one_is_missing() {
+        let query = topic_search_query(&["  ".into()], &["headline".into()]).unwrap();
+        assert_eq!(query, "(headline) when:2d");
+    }
 }
 
 /// Refresh market data. Folded into Scout because it is the same job — reach
