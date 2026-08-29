@@ -26,6 +26,7 @@ pub mod articles;
 pub mod claims;
 pub mod convert;
 pub mod declines;
+pub mod directions;
 pub mod entities;
 pub mod gaggles;
 pub mod items;
@@ -71,6 +72,9 @@ pub enum DbError {
 
     #[error("{0} not found")]
     NotFound(&'static str),
+
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }
 
 /// Embedding width the schema is built for. `vector(1536)` is fixed-width, so a

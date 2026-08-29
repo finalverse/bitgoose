@@ -6,6 +6,8 @@
 //! `bg-api`, tokio) is optional and gated behind the `ssr` feature.
 
 pub mod api;
+#[cfg(feature = "ssr")]
+pub mod editor;
 pub mod model;
 #[cfg(feature = "ssr")]
 pub mod ogcard;

@@ -348,6 +348,10 @@ const COLS: &str = "topic, slug, title, standfirst, source_count, story_count, m
                    editorial_language, pinned, analysis_md, watchpoints, \
                    primary_source_names, primary_source_urls, last_briefed_at";
 
+/// Discovery can begin earlier, but a reader-facing hot topic must already
+/// contain enough reporting to be useful rather than an empty promise.
+pub const HOT_TOPIC_MIN_STORIES: i32 = 5;
+
 /// Gaggles still being covered, hottest first.
 ///
 /// Windowed rather than listing everything: a topic page nobody has written
@@ -356,7 +360,8 @@ const COLS: &str = "topic, slug, title, standfirst, source_count, story_count, m
 pub async fn live(db: &Db, within_hours: i64, limit: i64) -> Result<Vec<GaggleRow>> {
     let rows = crate::sql(format!(
         "SELECT {COLS} FROM gaggles
-          WHERE pinned OR last_hot_at > now() - make_interval(hours => $1)
+          WHERE story_count >= {HOT_TOPIC_MIN_STORIES}
+            AND (pinned OR last_hot_at > now() - make_interval(hours => $1))
           -- Heat, not size. Ordering by source_count alone meant a subject that
           -- once drew nine outlets outranked one drawing six an hour ago for as
           -- long as it kept qualifying at all, so the Special Topics row showed
@@ -390,7 +395,8 @@ pub async fn live_for_language(
     let rows = crate::sql(format!(
         "SELECT {COLS}, g.last_hot_at
            FROM gaggles g
-          WHERE (
+          WHERE g.story_count >= {HOT_TOPIC_MIN_STORIES}
+            AND (
                 (g.pinned AND g.editorial_language = $2)
                 OR (
                     NOT g.pinned
@@ -404,7 +410,7 @@ pub async fn live_for_language(
                            AND s.editorial_language = $2
                     )
                 )
-          )
+            )
           ORDER BY g.source_count
                    * exp(-extract(epoch from (now() - g.last_hot_at)) / 43200.0)
                    DESC,

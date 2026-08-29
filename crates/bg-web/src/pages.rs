@@ -86,6 +86,18 @@ fn topic_label(language: &str) -> &'static str {
     }
 }
 
+fn gathering_topic_label(language: &str) -> &'static str {
+    match language {
+        "zh" => "专题资料汇集",
+        "zh-hant" => "專題資料匯集",
+        "fr" => "Dossier en préparation",
+        "es" => "Dossier en preparación",
+        "ja" => "特集取材中",
+        "ko" => "특집 취재 중",
+        _ => "Topic gathering",
+    }
+}
+
 fn live_label(language: &str) -> &'static str {
     match language {
         "zh" => "持续追踪",
@@ -880,7 +892,7 @@ pub fn Gaggle() -> impl IntoView {
                         />
                         <div class="shell page">
                             <div class="gaggle-head">
-                                <span class="gaggle-tag">{topic_label(&c.language)}</span>
+                                <span class="gaggle-tag">{if c.stories >= 5 { topic_label(&c.language) } else { gathering_topic_label(&c.language) }}</span>
                                 <h1>{c.title.clone()}</h1>
                                 <p class="lede">{c.standfirst.clone()}</p>
                                 // The argument for the page existing, stated
