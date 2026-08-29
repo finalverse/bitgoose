@@ -178,4 +178,4 @@ systemctl restart bitgoose-worker || true
 log "deployed"
 echo "    web:    $(systemctl is-active bitgoose-web)"
 echo "    worker: $(systemctl is-active bitgoose-worker)"
-echo "    local:  $(curl -s -o /dev/null -w '%{http_code}' -m 10 http://127.0.0.1:3000/v1/health || echo unreachable)"
+echo "    local:  $(curl -s -o /dev/null -w '%{http_code}' -m 10 http://127.0.0.1:3001/v1/health || echo unreachable)"
