@@ -259,6 +259,18 @@ async fn run_language(ctx: &Ctx, max_new: usize, language: EditorialLanguage) ->
         // A gaggle that already exists is refreshed without spending a call on
         // re-writing prose that has not stopped being true.
         let known = bg_db::gaggles::exists(&ctx.db, &heat.topic, language).await?;
+        let slug = bg_core::slug::slugify(&heat.topic);
+        if !known
+            && bg_db::gaggles::by_slug(&ctx.db, &slug, language)
+                .await?
+                .is_some()
+        {
+            // Two near-identical tokens can normalize to one URL, especially
+            // across case and CJK punctuation. The existing reader-facing hub
+            // wins; a random suffix would manufacture duplicate topics.
+            info!(topic = %heat.topic, %slug, "skipping colliding topic slug");
+            continue;
+        }
         let stories = bg_db::gaggles::stories_for_topic(&ctx.db, &heat.topic, language, 60).await?;
         if stories.is_empty() {
             // Hot across the wires but nothing published yet. It will still be
@@ -271,7 +283,7 @@ async fn run_language(ctx: &Ctx, max_new: usize, language: EditorialLanguage) ->
                 &ctx.db,
                 &bg_db::gaggles::NewGaggle {
                     topic: &heat.topic,
-                    slug: &bg_core::slug::slugify(&heat.topic),
+                    slug: &slug,
                     // Ignored by the upsert's conflict branch; the existing
                     // framing stands.
                     title: &heat.topic,
@@ -345,7 +357,7 @@ async fn run_language(ctx: &Ctx, max_new: usize, language: EditorialLanguage) ->
                 &ctx.db,
                 &bg_db::gaggles::NewGaggle {
                     topic: &heat.topic,
-                    slug: &bg_core::slug::slugify(&heat.topic),
+                    slug: &slug,
                     title,
                     standfirst,
                     source_count: heat.sources as i32,
