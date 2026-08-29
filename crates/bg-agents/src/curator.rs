@@ -322,7 +322,13 @@ pub async fn rescore(ctx: &Ctx, story: StoryId) -> Result<i16> {
     }
 
     let row = sqlx::query_as::<_, (Option<f64>, Option<i64>, Option<i64>)>(
-        "SELECT avg(s.trust)::float8, max(r.triage_score)::bigint, count(DISTINCT r.source_id)
+        "SELECT avg(s.trust)::float8, max(r.triage_score)::bigint,
+                count(DISTINCT
+                  CASE WHEN s.slug LIKE 'gnews%'
+                            AND cardinality(r.authors) > 0
+                       THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                       ELSE 'publisher:' || lower(split_part(s.name, ' · ', 1))
+                   END)
          FROM raw_items r JOIN sources s ON s.id = r.source_id
          WHERE r.story_id = $1",
     )

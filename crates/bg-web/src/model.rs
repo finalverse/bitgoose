@@ -52,6 +52,9 @@ pub struct FrontPage {
     pub prices: Vec<Tick>,
     /// Live special topics, hottest first. Usually empty — that is the point.
     pub gaggles: Vec<GaggleCard>,
+    /// Current edition's strongest live headlines, ranked independently from
+    /// page layout so readers can scan momentum at a glance.
+    pub hotline: Vec<StoryCard>,
     pub honk: Option<StoryCard>,
 }
 

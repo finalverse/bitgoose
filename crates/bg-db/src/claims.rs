@@ -130,10 +130,17 @@ pub async fn by_id(db: &Db, id: ClaimId) -> Result<Claim> {
 /// exactly the failure that makes aggregators look confident about nothing.
 pub async fn source_counts(db: &Db, story: StoryId) -> Result<Vec<(ClaimId, i64)>> {
     let rows = sqlx::query(
-        "SELECT c.id, count(DISTINCT r.source_id) AS n
+        "SELECT c.id,
+                count(DISTINCT
+                  CASE WHEN s.slug LIKE 'gnews%'
+                            AND cardinality(r.authors) > 0
+                       THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                       ELSE 'publisher:' || lower(split_part(s.name, ' · ', 1))
+                   END) AS n
          FROM claims c
          LEFT JOIN claim_sources cs ON cs.claim_id = c.id AND cs.stance = 'supports'
          LEFT JOIN raw_items r ON r.id = cs.raw_item_id
+         LEFT JOIN sources s ON s.id = r.source_id
          WHERE c.story_id = $1
          GROUP BY c.id",
     )

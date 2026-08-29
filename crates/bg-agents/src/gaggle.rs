@@ -43,15 +43,23 @@ pub const WINDOW_HOURS: i64 = 48;
 /// still reads as new.
 pub const BASELINE_DAYS: f32 = 14.0;
 
-pub const SYSTEM: &str = "Gander opens a special topic after several independent outlets converge.
-Write a concise 4-8 word title and a two-or-three-sentence standfirst explaining
-why the subject matters now. Use only the supplied headlines, never invent facts,
-and write entirely in the requested OUTPUT_LANGUAGE.";
-pub const TRACKED_SYSTEM: &str = "Refresh a permanent special-topic brief using
-only the supplied published stories and primary-source list. Separate verified
-facts from analysis, identify uncertainty, and write entirely in the requested
-OUTPUT_LANGUAGE.";
-const TRACKED_BRIEF_HOURS: i64 = 6;
+pub const SYSTEM: &str = "Gander opens a special topic after several independent
+publishers converge. Write a concise native-language title and a two-or-three-
+sentence standfirst explaining why the subject matters now. Each edition has
+its own agenda; do not translate another edition. Hot lists and commentators
+are discovery signals, not factual corroboration. Use only supplied headlines,
+never invent facts, and write entirely in the requested OUTPUT_LANGUAGE.";
+pub const TRACKED_SYSTEM: &str = "Maintain a deep, permanent BitGoose topic
+dossier using only the supplied published stories, named source references and
+primary-source list. Write a complete native-language brief covering: latest
+developments with an explicit as-of time; verified facts; timeline; competing
+claims; technical, market, legal or historical roots; outcomes and downstream
+impact; original BitGoose analysis; and evidence boundaries. Every claim must
+map to supplied evidence. Separate facts, market data and analysis, state
+single-source uncertainty, and do not rewrite merely to appear fresh. Produce
+4-10 concrete, falsifiable watchpoints. Never copy source articles and write
+entirely in the requested OUTPUT_LANGUAGE.";
+const TRACKED_BRIEF_HOURS: i64 = 3;
 
 #[derive(Debug, Deserialize)]
 pub struct Framing {
@@ -388,6 +396,17 @@ async fn refresh_tracked_briefs(ctx: &Ctx, max: usize) -> Result<usize> {
                     evidence.push_str(&format!(" [{}]", at.to_rfc3339()));
                 }
                 evidence.push('\n');
+                if let Ok(refs) = bg_db::stories::source_refs(&ctx.db, *id).await {
+                    for source in refs.iter().take(8) {
+                        evidence.push_str("    source: ");
+                        evidence.push_str(&source.name);
+                        evidence.push_str(" | ");
+                        evidence.push_str(&source.title);
+                        evidence.push_str(" | ");
+                        evidence.push_str(&source.url);
+                        evidence.push('\n');
+                    }
+                }
             }
         }
         if evidence.is_empty() {
@@ -424,9 +443,9 @@ async fn refresh_tracked_briefs(ctx: &Ctx, max: usize) -> Result<usize> {
             None,
             "trade-watch",
             |run| async move {
-                let req = Request::new("gander.trade_watch", ModelTier::Mid, system, prompt)
+                let req = Request::new("gander.topic_dossier", ModelTier::Mid, system, prompt)
                     .with_schema(tracked_schema())
-                    .with_max_tokens(2_200);
+                    .with_max_tokens(3_400);
                 let (brief, completion) = ctx.llm.complete_json::<TrackedFraming>(&req).await?;
                 let standfirst = brief.standfirst.trim();
                 let analysis = brief.analysis_md.trim();

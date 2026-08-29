@@ -434,7 +434,10 @@ pub async fn wire_for_language(
                 -- whose whole claim is that you can see who stands behind a
                 -- fact, that is the wrong byline. The ingester records the real
                 -- outlet in the authors column for exactly this purpose.
-                coalesce(nullif(ri.authors[1], ''), src.name) AS source_name,
+                coalesce(
+                    nullif(ri.authors[cardinality(ri.authors)], ''),
+                    src.name
+                ) AS source_name,
                 src.slug AS source_slug, src.kind AS source_kind,
                 ri.canonical_url AS source_url
          FROM stories st
@@ -486,7 +489,11 @@ pub async fn wire_for_language(
 /// Sources backing a story, for the byline strip and the policy link-out check.
 pub async fn source_refs(db: &Db, id: StoryId) -> Result<Vec<bg_core::domain::SourceRef>> {
     let rows = sqlx::query(
-        "SELECT s.name, s.slug, s.trust, r.canonical_url AS url, r.title, r.published_at, si.role
+        "SELECT CASE WHEN s.slug LIKE 'gnews%' AND cardinality(r.authors) > 0
+                     THEN r.authors[cardinality(r.authors)]
+                     ELSE s.name
+                 END AS name,
+                s.slug, s.trust, r.canonical_url AS url, r.title, r.published_at, si.role
          FROM story_items si
          JOIN raw_items r ON r.id = si.raw_item_id
          JOIN sources s   ON s.id = r.source_id
@@ -699,7 +706,14 @@ pub async fn merge_into(db: &Db, from: StoryId, into: StoryId) -> Result<u64> {
     // Curator's arithmetic and the next pass will redo them.
     sqlx::query(
         "UPDATE stories SET source_count = (
-             SELECT count(DISTINCT r.source_id) FROM raw_items r WHERE r.story_id = $1
+             SELECT count(DISTINCT
+                       CASE WHEN src.slug LIKE 'gnews%'
+                                 AND cardinality(r.authors) > 0
+                            THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                            ELSE 'publisher:' || lower(split_part(src.name, ' · ', 1))
+                        END)
+               FROM raw_items r JOIN sources src ON src.id = r.source_id
+              WHERE r.story_id = $1
          ), updated_at = now() WHERE id = $1",
     )
     .bind(into.into_uuid())
@@ -740,8 +754,16 @@ pub async fn reconcile_source_counts(db: &Db) -> Result<u64> {
     let r = sqlx::query(
         "UPDATE stories s
             SET source_count = c.n, updated_at = now()
-           FROM (SELECT st.id, count(DISTINCT r.source_id)::int AS n
-                   FROM stories st JOIN raw_items r ON r.story_id = st.id
+           FROM (SELECT st.id,
+                        count(DISTINCT
+                          CASE WHEN src.slug LIKE 'gnews%'
+                                    AND cardinality(r.authors) > 0
+                               THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                               ELSE 'publisher:' || lower(split_part(src.name, ' · ', 1))
+                           END)::int AS n
+                   FROM stories st
+                   JOIN raw_items r ON r.story_id = st.id
+                   JOIN sources src ON src.id = r.source_id
                   GROUP BY st.id) c
           WHERE s.id = c.id AND s.source_count IS DISTINCT FROM c.n",
     )

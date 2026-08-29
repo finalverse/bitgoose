@@ -451,13 +451,13 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                         <div>
                                             <span class="gaggle-strip-label">{topic_label(language)}</span>
                                             <strong>{match language {
-                                                "zh" => "热点正在发生",
-                                                "zh-hant" => "焦點正在發生",
-                                                "fr" => "L’actualité en mouvement",
-                                                "es" => "Noticias en movimiento",
-                                                "ja" => "いま動いているニュース",
-                                                "ko" => "지금 움직이는 뉴스",
-                                                _ => "News in motion",
+                                                "zh" => "实时热点池 · 趋势排行",
+                                                "zh-hant" => "即時熱點池 · 趨勢排行",
+                                                "fr" => "Tendances en temps réel",
+                                                "es" => "Tendencias en tiempo real",
+                                                "ja" => "リアルタイム注目トピック",
+                                                "ko" => "실시간 핫이슈 순위",
+                                                _ => "Live news trend ranking",
                                             }}</strong>
                                         </div>
                                         <a href=format!("{}/flyway", language_prefix(language))>
@@ -465,7 +465,7 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                         </a>
                                     </div>
                                     <div class="topic-radar-grid">
-                                        {gs.into_iter().map(|g| {
+                                        {gs.into_iter().enumerate().map(|(index, g)| {
                                             let heat = (g.sources * 11 + g.stories * 7).clamp(12, 100);
                                             view! {
                                                 <a class="topic-radar-card" href=format!(
@@ -474,6 +474,7 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                                     g.slug,
                                                 )>
                                                     <div class="topic-radar-status">
+                                                        <b class="topic-rank">{format!("#{:02}", index + 1)}</b>
                                                         <span class="hot-pulse"></span>
                                                         <span>{if g.pinned { live_label(language).to_string() } else { topic_label(language).to_string() }}</span>
                                                         <time>{g.last_updated.clone()}</time>
@@ -508,6 +509,29 @@ fn Front(#[prop(optional)] beat: Option<&'static str>, language: &'static str) -
                                     </div>
                                 </div>
                             </div>
+                        }
+                    })}
+                {(!fp.hotline.is_empty())
+                    .then(|| {
+                        let items = fp.hotline.clone();
+                        view! {
+                            <section class="hotline-pool shell" aria-label="Live headline ranking">
+                                <div class="hotline-pool-head">
+                                    <strong>{match language { "zh" => "热榜", "zh-hant" => "熱榜", "fr" => "Palmarès", "es" => "Tendencias", "ja" => "速報ランキング", "ko" => "실시간 뉴스 순위", _ => "Live headline ranking" }}</strong>
+                                    <span>{match language { "zh" => "按重要性与时效实时排序", "zh-hant" => "按重要性與時效即時排序", "fr" => "Classé par importance et fraîcheur", "es" => "Ordenado por importancia y actualidad", "ja" => "重要度と鮮度で更新", "ko" => "중요도와 최신성 기준", _ => "Ranked by importance and recency" }}</span>
+                                </div>
+                                <ol class="hotline-list">
+                                    {items.into_iter().enumerate().map(|(index, story)| view! {
+                                        <li>
+                                            <a href=format!("{}/story/{}", language_prefix(language), story.slug)>
+                                                <b>{format!("{:02}", index + 1)}</b>
+                                                <span>{story.title}</span>
+                                                <em>{format!("{} · {}", story.newsworthiness, story.ago)}</em>
+                                            </a>
+                                        </li>
+                                    }).collect_view()}
+                                </ol>
+                            </section>
                         }
                     })}
                 // The ticker is crypto spot prices. On the AI desk it is not
@@ -894,7 +918,7 @@ pub fn Gaggle() -> impl IntoView {
                                                 </div>
                                                 <div class="topic-rail-block">
                                                     <div class="rail-title">
-                                                        <span>{match c.language.as_str() { "en" => "Primary record", "fr" => "Sources primaires", "es" => "Fuentes primarias", "ja" => "一次資料", "ko" => "1차 자료", _ => "一手文件" }}</span>
+                                                        <span>{match c.language.as_str() { "en" => "Evidence and sources", "zh-hant" => "證據與來源", "fr" => "Preuves et sources", "es" => "Pruebas y fuentes", "ja" => "証拠と情報源", "ko" => "근거와 출처", _ => "证据与来源" }}</span>
                                                     </div>
                                                     <ol class="topic-sources">
                                                         {sources

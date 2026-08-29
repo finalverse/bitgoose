@@ -21,11 +21,16 @@ pub async fn recent_headlines(
     limit: i64,
 ) -> Result<Vec<(String, String)>> {
     let rows = sqlx::query(
-        "SELECT r.title, s.homepage
+        "SELECT r.title,
+                CASE WHEN s.slug LIKE 'gnews%'
+                          AND cardinality(r.authors) > 0
+                     THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                     ELSE 'publisher:' || lower(split_part(s.name, ' · ', 1))
+                 END AS source_identity
            FROM raw_items r
            JOIN sources s ON s.id = r.source_id
           WHERE r.published_at > now() - make_interval(hours => $1)
-            AND s.robots_ok
+            AND (s.robots_ok OR s.robots_override)
             AND CASE
                 WHEN $2 = 'zh-hant' THEN lower(r.lang) = 'zh-hant'
                 WHEN $2 = 'zh' THEN lower(r.lang) = 'zh'
@@ -47,7 +52,7 @@ pub async fn recent_headlines(
     .await?;
     Ok(rows
         .iter()
-        .map(|r| (r.get("title"), r.get("homepage")))
+        .map(|r| (r.get("title"), r.get("source_identity")))
         .collect())
 }
 
@@ -63,12 +68,17 @@ pub async fn baseline_headlines(
     limit: i64,
 ) -> Result<Vec<(String, String)>> {
     let rows = sqlx::query(
-        "SELECT r.title, s.homepage
+        "SELECT r.title,
+                CASE WHEN s.slug LIKE 'gnews%'
+                          AND cardinality(r.authors) > 0
+                     THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                     ELSE 'publisher:' || lower(split_part(s.name, ' · ', 1))
+                 END AS source_identity
            FROM raw_items r
            JOIN sources s ON s.id = r.source_id
           WHERE r.published_at <= now() - make_interval(hours => $1)
             AND r.published_at >  now() - make_interval(hours => $2)
-            AND s.robots_ok
+            AND (s.robots_ok OR s.robots_override)
             AND CASE
                 WHEN $3 = 'zh-hant' THEN lower(r.lang) = 'zh-hant'
                 WHEN $3 = 'zh' THEN lower(r.lang) = 'zh'
@@ -91,11 +101,13 @@ pub async fn baseline_headlines(
     .await?;
     Ok(rows
         .iter()
-        .map(|r| (r.get("title"), r.get("homepage")))
+        .map(|r| (r.get("title"), r.get("source_identity")))
         .collect())
 }
 
-/// Published stories whose headline carries a topic, newest first.
+/// Published stories whose visible headline or summary carries a topic,
+/// newest first. Follow-ups often put the result in the headline and retain
+/// the original event only in the summary.
 ///
 /// Matched on the title rather than a stored tag: the topic was *derived* from
 /// titles, so matching anywhere else would put stories in a gaggle that do not
@@ -108,7 +120,8 @@ pub async fn stories_for_topic(
 ) -> Result<Vec<StoryId>> {
     let rows = sqlx::query(
         "SELECT id FROM stories
-          WHERE status = 'published' AND title ILIKE '%' || $1 || '%'
+          WHERE status = 'published'
+            AND concat_ws(' ', title, summary) ILIKE '%' || $1 || '%'
             AND editorial_language = $2
           ORDER BY published_at DESC
           LIMIT $3",
@@ -199,7 +212,7 @@ pub async fn set_stories(db: &Db, gaggle: Uuid, stories: &[StoryId]) -> Result<(
 /// whether an already-published story visibly contains the tracked subject.
 pub async fn refresh_tracked(db: &Db) -> Result<usize> {
     let tracked = sqlx::query(
-        "SELECT id, editorial_language, anchor_terms, keywords
+        "SELECT id, editorial_language, anchor_terms, keywords, primary_source_urls
            FROM gaggles
           WHERE pinned",
     )
@@ -211,6 +224,7 @@ pub async fn refresh_tracked(db: &Db) -> Result<usize> {
         let language: String = topic.try_get("editorial_language")?;
         let anchors: Vec<String> = topic.try_get("anchor_terms")?;
         let signals: Vec<String> = topic.try_get("keywords")?;
+        let pinned_sources: Vec<String> = topic.try_get("primary_source_urls")?;
 
         let rows = sqlx::query(
             "SELECT s.id
@@ -241,12 +255,18 @@ pub async fn refresh_tracked(db: &Db) -> Result<usize> {
 
         let ids: Vec<Uuid> = story_ids.iter().map(|s| s.into_uuid()).collect();
         let source_count = if ids.is_empty() {
-            0i64
+            pinned_sources.len() as i64
         } else {
             sqlx::query_scalar::<_, i64>(
-                "SELECT count(DISTINCT r.source_id)
+                "SELECT count(DISTINCT
+                         CASE WHEN src.slug LIKE 'gnews%'
+                                   AND cardinality(r.authors) > 0
+                              THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                              ELSE 'publisher:' || lower(split_part(src.name, ' · ', 1))
+                          END)
                    FROM story_items si
                    JOIN raw_items r ON r.id = si.raw_item_id
+                   JOIN sources src ON src.id = r.source_id
                   WHERE si.story_id = ANY($1)",
             )
             .bind(&ids)
@@ -255,12 +275,19 @@ pub async fn refresh_tracked(db: &Db) -> Result<usize> {
         };
         sqlx::query(
             "UPDATE gaggles
-                SET source_count = $2, story_count = $3, last_hot_at = now()
+                SET source_count = $2,
+                    story_count = $3,
+                    last_hot_at = CASE
+                        WHEN cardinality($4::uuid[]) > 0 THEN
+                            (SELECT max(published_at) FROM stories WHERE id = ANY($4))
+                        ELSE last_hot_at
+                    END
               WHERE id = $1",
         )
         .bind(id)
         .bind(source_count as i32)
         .bind(story_ids.len() as i32)
+        .bind(&ids)
         .execute(&db.pool)
         .await?;
     }
@@ -378,8 +405,10 @@ pub async fn live_for_language(
                     )
                 )
           )
-          ORDER BY g.pinned DESC, g.last_hot_at DESC,
-                   g.source_count DESC, g.story_count DESC
+          ORDER BY g.source_count
+                   * exp(-extract(epoch from (now() - g.last_hot_at)) / 43200.0)
+                   DESC,
+                   g.story_count DESC, g.last_hot_at DESC
           LIMIT $3"
     ))
     .bind(within_hours as i32)
@@ -566,5 +595,55 @@ pub async fn update_tracked_brief(
     .bind(run.into_uuid())
     .execute(&db.pool)
     .await?;
+    Ok(())
+}
+
+/// A permanent topic due for another native-language discovery sweep.
+#[derive(Debug, Clone)]
+pub struct TopicSearch {
+    pub id: Uuid,
+    pub slug: String,
+    pub title: String,
+    pub anchor_terms: Vec<String>,
+    pub keywords: Vec<String>,
+    pub editorial_language: EditorialLanguage,
+}
+
+pub async fn searches_due(db: &Db, minutes: i64, limit: i64) -> Result<Vec<TopicSearch>> {
+    use std::str::FromStr;
+    let rows = sqlx::query(
+        "SELECT id, slug, title, anchor_terms, keywords, editorial_language
+           FROM gaggles
+          WHERE pinned
+            AND (last_searched_at IS NULL
+                 OR last_searched_at < now() - make_interval(mins => $1::int))
+          ORDER BY last_searched_at ASC NULLS FIRST, last_hot_at DESC
+          LIMIT $2",
+    )
+    .bind(minutes as i32)
+    .bind(limit)
+    .fetch_all(&db.pool)
+    .await?;
+    rows.iter()
+        .map(|r| {
+            let language: String = r.try_get("editorial_language")?;
+            Ok(TopicSearch {
+                id: r.try_get("id")?,
+                slug: r.try_get("slug")?,
+                title: r.try_get("title")?,
+                anchor_terms: r.try_get("anchor_terms")?,
+                keywords: r.try_get("keywords")?,
+                editorial_language: EditorialLanguage::from_str(&language)
+                    .unwrap_or(EditorialLanguage::En),
+            })
+        })
+        .collect()
+}
+
+pub async fn mark_searched(db: &Db, id: Uuid) -> Result<()> {
+    sqlx::query("UPDATE gaggles SET last_searched_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
     Ok(())
 }

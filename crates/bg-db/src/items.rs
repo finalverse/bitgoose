@@ -340,8 +340,15 @@ pub async fn attach_to_story(
     // Denormalized so front-page queries never need the join.
     sqlx::query(
         "UPDATE stories SET
-            source_count = (SELECT count(DISTINCT r.source_id)
-                            FROM story_items si JOIN raw_items r ON r.id = si.raw_item_id
+            source_count = (SELECT count(DISTINCT
+                                CASE WHEN src.slug LIKE 'gnews%'
+                                          AND cardinality(r.authors) > 0
+                                     THEN 'publisher:' || lower(r.authors[cardinality(r.authors)])
+                                     ELSE 'publisher:' || lower(split_part(src.name, ' · ', 1))
+                                 END)
+                            FROM story_items si
+                            JOIN raw_items r ON r.id = si.raw_item_id
+                            JOIN sources src ON src.id = r.source_id
                             WHERE si.story_id = $1),
             updated_at = now()
          WHERE id = $1",

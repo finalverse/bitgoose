@@ -25,6 +25,30 @@ pub struct SeedSource {
 }
 
 pub const SOURCES: &[SeedSource] = &[
+    // Scheduler handles for permanent-topic discovery. Scout replaces the
+    // query with each topic's native terms; these feeds are independent
+    // newsroom assignments, not translations of one global feed.
+    SeedSource { slug: "gnews-en-topics", name: "Google News · BitGoose topic search", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=BitGoose+topic+when:1d&hl=en-US&gl=US&ceid=US:en",
+        homepage: "https://news.google.com", trust: 68, poll_interval_s: 3600, beat: Some(Beat::World) },
+    SeedSource { slug: "gnews-zh-topics", name: "Google 新闻 · BitGoose 专题搜索", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=BitGoose+%E4%B8%93%E9%A2%98+when:1d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        homepage: "https://news.google.com", trust: 68, poll_interval_s: 3600, beat: Some(Beat::World) },
+    SeedSource { slug: "gnews-zh-hant-topics", name: "Google 新聞 · BitGoose 專題搜尋", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=BitGoose+%E5%B0%88%E9%A1%8C+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        homepage: "https://news.google.com", trust: 68, poll_interval_s: 3600, beat: Some(Beat::World) },
+    SeedSource { slug: "gnews-fr-topics", name: "Google Actualités · recherche thématique BitGoose", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=BitGoose+dossier+when:1d&hl=fr&gl=FR&ceid=FR:fr",
+        homepage: "https://news.google.com", trust: 68, poll_interval_s: 3600, beat: Some(Beat::World) },
+    SeedSource { slug: "gnews-es-topics", name: "Google Noticias · búsqueda temática BitGoose", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=BitGoose+especial+when:1d&hl=es&gl=ES&ceid=ES:es",
+        homepage: "https://news.google.com", trust: 68, poll_interval_s: 3600, beat: Some(Beat::World) },
+    SeedSource { slug: "gnews-ja-topics", name: "Google ニュース · BitGoose 特集検索", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=BitGoose+%E7%89%B9%E9%9B%86+when:1d&hl=ja&gl=JP&ceid=JP:ja",
+        homepage: "https://news.google.com", trust: 68, poll_interval_s: 3600, beat: Some(Beat::World) },
+    SeedSource { slug: "gnews-ko-topics", name: "Google 뉴스 · BitGoose 기획 검색", kind: SourceKind::Rss,
+        url: "https://news.google.com/rss/search?q=BitGoose+%EA%B8%B0%ED%9A%8D+when:1d&hl=ko&gl=KR&ceid=KR:ko",
+        homepage: "https://news.google.com", trust: 68, poll_interval_s: 3600, beat: Some(Beat::World) },
     // ---- Traditional Chinese: crypto, AI and technology -----------------
     SeedSource {
         slug: "gnews-zh-hant-ai", name: "Google 新聞 · 人工智能", kind: SourceKind::Rss,
@@ -1016,6 +1040,13 @@ pub async fn seed_sources(db: &Db) -> Result<usize> {
             s.beat,
         )
         .await?;
+        // Google News is used only as a public headline/link/timestamp index.
+        // Destination article extraction still obeys each publisher's robots
+        // policy; approving this index prevents Google's blanket robots file
+        // from disabling every language desk.
+        if s.slug.starts_with("gnews") {
+            sources::set_robots_override(db, s.slug, true).await?;
+        }
     }
     Ok(SOURCES.len())
 }
