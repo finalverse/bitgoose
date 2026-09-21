@@ -332,6 +332,14 @@ async fn run_language(ctx: &Ctx, max_new: usize, language: EditorialLanguage) ->
             if title.is_empty() || standfirst.is_empty() {
                 return Err(FlockError::Other("gaggle framing was empty".into()));
             }
+            if bg_core::text::contains_prompt_scaffolding(title)
+                || bg_core::text::contains_prompt_scaffolding(standfirst)
+            {
+                return Err(FlockError::Other(
+                    "gaggle framing leaked private prompt scaffolding; refusing publication"
+                        .into(),
+                ));
+            }
             // A small model asked to name a topic it cannot see enough of does
             // not return an error, it writes "No story" or "Hold: insufficient
             // coverage". Stored unchecked, seven of the twelve special topics
@@ -477,6 +485,16 @@ async fn refresh_tracked_briefs(ctx: &Ctx, max: usize) -> Result<usize> {
                 if standfirst.len() < 80 || analysis.len() < 400 || watchpoints.len() < 3 {
                     return Err(FlockError::Other(
                         "tracked-topic brief was too thin; keeping the verified prior brief".into(),
+                    ));
+                }
+                if bg_core::text::contains_prompt_scaffolding(standfirst)
+                    || bg_core::text::contains_prompt_scaffolding(analysis)
+                    || watchpoints
+                        .iter()
+                        .any(|w| bg_core::text::contains_prompt_scaffolding(w))
+                {
+                    return Err(FlockError::Other(
+                        "tracked-topic output leaked private prompt scaffolding; keeping the verified prior brief".into(),
                     ));
                 }
                 if bg_core::share::reads_as_a_refusal(standfirst)

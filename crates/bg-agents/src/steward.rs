@@ -325,18 +325,23 @@ async fn check_queue(ctx: &Ctx) -> Vec<Finding> {
 /// strip. The cause is fixed at the point of creation; this clears what already
 /// shipped, and keeps clearing if a new shape of refusal gets past the guard.
 async fn check_junk_topics(ctx: &Ctx, apply: bool) -> Vec<Finding> {
-    let all = match bg_db::gaggles::all_titles(&ctx.db).await {
+    let all = match bg_db::gaggles::all_framings(&ctx.db).await {
         Ok(v) => v,
         Err(e) => return vec![Finding::noted("junk-topic", format!("cannot check: {e}"))],
     };
     let junk: Vec<_> = all
         .into_iter()
-        .filter(|(_, title, _)| bg_core::share::reads_as_a_refusal(title))
+        .filter(|(_, title, standfirst, _)| {
+            bg_core::share::reads_as_a_refusal(title)
+                || bg_core::share::reads_as_a_refusal(standfirst)
+                || bg_core::text::contains_prompt_scaffolding(title)
+                || bg_core::text::contains_prompt_scaffolding(standfirst)
+        })
         .collect();
     if junk.is_empty() {
         return Vec::new();
     }
-    let names: Vec<&str> = junk.iter().map(|(_, t, _)| t.as_str()).collect();
+    let names: Vec<&str> = junk.iter().map(|(_, t, _, _)| t.as_str()).collect();
     let detail = format!(
         "{} special topics are model refusals, not topics: {}",
         junk.len(),
@@ -346,7 +351,7 @@ async fn check_junk_topics(ctx: &Ctx, apply: bool) -> Vec<Finding> {
         return vec![Finding::noted("junk-topic", detail)];
     }
     let mut gone = 0usize;
-    for (id, _, _) in &junk {
+    for (id, _, _, _) in &junk {
         if bg_db::gaggles::delete(&ctx.db, *id).await.is_ok() {
             gone += 1;
         }

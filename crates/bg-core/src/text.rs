@@ -251,6 +251,27 @@ pub fn strip_html(s: &str) -> String {
         .replace("&nbsp;", " ")
 }
 
+/// Whether generated copy contains private prompt scaffolding.
+///
+/// This is a publication-boundary check, not a provider workaround. A hosted
+/// model, a local model or the offline provider can all echo instructions.
+/// Internal controls and section labels must never become headlines, topic
+/// titles, summaries or analysis visible to a reader.
+pub fn contains_prompt_scaffolding(s: &str) -> bool {
+    const LABELS: &[&str] = &[
+        "OUTPUT_LANGUAGE=",
+        "SOURCE MATERIAL:",
+        "VERIFIED CLAIMS:",
+        "INDEPENDENT OUTLETS COVERING IT:",
+        "PINNED PRIMARY SOURCES:",
+        "CURRENT STANDFIRST:",
+        "CURRENT BRIEF:",
+        "CURRENT WATCHPOINTS:",
+    ];
+    let upper = s.to_ascii_uppercase();
+    LABELS.iter().any(|label| upper.contains(label))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -329,6 +350,27 @@ mod tests {
     #[test]
     fn strip_html_removes_markup_and_entities() {
         assert_eq!(strip_html("<p>Hello   &amp; <b>bye</b></p>"), "Hello & bye");
+    }
+
+    #[test]
+    fn prompt_scaffolding_is_caught_before_publication() {
+        for leaked in [
+            "OUTPUT_LANGUAGE=en",
+            "Latest update\nVerified claims:\n- one",
+            "current brief: nothing yet",
+        ] {
+            assert!(contains_prompt_scaffolding(leaked), "missed {leaked:?}");
+        }
+        for real in [
+            "OpenAI expands its newsroom partnerships",
+            "The verified claims remain disputed in court.",
+            "Language policy becomes an election issue",
+        ] {
+            assert!(
+                !contains_prompt_scaffolding(real),
+                "false positive {real:?}"
+            );
+        }
     }
 
     #[test]

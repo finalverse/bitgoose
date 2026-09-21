@@ -76,7 +76,21 @@ fn first_sentence(s: &str) -> String {
 fn subject_of(prompt: &str) -> String {
     for line in prompt.lines() {
         let mut l = line.trim();
-        for prefix in ["Headline: ", "Story: ", "- ", "* ", "[0] "] {
+        // Machine-readable controls belong to the request envelope, not the
+        // copy. `OUTPUT_LANGUAGE=en` used to be the first non-empty line and
+        // was therefore echoed into five live special-topic titles.
+        if is_control_directive(l) {
+            continue;
+        }
+        for prefix in [
+            "Headline: ",
+            "Story: ",
+            "Subject: ",
+            "Topic: ",
+            "- ",
+            "* ",
+            "[0] ",
+        ] {
             if let Some(rest) = l.strip_prefix(prefix) {
                 l = rest.trim();
                 break;
@@ -91,6 +105,18 @@ fn subject_of(prompt: &str) -> String {
         }
     }
     strip_leading_tag(&first_sentence(prompt)).to_string()
+}
+
+/// Prompt controls use an all-caps key and an equals sign. They are useful to
+/// providers, but can never be reader-facing subject matter.
+fn is_control_directive(line: &str) -> bool {
+    let Some((key, _value)) = line.split_once('=') else {
+        return false;
+    };
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// Drop a leading `[Something]` annotation.
@@ -235,7 +261,7 @@ fn synth(schema: &Value, rng: &mut Rng, ctx: &str, depth: usize, ordinal: usize)
 fn stub_string(hint: &str, ctx: &str, rng: &mut Rng, ordinal: usize) -> String {
     let subject = subject_of(ctx);
     match hint {
-        "headline" => bg_core::text::truncate_words(&subject, 12),
+        "headline" | "topic" => bg_core::text::truncate_words(&subject, 12),
         // Claims are the one field where identical values look obviously wrong:
         // a ledger showing the same sentence three times reads as a rendering
         // bug rather than as placeholder content.
@@ -352,6 +378,14 @@ mod tests {
             strip_leading_tag("Coinbase [sic] beats estimates"),
             "Coinbase [sic] beats estimates"
         );
+    }
+
+    #[test]
+    fn prompt_controls_never_become_reader_facing_copy() {
+        let prompt = "OUTPUT_LANGUAGE=en\n\nSubject: Stablecoin hiring expands\nHeadlines:\n- Apple and Google add stablecoin roles";
+        assert_eq!(subject_of(prompt), "Stablecoin hiring expands");
+        assert!(is_control_directive("OUTPUT_LANGUAGE=en"));
+        assert!(!is_control_directive("S&P 500=flat"));
     }
 
     use crate::schema as s;

@@ -550,8 +550,29 @@ impl Llm {
     ) -> Result<(T, Completion)> {
         debug_assert!(req.json_schema.is_some(), "complete_json without a schema");
         let c = self.complete(req).await?;
-        let v = c.parse_into::<T>()?;
+        let json = c.json()?;
+        if json_contains_prompt_scaffolding(&json) {
+            return Err(LlmError::SchemaViolation(
+                "model output echoed private prompt scaffolding".into(),
+            ));
+        }
+        let v = serde_json::from_value::<T>(json).map_err(|e| LlmError::BadJson {
+            detail: e.to_string(),
+            raw: c.text.chars().take(400).collect(),
+        })?;
         Ok((v, c))
+    }
+}
+
+/// Scan every string leaf in structured output before it reaches an agent.
+/// Keeping this at the LLM boundary protects every current and future editor,
+/// not only the stage in which a prompt leak was first noticed.
+fn json_contains_prompt_scaffolding(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(s) => bg_core::text::contains_prompt_scaffolding(s),
+        serde_json::Value::Array(items) => items.iter().any(json_contains_prompt_scaffolding),
+        serde_json::Value::Object(fields) => fields.values().any(json_contains_prompt_scaffolding),
+        _ => false,
     }
 }
 
@@ -577,6 +598,20 @@ pub(crate) fn http_client() -> reqwest::Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structured_output_cannot_echo_private_prompt_controls() {
+        assert!(json_contains_prompt_scaffolding(&serde_json::json!({
+            "headline": "OUTPUT_LANGUAGE=en"
+        })));
+        assert!(json_contains_prompt_scaffolding(&serde_json::json!({
+            "watchpoints": ["real signal", "Current brief: unavailable"]
+        })));
+        assert!(!json_contains_prompt_scaffolding(&serde_json::json!({
+            "headline": "Stablecoin hiring expands",
+            "summary": "Apple and Google listed new payments roles."
+        })));
+    }
 
     #[test]
     fn refusals_and_schema_violations_are_not_retried() {

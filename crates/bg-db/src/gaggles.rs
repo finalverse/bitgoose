@@ -485,6 +485,23 @@ pub async fn all_titles(db: &Db) -> Result<Vec<(uuid::Uuid, String, String)>> {
         .collect()
 }
 
+/// Every gaggle's reader-facing framing, for publication-quality audits.
+pub async fn all_framings(db: &Db) -> Result<Vec<(uuid::Uuid, String, String, String)>> {
+    let rows = sqlx::query("SELECT id, title, standfirst, slug FROM gaggles")
+        .fetch_all(&db.pool)
+        .await?;
+    rows.iter()
+        .map(|r| {
+            Ok((
+                r.try_get::<uuid::Uuid, _>("id")?,
+                r.try_get("title")?,
+                r.try_get("standfirst")?,
+                r.try_get("slug")?,
+            ))
+        })
+        .collect()
+}
+
 /// Remove a special topic and its story links.
 ///
 /// A gaggle is BitGoose's own furniture rather than reporting, so unlike a
