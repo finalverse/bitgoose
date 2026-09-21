@@ -13,6 +13,10 @@ use serde_json::json;
 use tracing::debug;
 
 pub struct OpenAiProvider {
+    /// The actual operator-facing provider name. OpenAI-compatible is a wire
+    /// protocol, not provenance: a local Ollama call must not be recorded as
+    /// an OpenAI call in the public newsroom ledger.
+    provider_name: &'static str,
     /// Serving from localhost, so calls are free. See `pricing::LOCAL`.
     is_local: bool,
     api_key: String,
@@ -137,6 +141,7 @@ impl OpenAiProvider {
             .trim_end_matches('/')
             .to_string();
         Ok(Self {
+            provider_name: "ollama",
             is_local: true,
             api_key: "local".into(),
             base_url,
@@ -186,6 +191,7 @@ impl OpenAiProvider {
             });
         }
         Ok(Self {
+            provider_name: if xai { "xai" } else { "openai" },
             is_local,
             api_key: if api_key.is_empty() {
                 "local".into()
@@ -396,7 +402,7 @@ fn takes_reasoning_effort(model: &str) -> bool {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     fn name(&self) -> &'static str {
-        "openai"
+        self.provider_name
     }
 
     fn is_local(&self) -> bool {
@@ -464,13 +470,13 @@ impl LlmProvider for OpenAiProvider {
                 // the same thing.
                 .clamp(1.0, 3600.0);
             return Err(LlmError::RateLimited {
-                provider: "openai",
+                provider: self.provider_name,
                 retry_after: std::time::Duration::from_secs_f64(secs),
             });
         }
         if !status.is_success() {
             return Err(LlmError::Api {
-                provider: "openai",
+                provider: self.provider_name,
                 status: status.as_u16(),
                 body: resp
                     .text()
@@ -540,7 +546,7 @@ impl LlmProvider for OpenAiProvider {
 
         Ok(Completion {
             text,
-            provider: "openai".into(),
+            provider: self.provider_name.into(),
             model: parsed.model.unwrap_or(model),
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
@@ -564,7 +570,7 @@ impl LlmProvider for OpenAiProvider {
             Ok(())
         } else {
             Err(LlmError::Api {
-                provider: "openai",
+                provider: self.provider_name,
                 status: resp.status().as_u16(),
                 body: resp
                     .text()
@@ -628,6 +634,7 @@ mod local_pricing_tests {
     /// numbers are real.
     fn provider_at(url: &str) -> OpenAiProvider {
         OpenAiProvider {
+            provider_name: "openai",
             is_local: url.contains("127.0.0.1") || url.contains("localhost"),
             api_key: "k".into(),
             base_url: url.into(),
@@ -845,6 +852,7 @@ mod local_pricing_tests {
     #[test]
     fn local_models_are_never_billed() {
         let local = OpenAiProvider {
+            provider_name: "ollama",
             is_local: true,
             api_key: "local".into(),
             base_url: "http://127.0.0.1:11434/v1".into(),
@@ -858,6 +866,7 @@ mod local_pricing_tests {
         }
 
         let hosted = OpenAiProvider {
+            provider_name: "openai",
             is_local: false,
             api_key: "sk-test".into(),
             base_url: "https://api.openai.com/v1".into(),
@@ -868,6 +877,19 @@ mod local_pricing_tests {
             hosted.spec_for(ModelTier::Top).output_per_mtok > 0.0,
             "a hosted model must still be billed"
         );
+    }
+
+    #[test]
+    fn local_ollama_keeps_its_identity_in_the_ledger() {
+        let local = OpenAiProvider {
+            provider_name: "ollama",
+            is_local: true,
+            api_key: "local".into(),
+            base_url: "http://127.0.0.1:11434/v1".into(),
+            http: http_client(),
+            overrides: [None, None, None],
+        };
+        assert_eq!(local.name(), "ollama");
     }
 }
 
