@@ -586,10 +586,17 @@ impl std::fmt::Debug for Llm {
 
 /// Shared HTTP client for the network-backed providers.
 pub(crate) fn http_client() -> reqwest::Client {
+    http_client_with_timeout(std::time::Duration::from_secs(180))
+}
+
+/// The same hardened client with a provider-specific request deadline.
+///
+/// Hosted APIs answer independently, but a local Ollama deliberately queues
+/// work behind the one CPU runner shared by both newsrooms. Its deadline must
+/// include that queue wait as well as generation time.
+pub(crate) fn http_client_with_timeout(timeout: std::time::Duration) -> reqwest::Client {
     reqwest::Client::builder()
-        // Generous: a top-tier model reasoning over a large claim set can take
-        // well over a minute.
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(timeout)
         .connect_timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("http client")

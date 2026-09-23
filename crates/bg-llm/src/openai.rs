@@ -5,7 +5,10 @@
 //! chain: it is a genuinely independent second path, including a fully local
 //! one, rather than a second endpoint at the same vendor.
 
-use crate::{http_client, pricing, Completion, LlmError, LlmProvider, ModelSpec, Request, Result};
+use crate::{
+    http_client, http_client_with_timeout, pricing, Completion, LlmError, LlmProvider, ModelSpec,
+    Request, Result,
+};
 use async_trait::async_trait;
 use bg_core::domain::ModelTier;
 use serde::Deserialize;
@@ -145,7 +148,7 @@ impl OpenAiProvider {
             is_local: true,
             api_key: "local".into(),
             base_url,
-            http: http_client(),
+            http: http_client_with_timeout(local_timeout()),
             overrides: model_overrides(),
         })
     }
@@ -247,6 +250,20 @@ impl OpenAiProvider {
             .clone()
             .unwrap_or_else(|| pricing::openai_spec(tier).id.to_string())
     }
+}
+
+const DEFAULT_LOCAL_TIMEOUT_SECS: u64 = 600;
+
+fn parse_local_timeout(raw: Option<&str>) -> std::time::Duration {
+    let seconds = raw
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_LOCAL_TIMEOUT_SECS)
+        .clamp(60, 3_600);
+    std::time::Duration::from_secs(seconds)
+}
+
+fn local_timeout() -> std::time::Duration {
+    parse_local_timeout(std::env::var("BG_LOCAL_LLM_TIMEOUT_SECS").ok().as_deref())
 }
 
 #[derive(Debug, Deserialize)]
@@ -890,6 +907,15 @@ mod local_pricing_tests {
             overrides: [None, None, None],
         };
         assert_eq!(local.name(), "ollama");
+    }
+
+    #[test]
+    fn local_timeout_includes_the_shared_runner_queue() {
+        assert_eq!(parse_local_timeout(None).as_secs(), 600);
+        assert_eq!(parse_local_timeout(Some("900")).as_secs(), 900);
+        assert_eq!(parse_local_timeout(Some("garbage")).as_secs(), 600);
+        assert_eq!(parse_local_timeout(Some("5")).as_secs(), 60);
+        assert_eq!(parse_local_timeout(Some("99999")).as_secs(), 3_600);
     }
 }
 
